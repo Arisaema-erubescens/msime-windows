@@ -168,6 +168,7 @@ class StackPanel : public Panel
 {
   public:
     explicit StackPanel(float spacing = 0.0f);
+    void SetSpacing(float spacing);
     void SetHorizontalContentAlignment(HorizontalAlignment alignment);
     void SetVerticalContentAlignment(VerticalAlignment alignment);
 
@@ -362,6 +363,8 @@ class Card : public Panel
 
     void SetBrush(Brush brush);
     void SetPadding(float padding);
+    // 四边独立的内边距，给 v2 皮肤的 content_insets_dip 用。
+    void SetPadding(Thickness padding);
     void SetShadowScale(float scale);
     // Multiplies every shadow pass alpha; 1.0 keeps the built-in intensity.
     void SetShadowOpacity(float opacity);
@@ -374,6 +377,10 @@ class Card : public Panel
     // card shape. An empty path removes it.
     void SetBackgroundImage(std::wstring filePath, ImageStretch stretch = ImageStretch::UniformToFill,
                             float opacity = 1.0f);
+    // 九宫格背景：四边按切片原样绘制，其余单向/双向拉伸，用来铺「面板即贴图」的 v2 皮肤。
+    // 切片单位与源图像素一致；给出后覆盖 SetBackgroundImage 的普通背景。
+    void SetBackgroundImageNineSlice(std::wstring filePath, float left, float top, float right, float bottom,
+                                     float opacity = 1.0f);
 
     SizeF Measure(const SizeF &availableSize) override;
     void Arrange(const RectF &finalRect) override;
@@ -386,10 +393,15 @@ class Card : public Panel
                                const D2D1_ROUNDED_RECT &shape);
 
     Brush brush_;
-    float padding_ = 0.0f;
+    Thickness padding_ = {};
     std::wstring backgroundImage_;
     ImageStretch backgroundStretch_ = ImageStretch::UniformToFill;
     float backgroundOpacity_ = 1.0f;
+    bool backgroundNineSlice_ = false;
+    float sliceLeft_ = 0.0f;
+    float sliceTop_ = 0.0f;
+    float sliceRight_ = 0.0f;
+    float sliceBottom_ = 0.0f;
     float shadowScale_ = 1.0f;
     float shadowOpacity_ = 1.0f;
     std::vector<ShadowPass> shadowPasses_;

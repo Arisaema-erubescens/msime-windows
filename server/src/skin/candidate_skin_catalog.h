@@ -57,8 +57,44 @@ struct ToolbarColors
     std::string hover;
 };
 
+struct BorderImage
+{
+    std::string source;
+    // 四边切片大小（DIP）：top, right, bottom, left
+    std::vector<double> sliceDip;
+    // 可拉伸区（上右下左，从面板外缘量起）：给出时覆盖 sliceDip。
+    // 面板图里画死的装饰必须落在可拉伸区之外，否则会被横向拉长。
+    std::vector<double> stretchDip;
+    // 四边宽度（DIP）：top, right, bottom, left；若为空则沿用 sliceDip
+    std::vector<double> widthDip;
+    // 是否填充中间内容区域
+    bool fill = true;
+};
+
+struct InsetsDip
+{
+    double top = 0.0;
+    double right = 0.0;
+    double bottom = 0.0;
+    double left = 0.0;
+};
+
+struct FreeDecoration
+{
+    std::string image;
+    // 锚定基准：top-left, top-right, bottom-left, bottom-right, left, right, top, bottom, center
+    std::string anchor = "right";
+    double offsetXDip = 0.0;
+    double offsetYDip = 0.0;
+    double widthDip = 0.0;
+    double heightDip = 0.0;
+    int zIndex = 2;
+};
+
 struct Package
 {
+    // 皮肤规范版本：1 为通用现代卡片皮肤，2 为支持九宫格与自由挂件的高级皮肤。
+    int schemaVersion = 1;
     std::string id;
     std::string name;
     std::string version;
@@ -97,6 +133,17 @@ struct Package
     std::optional<double> toolbarCornerRadiusDip;
     ToolbarColors toolbarDark;
     ToolbarColors toolbarLight;
+    // v2 专有特性：九宫格贴图边框
+    std::optional<BorderImage> borderImage;
+    // v2 专有特性：面板内容/文字安全内边距，从面板外缘量起（渲染时扣掉边框宽度）。
+    std::optional<InsetsDip> contentInsetsDip;
+    // v2 专有特性：预编辑行与候选行之间的行距（DIP，0–100）；未设置时沿用 base 的行距。
+    std::optional<double> lineGapDip;
+    // v2 专有特性：面板之外需要额外预留的窗口空间（上右下左 DIP），给挂在卡片外沿的挂件用。
+    // 不声明时窗口只按卡片大小开，挂到外面的立绘会被窗口边界裁掉。
+    std::optional<InsetsDip> outerInsetsDip;
+    // v2 专有特性：多层自由锚定挂件（支持动图）
+    std::vector<FreeDecoration> freeDecorations;
 };
 
 struct Issue
