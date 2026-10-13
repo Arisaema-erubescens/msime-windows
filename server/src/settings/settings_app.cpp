@@ -8,6 +8,7 @@
 #include "settings/collocation_model.h"
 #include "settings/neural_model.h"
 #include "settings/default_input_method.h"
+#include "settings/game_compat_name.h"
 #include "settings/settings_splash.h"
 #include "settings/dictionary_manager.h"
 #include "settings/serial_task_queue.h"
@@ -1690,6 +1691,46 @@ void HandleWebMessage(HWND hwnd, ICoreWebView2WebMessageReceivedEventArgs *args)
                 };
             });
         }
+        else if (type == "gameCompatRequest")
+        {
+            const auto &data = value.at("data").as_object();
+            const std::string request_id = json::value_to<std::string>(data.at("requestId"));
+            const std::string action = json::value_to<std::string>(data.at("action"));
+            const bool enabled = data.contains("enabled") && data.at("enabled").as_bool();
+            const std::wstring name =
+                data.contains("name") ? string_to_wstring(json::value_to<std::string>(data.at("name"))) : L"";
+            // Apply waits for the UAC prompt and the elevated instance; keep it off the window thread.
+            g_worker->Submit([request_id, action, enabled, name, hwnd]() -> SerialTaskQueue::Completion {
+                bool ok = true;
+                std::string message;
+                if (action == "apply")
+                {
+                    ok = game_compat_name::Apply(hwnd, enabled, name, message);
+                    if (ok)
+                        message = enabled ? "已应用。请完全退出并重新启动游戏后生效。"
+                                          : "已恢复原名称。请重新启动游戏后生效。";
+                }
+                const game_compat_name::Status status = game_compat_name::QueryStatus();
+                json::value response = {
+                    {"type", "gameCompatResponse"},
+                    {"requestId", request_id},
+                    {"action", action},
+                    {"ok", ok},
+                    {"message", message},
+                    {"enabled", status.enabled},
+                    {"name", wstring_to_string(status.name)},
+                    {"registeredName", wstring_to_string(status.registeredName)},
+                    {"defaultName", wstring_to_string(std::wstring(game_compat_name::kDefaultName))},
+                    {"protocolVersion", metasequoia::webview::Version}};
+                if (!metasequoia::webview::Validate(response, "server"))
+                    throw std::runtime_error("Invalid game compat response");
+                auto serialized = string_to_wstring(json::serialize(response));
+                return [serialized = std::move(serialized)] {
+                    if (g_webview)
+                        g_webview->PostWebMessageAsJson(serialized.c_str());
+                };
+            });
+        }
         else if (type == "statsRequest")
         {
             const auto data = value.at("data").as_object();
@@ -2344,6 +2385,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_pa
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line, int show_command)
 {
     TraceStartup("wWinMain");
+    // The elevated half of the game-compat switch: write HKLM and exit, no window, no single-instance check.
+    if (const int elevated_result = game_compat_name::RunElevatedApplyIfRequested(command_line); elevated_result >= 0)
+        return elevated_result;
     g_open_about_on_ready = command_line && std::wstring(command_line).find(L"--about") != std::wstring::npos;
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const HRESULT com_result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);

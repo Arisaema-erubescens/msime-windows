@@ -16,20 +16,36 @@ inline LONG INVALID_Y = -100000;
 // 往左偏一格。微信输入法同样把 Excel 排除在这个功能之外。
 inline const wchar_t *const PAIRED_PUNCTUATION_EXCLUDED_APPS[] = {L"EXCEL.EXE"};
 
-inline bool IsPairedPunctuationExcludedProcess(const std::wstring &processName)
+// 起源 2 引擎的 Valve 游戏：BeginUIElement 回 pbShow=FALSE 声称自己画候选，但 imemanager.dll 只替白名单
+// （按 profile 名称全等比对）里的输入法画；不在名单里的，组合落到系统默认组合窗（左上角只显示编码的小框），
+// 等于没有候选。这些宿主不理会该声明，照常弹我们自己的候选窗——除非设置页开了游戏兼容名称
+// （Global::ReadGameCompatProfileName），那时游戏会自己画，见 MetasequoiaIME::ActivateEx。
+inline const wchar_t *const UILESS_IGNORED_APPS[] = {L"cs2.exe", L"dota2.exe"};
+
+template <size_t N> inline bool IsProcessInList(const std::wstring &processName, const wchar_t *const (&apps)[N])
 {
     if (processName.empty())
     {
         return false;
     }
-    for (const wchar_t *excluded : PAIRED_PUNCTUATION_EXCLUDED_APPS)
+    for (const wchar_t *app : apps)
     {
-        if (CompareStringOrdinal(processName.c_str(), -1, excluded, -1, TRUE) == CSTR_EQUAL)
+        if (CompareStringOrdinal(processName.c_str(), -1, app, -1, TRUE) == CSTR_EQUAL)
         {
             return true;
         }
     }
     return false;
+}
+
+inline bool IsPairedPunctuationExcludedProcess(const std::wstring &processName)
+{
+    return IsProcessInList(processName, PAIRED_PUNCTUATION_EXCLUDED_APPS);
+}
+
+inline bool IsUiLessIgnoredProcess(const std::wstring &processName)
+{
+    return IsProcessInList(processName, UILESS_IGNORED_APPS);
 }
 } // namespace Global
 
