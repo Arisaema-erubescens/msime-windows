@@ -22,6 +22,10 @@ inline const wchar_t *const PAIRED_PUNCTUATION_EXCLUDED_APPS[] = {L"EXCEL.EXE"};
 // （Global::ReadGameCompatProfileName），那时游戏会自己画，见 MetasequoiaIME::ActivateEx。
 inline const wchar_t *const UILESS_IGNORED_APPS[] = {L"cs2.exe", L"dota2.exe"};
 
+// 我的世界基岩版：聊天框不向输入法报位置。组合开始前 GetTextExt 给的是工作区右下角，开始后给的是左上角系统
+// 默认组合窗里的位置，候选窗每次都从右下角闪到左上角。这些宿主里候选窗固定在所在显示器工作区的左上角。
+inline const wchar_t *const CANDIDATE_PINNED_TOP_LEFT_APPS[] = {L"Minecraft.Windows.exe"};
+
 template <size_t N> inline bool IsProcessInList(const std::wstring &processName, const wchar_t *const (&apps)[N])
 {
     if (processName.empty())
@@ -46,6 +50,11 @@ inline bool IsPairedPunctuationExcludedProcess(const std::wstring &processName)
 inline bool IsUiLessIgnoredProcess(const std::wstring &processName)
 {
     return IsProcessInList(processName, UILESS_IGNORED_APPS);
+}
+
+inline bool IsCandidatePinnedTopLeftProcess(const std::wstring &processName)
+{
+    return IsProcessInList(processName, CANDIDATE_PINNED_TOP_LEFT_APPS);
 }
 } // namespace Global
 
