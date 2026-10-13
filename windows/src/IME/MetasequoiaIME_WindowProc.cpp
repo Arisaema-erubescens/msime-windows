@@ -940,6 +940,9 @@ LRESULT CALLBACK CMetasequoiaIME_WindowProc(HWND hWnd, UINT message, WPARAM wPar
         SendCurrentImeStatusSnapshot(pIME);
         break;
     }
+    case WM_ApplyCapsLockEdge:
+        pIME->_ApplyCapsLockKeyDownSideEffects((GetKeyState(VK_CAPITAL) & 0x0001) != 0);
+        break;
     case WM_SyncCapsLockPunctuation: {
         CCompositionProcessorEngine *engine = pIME->GetCompositionProcessorEngine();
         if (engine)
