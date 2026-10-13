@@ -702,6 +702,92 @@ TEST_CASE(UserDictionaryReplaySkipsNonpositivePinyinUpserts)
     std::filesystem::remove_all(directory);
 }
 
+// #869：旧版日文模式调频时，日文候选以罗马音为键进了拼音日志；msime.db 里没有那些行，
+// UPDATE 改不到任何东西，但日志照记，升级回放时 apply_pinyin 就把日文词插进了拼音表。
+TEST_CASE(UserDictionaryRankingDoesNotJournalRowsMissingFromTheDictionary)
+{
+    const auto directory = std::filesystem::temp_directory_path() /
+                           ("msime-ranking-missing-rows-" + std::to_string(GetCurrentProcessId()));
+    std::filesystem::create_directories(directory);
+    const auto user_path = directory / "msime_user.db";
+    const auto main_path = directory / "msime.db";
+    {
+        TestDatabase db(main_path);
+        db.exec("CREATE TABLE tbl_1_p(key TEXT,jp TEXT,value TEXT,weight INTEGER);"
+                "INSERT INTO tbl_1_p VALUES('pan','p','盘',5000);");
+    }
+    std::vector<WordItem> candidates = {
+        {"pan", "パン", 980000, CandidateSource::Database, "pan"},
+        {"pan", "パン粉", 970000, CandidateSource::Database, "pan"},
+    };
+    REQUIRE(user_dictionary::adjust_candidate_ranking(test::Utf8(main_path), test::Utf8(user_path), "pan", candidates,
+                                                      "pan", "パン粉", "promote", 1, 1, false));
+    {
+        TestDatabase db(main_path);
+        REQUIRE_EQ(db.scalar_int("SELECT COUNT(*) FROM tbl_1_p"), 1);
+        REQUIRE_EQ(db.scalar_int64("SELECT weight FROM tbl_1_p WHERE value='盘'"), 5000);
+    }
+    {
+        TestDatabase user_db(user_path);
+        REQUIRE_EQ(user_db.scalar_int("SELECT COUNT(*) FROM user_dictionary_operations"), 0);
+    }
+    std::filesystem::remove_all(directory);
+}
+
+// 已经写进日志的那些残留：升级回放要跳过，打开日志时清掉；用户在设置页手动加的带假名词不能动。
+TEST_CASE(UserDictionaryReplaySkipsLearnedKanaPinyinUpserts)
+{
+    const auto directory =
+        std::filesystem::temp_directory_path() / ("msime-skip-kana-replay-" + std::to_string(GetCurrentProcessId()));
+    std::filesystem::create_directories(directory);
+    const auto user_path = directory / "msime_user.db";
+    const auto main_path = directory / "msime.db";
+    const auto english_path = directory / "english.db";
+    {
+        TestDatabase main_db(main_path);
+        main_db.exec("CREATE TABLE tbl_1_p(key TEXT,jp TEXT,value TEXT,weight INTEGER);"
+                     "CREATE TABLE tbl_1_a(key TEXT,jp TEXT,value TEXT,weight INTEGER);"
+                     "CREATE TABLE tbl_1_o(key TEXT,jp TEXT,value TEXT,weight INTEGER);"
+                     "CREATE TABLE tbl_1_x(key TEXT,jp TEXT,value TEXT,weight INTEGER);"
+                     "INSERT INTO tbl_1_x VALUES('xian','x','现',1);");
+        TestDatabase english_db(english_path);
+        english_db.exec("CREATE TABLE english_words(word TEXT PRIMARY KEY,display TEXT);");
+    }
+
+    const auto user = test::Utf8(user_path);
+    REQUIRE(user_dictionary::record_upsert(user, user_dictionary::DictionaryKind::Pinyin, "pan", "パン", 980000));
+    REQUIRE(user_dictionary::record_upsert(user, user_dictionary::DictionaryKind::Pinyin, "amarini", "余りに", 900000));
+    REQUIRE(
+        user_dictionary::record_upsert(user, user_dictionary::DictionaryKind::Pinyin, "omoimasu", "思います", 900000));
+    REQUIRE(user_dictionary::record_upsert(user, user_dictionary::DictionaryKind::Pinyin, "xian", "现", 5000));
+    REQUIRE(user_dictionary::record_user_insert(user, user_dictionary::DictionaryKind::Pinyin, "pen", "ペン", 100));
+
+    const auto replay = user_dictionary::replay(user, test::Utf8(main_path), test::Utf8(english_path));
+    REQUIRE(replay.error.empty());
+    REQUIRE_EQ(replay.failed, 0);
+    REQUIRE_EQ(replay.skipped, 3);
+    REQUIRE_EQ(replay.applied, 2);
+    {
+        TestDatabase db(main_path);
+        REQUIRE_EQ(db.scalar_int("SELECT COUNT(*) FROM tbl_1_p WHERE value='パン'"), 0);
+        REQUIRE_EQ(db.scalar_int("SELECT COUNT(*) FROM tbl_1_a"), 0);
+        REQUIRE_EQ(db.scalar_int("SELECT COUNT(*) FROM tbl_1_o"), 0);
+        REQUIRE_EQ(db.scalar_int64("SELECT weight FROM tbl_1_x WHERE value='现'"), 5000);
+        REQUIRE_EQ(db.scalar_int("SELECT COUNT(*) FROM tbl_1_p WHERE value='ペン'"), 1);
+    }
+
+    REQUIRE(user_dictionary::ensure_user_database(user));
+    {
+        TestDatabase user_db(user_path);
+        REQUIRE_EQ(user_db.scalar_int("SELECT COUNT(*) FROM user_dictionary_operations WHERE user_inserted=0 AND "
+                                      "value IN ('パン','余りに','思います')"),
+                   0);
+        REQUIRE_EQ(user_db.scalar_int("SELECT COUNT(*) FROM user_dictionary_operations WHERE value IN ('现','ペン')"),
+                   2);
+    }
+    std::filesystem::remove_all(directory);
+}
+
 TEST_CASE(UserDictionaryLocalRebalanceKeepsPositiveSameKeyWeights)
 {
     const auto directory =

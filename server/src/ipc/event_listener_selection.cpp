@@ -257,7 +257,10 @@ void ProcessSelectionKey(UINT keycode, uint64_t client_id, uint64_t activation_e
             mid_sentence_ranking_candidates = g_inputSession->candidates_without_mid_sentence_helpcode();
         }
         const bool mid_sentence_ranking = !mid_sentence_ranking_candidates.empty();
-        isNeedUpdateWeight = mid_sentence_ranking || !is_first_page_first;
+        // 日文候选的键是罗马音，不在拼音词库里：调频、造词、云候选落库都会把它当拼音键写进日志，
+        // 升级回放时日文词就成了中文候选（#869）。日文候选一律不往拼音词库写。
+        const bool japanese_candidate = curWordItem.scheme == SchemeType::JapaneseRomaji;
+        isNeedUpdateWeight = !japanese_candidate && (mid_sentence_ranking || !is_first_page_first);
         const size_t absolute_index =
             static_cast<size_t>(Global::candidate_ui.page_index) * static_cast<size_t>(Global::candidate_ui.page_size) +
             static_cast<size_t>(index);
@@ -280,9 +283,9 @@ void ProcessSelectionKey(UINT keycode, uint64_t client_id, uint64_t activation_e
             // append_canonical_pinyin 累积，lattice 候选的 canonical_pinyin 是整句 key），
             // 直接按 '\'' 拼接即可；音节数与汉字数是否匹配由
             // create_word_from_canonical_pinyin 自行校验，不匹配时安全地拒绝入库。
-            if (FanyImeIpc::ShouldStoreEarlyReturnPhrase(
-                    curWordItem.source, GlobalIme::composition.creating_word.active,
-                    GlobalIme::composition.creating_word.pinyin, curWordItem.canonical_pinyin))
+            if (!japanese_candidate && FanyImeIpc::ShouldStoreEarlyReturnPhrase(
+                                           curWordItem.source, GlobalIme::composition.creating_word.active,
+                                           GlobalIme::composition.creating_word.pinyin, curWordItem.canonical_pinyin))
             {
                 const std::string &prefix_pinyin = GlobalIme::composition.creating_word.pinyin;
                 // 前缀为空时不能带上那个分隔符，'na'yi'tiao 这种前导撇号会让整条读音作废。
@@ -450,7 +453,7 @@ void ProcessSelectionKey(UINT keycode, uint64_t client_id, uint64_t activation_e
                 Global::candidate_ui.selected_text =
                     string_to_wstring(CandidateTextForOutput(GlobalIme::composition.creating_word.word));
 
-                if (creating_word_progress.can_store)
+                if (creating_word_progress.can_store && !japanese_candidate)
                 {
                     // 这里异步处理，不然有可能会阻塞住 TSF 端读取 pipe 导致超时
                     EnqueueStoreUserPhraseTask(GlobalIme::composition.creating_word.pinyin,
@@ -476,7 +479,8 @@ void ProcessSelectionKey(UINT keycode, uint64_t client_id, uint64_t activation_e
         // 看看云联想出来的词是否需要被插入到数据库
         if (curWordItem.source == CandidateSource::CloudSuggestion && !cloudCommittedPinyin.empty())
         {
-            EnqueueStoreUserPhraseTask(cloudCommittedPinyin, curWord, cloudCommittedPinyinIsCanonical);
+            if (!japanese_candidate)
+                EnqueueStoreUserPhraseTask(cloudCommittedPinyin, curWord, cloudCommittedPinyinIsCanonical);
             // 清理云联想变量状态
             Global::cloud_candidate.added = false;
             Global::cloud_candidate.word.clear();
