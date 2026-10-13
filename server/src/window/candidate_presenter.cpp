@@ -724,19 +724,19 @@ void CandidatePresenter::ApplySkin()
         tokens.radius = 8.0f;
         tokens.containerPad = std::round(fontSize * 0.3f);
         tokens.itemRadius = 4.0f;
-        tokens.itemExtraHeight = std::round(fontSize * 0.47f);
-        // 序号左端距高亮左缘 0.76em，其中 5 DIP 是列表固定的 textPadLeft。
-        tokens.itemPadLeft = (std::max)(0.0f, std::round(fontSize * 0.76f) - 5.0f);
-        tokens.itemPadRight = std::round(fontSize * 0.9f);
+        tokens.itemExtraHeight = std::round(fontSize * 0.24f);
+        // 序号左端距高亮左缘 0.4em，其中 5 DIP 是列表固定的 textPadLeft。
+        tokens.itemPadLeft = (std::max)(0.0f, std::round(fontSize * 0.4f) - 5.0f);
+        tokens.itemPadRight = std::round(fontSize * 0.3f);
         if (horizontalLayout)
         {
-            tokens.itemGap = std::round(fontSize * 0.28f);
-            tokens.minItemWidth = std::round(fontSize * 4.35f);
+            tokens.itemGap = std::round(fontSize * 0.15f);
+            tokens.minItemWidth = std::round(fontSize * 3.5f);
         }
         tokens.labelScale = 1.0f;
         tokens.labelGap = std::round(fontSize * 0.2f);
-        tokens.selectedBarWidth = (std::max)(3.0f, fontSize * 0.24f);
-        tokens.selectedBarHeightEm = 1.1f;
+        tokens.selectedBarWidth = 3.0f;
+        tokens.selectedBarHeightEm = 0.9f;
         tokens.selectedBarInside = true;
         tokens.trianglePager = true;
         tokens.trimHiddenPreeditGap = true;
@@ -919,9 +919,9 @@ void CandidatePresenter::ApplySkin()
             // 微软拼音式：候选文字色的实心三角，按钮与候选行等高。横排时按钮更宽，前面隔一条分隔线，
             // 与 CSS 的 .page-arrow 同一组 em 尺寸。
             pagerAppearance.glyph = msimeui::PagerArrows::Glyph::Triangle;
-            // 高 0.56em、宽 0.47em，三个角各圆掉高度的四分之一，尖端是钝的。
-            pagerAppearance.glyphSize = fontSize * 0.56f;
-            pagerAppearance.strokeWidth = pagerAppearance.glyphSize * 0.25f;
+            // 高 0.52em、宽 0.44em，三个角各圆掉高度的八分之三，尖端是钝的。
+            pagerAppearance.glyphSize = fontSize * 0.52f;
+            pagerAppearance.strokeWidth = pagerAppearance.glyphSize * 0.375f;
             pagerAppearance.cornerRadius = tokens.itemRadius;
             pagerAppearance.gap = 0.0f;
             pagerAppearance.glyphColor = palette.candidateText;
@@ -929,14 +929,14 @@ void CandidatePresenter::ApplySkin()
             pagerAppearance.buttonHeight = std::round(appearance.itemHeight);
             if (horizontalLayout)
             {
-                pagerAppearance.buttonWidth = std::round(fontSize * 1.73f);
+                pagerAppearance.buttonWidth = std::round(fontSize * 0.96f);
                 pagerAppearance.dividerWidth = 1.0f;
                 pagerAppearance.dividerGap = std::round(fontSize * 0.12f);
                 pagerAppearance.dividerColor = tokens.pagerDivider;
             }
             else
             {
-                pagerAppearance.buttonWidth = std::round(fontSize * 1.2f);
+                pagerAppearance.buttonWidth = std::round(fontSize * 0.81f);
                 pagerAppearance.buttonHeight = std::round(fontSize * 1.2f);
             }
         }
