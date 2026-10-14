@@ -16,6 +16,7 @@ vi.mock('./shared', () => ({
   applyCollocationModelStatus: vi.fn(),
   applyNeuralModelStatus: vi.fn(),
   setFuzzyRuleOptionsDisabled: vi.fn(),
+  setLanguageBarOptionsDisabled: vi.fn(),
   setMixedCandidateOptionsDisabled: vi.fn(),
   setSmartPunctuationOptionsDisabled: vi.fn()
 }));
@@ -45,7 +46,7 @@ vi.mock('./floating-toolbar', () => ({
 vi.mock('./stats', () => ({ applyStatisticsEnabled: vi.fn(), applyStatisticsRetention: vi.fn() }));
 vi.mock('./shortcut', () => ({ applyShortcutConfig: vi.fn() }));
 
-import { applyToggleState, setCandidateTranslationOptionsDisabled, setMixedCandidateOptionsDisabled } from './shared';
+import { applyToggleState, setCandidateTranslationOptionsDisabled, setLanguageBarOptionsDisabled, setMixedCandidateOptionsDisabled } from './shared';
 import { setupConfigSync } from './config-sync';
 
 beforeEach(() => {
@@ -125,4 +126,20 @@ it('greys out the mixed candidate sub-switches when the master switch is off', (
   expect(applyToggleState).toHaveBeenCalledWith('dateTimeMenuToggleBtn', false);
   snapshot({ data: { utility: { mixed_candidates: true } } });
   expect(setMixedCandidateOptionsDisabled).toHaveBeenLastCalledWith(false);
+});
+
+it('greys out the language bar sub-switches when the master switch is off', () => {
+  const snapshot = handlers.get('configSnapshot')!;
+  snapshot({
+    data: {
+      language_bar: { enabled: false, show_ime_mode: true, show_double_single_byte: false, show_punctuation: true }
+    }
+  });
+  expect(applyToggleState).toHaveBeenCalledWith('languageBarToggleBtn', false);
+  expect(setLanguageBarOptionsDisabled).toHaveBeenCalledWith(true);
+  expect(applyToggleState).toHaveBeenCalledWith('languageBarImeModeToggleBtn', true);
+  expect(applyToggleState).toHaveBeenCalledWith('languageBarDoubleSingleByteToggleBtn', false);
+  expect(applyToggleState).toHaveBeenCalledWith('languageBarPunctuationToggleBtn', true);
+  snapshot({ data: { language_bar: { enabled: true } } });
+  expect(setLanguageBarOptionsDisabled).toHaveBeenLastCalledWith(false);
 });

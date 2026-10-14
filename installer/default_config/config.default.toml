@@ -232,6 +232,20 @@ tsf_preedit_style = "raw"
 tsf_preedit_shuangpin_quanpin = false
 
 #
+# Language bar
+# 语言栏
+#
+[language_bar]
+# 总开关：是否在任务栏语言栏（输入法指示器旁）显示任何按钮。关闭后下面三个子开关一并隐藏，且不注册任何语言栏按钮。
+enabled = true
+# 是否在任务栏语言栏（输入法指示器旁）显示中/英模式按钮
+show_ime_mode = true
+# 是否在任务栏语言栏显示全/半角按钮
+show_double_single_byte = true
+# 是否在任务栏语言栏显示中文标点按钮
+show_punctuation = true
+
+#
 # Input
 # 输入
 #

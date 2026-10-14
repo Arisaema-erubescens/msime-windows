@@ -168,6 +168,10 @@ bool g_y_mode_enabled = true;
 bool g_r_mode_enabled = true;
 bool g_v_mode_enabled = true;
 bool g_clipboard_history_enabled = false;
+bool g_language_bar_enabled = true;
+bool g_language_bar_show_ime_mode = true;
+bool g_language_bar_show_double_single_byte = true;
+bool g_language_bar_show_punctuation = true;
 bool g_paging_minus_equal_enabled = true;
 bool g_paging_comma_period_enabled = false;
 bool g_paging_brackets_enabled = false;
@@ -612,6 +616,10 @@ bool LoadImeConfig()
             clipboard_history_loaded = true;
             ClipboardMonitor::Sync(g_clipboard_history_enabled);
         }
+        g_language_bar_enabled = tbl["language_bar"]["enabled"].value_or(true);
+        g_language_bar_show_ime_mode = tbl["language_bar"]["show_ime_mode"].value_or(true);
+        g_language_bar_show_double_single_byte = tbl["language_bar"]["show_double_single_byte"].value_or(true);
+        g_language_bar_show_punctuation = tbl["language_bar"]["show_punctuation"].value_or(true);
         const auto legacy_paging_mode = tbl["general"]["paging_mode"].value<std::string>();
         g_paging_minus_equal_enabled =
             tbl["general"]["paging_minus_equal"].value_or(!legacy_paging_mode || *legacy_paging_mode == "-/=");

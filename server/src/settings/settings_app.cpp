@@ -609,6 +609,11 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
             {"r_mode", GetConfiguredRModeEnabled()},
             {"v_mode", GetConfiguredVModeEnabled()},
             {"clipboard_history", GetConfiguredClipboardHistoryEnabled()}}},
+          {"language_bar",
+           {{"enabled", GetConfiguredLanguageBarEnabled()},
+            {"show_ime_mode", GetConfiguredLanguageBarShowImeMode()},
+            {"show_double_single_byte", GetConfiguredLanguageBarShowDoubleSingleByte()},
+            {"show_punctuation", GetConfiguredLanguageBarShowPunctuation()}}},
           {"appearance",
            {{"ui_backend", GetConfiguredUiBackend()},
             {"settings_window_linger", GetConfiguredSettingsWindowLinger()},
@@ -1017,6 +1022,14 @@ bool ApplyConfigUpdate(const json::object &data)
         return SetConfiguredVModeEnabled(json::value_to<bool>(data.at("value")));
     if (path == "utility.clipboard_history")
         return SetConfiguredClipboardHistoryEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "language_bar.enabled")
+        return SetConfiguredLanguageBarEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "language_bar.show_ime_mode")
+        return SetConfiguredLanguageBarShowImeMode(json::value_to<bool>(data.at("value")));
+    if (path == "language_bar.show_double_single_byte")
+        return SetConfiguredLanguageBarShowDoubleSingleByte(json::value_to<bool>(data.at("value")));
+    if (path == "language_bar.show_punctuation")
+        return SetConfiguredLanguageBarShowPunctuation(json::value_to<bool>(data.at("value")));
     if (path == "general.paging_minus_equal")
         return SetConfiguredPagingMinusEqualEnabled(json::value_to<bool>(data.at("value")));
     if (path == "general.paging_tab")

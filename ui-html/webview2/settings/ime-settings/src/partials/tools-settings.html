@@ -115,6 +115,48 @@
     </div>
   </div>
 
+  <!-- 语言栏：折叠头 + 总开关，展开后是三个语言栏按钮的子开关。总开关关闭时子开关置灰禁用，勾选状态仍保留展示 -->
+  <div class="section language-bar-section">
+    <div class="section-header toggle-section-header">
+      <button class="toggle-section-expand" id="languageBarExpand" type="button" aria-expanded="false" aria-controls="languageBarDetails">
+        <span class="section-title">语言栏</span><span class="toggle-section-chevron" aria-hidden="true"></span>
+      </button>
+      <div class="ftb-toggle-btn active" id="languageBarToggleBtn" role="switch" aria-checked="true" tabindex="0">
+        <div class="ftb-toggle-knob"></div>
+      </div>
+    </div>
+    <div class="toggle-section-details" id="languageBarDetails">
+      <div class="input-setting-description">在任务栏语言栏（输入法指示器旁）分别控制中/英模式、全/半角、中文标点三个按钮的显示。修改后需重启生效。</div>
+      <div class="section-header">
+        <div>
+          <div class="section-title">中/英模式按钮</div>
+          <div class="input-setting-description">显示中/英文输入模式切换按钮</div>
+        </div>
+        <div class="ftb-toggle-btn active" id="languageBarImeModeToggleBtn" role="switch" aria-checked="true" tabindex="0">
+          <div class="ftb-toggle-knob"></div>
+        </div>
+      </div>
+      <div class="section-header">
+        <div>
+          <div class="section-title">全/半角按钮</div>
+          <div class="input-setting-description">显示全角/半角切换按钮（只在使用桌面语言栏时才显示）</div>
+        </div>
+        <div class="ftb-toggle-btn active" id="languageBarDoubleSingleByteToggleBtn" role="switch" aria-checked="true" tabindex="0">
+          <div class="ftb-toggle-knob"></div>
+        </div>
+      </div>
+      <div class="section-header">
+        <div>
+          <div class="section-title">中文标点按钮</div>
+          <div class="input-setting-description">显示中文/英文标点切换按钮（只在使用桌面语言栏时才显示）</div>
+        </div>
+        <div class="ftb-toggle-btn active" id="languageBarPunctuationToggleBtn" role="switch" aria-checked="true" tabindex="0">
+          <div class="ftb-toggle-knob"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="dict-card quick-phrase-card">
     <div class="quick-phrase-heading section-header">
       <div>
