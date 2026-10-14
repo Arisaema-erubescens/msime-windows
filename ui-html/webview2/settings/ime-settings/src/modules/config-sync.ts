@@ -1,7 +1,7 @@
 import { onHostMessage } from '../utils/host-messages';
 import { setAiAssistantState } from './ai-assistant-state';
 import { serializeHostMessage } from '../../../../shared/messages';
-import { applyCollocationModelStatus, applyNeuralModelStatus, applyCandidateArrange, applyDropdownValue as applyDropdown, applyToggleState as applyToggle, setCandidateTranslationOptionsDisabled, setFuzzyRuleOptionsDisabled, setMixedCandidateOptionsDisabled, setSmartPunctuationOptionsDisabled } from './shared';
+import { applyCollocationModelStatus, applyNeuralModelStatus, applyCandidateArrange, applyDropdownValue as applyDropdown, applyToggleState as applyToggle, setCandidateTranslationOptionsDisabled, setFuzzyRuleOptionsDisabled, setLanguageBarOptionsDisabled, setMixedCandidateOptionsDisabled, setSmartPunctuationOptionsDisabled } from './shared';
 
 let lastSnapshot: Record<string, any> | null = null;
 const readyModules = new Set<string>();
@@ -252,6 +252,21 @@ function applyConfigData(data: Record<string, any>, target?: string): void {
   if (typeof data?.utility?.mixed_candidates === 'boolean' && findElement('mixedCandidatesToggleBtn')) {
     applyToggleState('mixedCandidatesToggleBtn', data.utility.mixed_candidates);
     setMixedCandidateOptionsDisabled(!data.utility.mixed_candidates);
+  }
+  // 语言栏：总开关关闭时三个子开关置灰禁用，勾选状态仍按已存值展示。
+  if (typeof data?.language_bar?.enabled === 'boolean' && findElement('languageBarToggleBtn')) {
+    applyToggleState('languageBarToggleBtn', data.language_bar.enabled);
+    setLanguageBarOptionsDisabled(!data.language_bar.enabled);
+  }
+  const languageBarOptions: [string, string][] = [
+    ['languageBarImeModeToggleBtn', 'show_ime_mode'],
+    ['languageBarDoubleSingleByteToggleBtn', 'show_double_single_byte'],
+    ['languageBarPunctuationToggleBtn', 'show_punctuation']
+  ];
+  for (const [id, key] of languageBarOptions) {
+    const value = data?.language_bar?.[key];
+    if (typeof value !== 'boolean') continue;
+    applyToggleState(id, value);
   }
   if (typeof data?.utility?.date_time_candidates === 'boolean') {
     applyToggleState('dateTimeCandidatesToggleBtn', data.utility.date_time_candidates);

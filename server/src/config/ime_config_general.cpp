@@ -561,3 +561,63 @@ bool SetConfiguredClipboardHistoryEnabled(bool enabled)
     ClipboardMonitor::Sync(enabled);
     return true;
 }
+
+bool GetConfiguredLanguageBarEnabled()
+{
+    return g_language_bar_enabled;
+}
+
+bool SetConfiguredLanguageBarEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("language_bar", "enabled", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_language_bar_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredLanguageBarShowImeMode()
+{
+    return g_language_bar_show_ime_mode;
+}
+
+bool SetConfiguredLanguageBarShowImeMode(bool enabled)
+{
+    if (!WriteConfiguredValue("language_bar", "show_ime_mode", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_language_bar_show_ime_mode = enabled;
+    return true;
+}
+
+bool GetConfiguredLanguageBarShowDoubleSingleByte()
+{
+    return g_language_bar_show_double_single_byte;
+}
+
+bool SetConfiguredLanguageBarShowDoubleSingleByte(bool enabled)
+{
+    if (!WriteConfiguredValue("language_bar", "show_double_single_byte", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_language_bar_show_double_single_byte = enabled;
+    return true;
+}
+
+bool GetConfiguredLanguageBarShowPunctuation()
+{
+    return g_language_bar_show_punctuation;
+}
+
+bool SetConfiguredLanguageBarShowPunctuation(bool enabled)
+{
+    if (!WriteConfiguredValue("language_bar", "show_punctuation", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_language_bar_show_punctuation = enabled;
+    return true;
+}
