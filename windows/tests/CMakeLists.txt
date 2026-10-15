@@ -45,6 +45,11 @@ target_include_directories(test_punctuation_commit_text PRIVATE ../src)
 target_compile_features(test_punctuation_commit_text PRIVATE cxx_std_17)
 add_test(NAME punctuation_commit_text COMMAND test_punctuation_commit_text)
 
+add_executable(test_input_state_shortcuts input_state_shortcuts.cpp)
+target_compile_features(test_input_state_shortcuts PRIVATE cxx_std_17)
+target_compile_definitions(test_input_state_shortcuts PRIVATE MSIME_SHORTCUT_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../engine/contracts/tests/input_state_shortcuts.json")
+add_test(NAME input_state_shortcuts COMMAND test_input_state_shortcuts)
+
 # The classifier and the event queue are compiled into this target directly:
 # they must stay free of TSF and DLL lifecycle dependencies.
 add_executable(test_statistics statistics.cpp ../src/Statistics/char_classify.cpp)

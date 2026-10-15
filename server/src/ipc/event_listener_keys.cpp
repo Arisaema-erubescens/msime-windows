@@ -951,6 +951,14 @@ void HandleImeKey(uint64_t client_id, uint64_t activation_epoch, uint64_t reques
     Global::ModifiersDown &= ~FanyImePipeFlags::SensitiveField;
     NoteAiContextKeySource(client_id, activation_epoch, sensitive_field);
 
+    // MainPipeClientThread only enqueues this from a negotiated client with a known action.
+    if (namedpipeData.event_type == FanyImePipeEventType::InputStateAction)
+    {
+        SetEnglishInputMode(!g_english_input_mode);
+        ClearState();
+        return;
+    }
+
     // Only the explicit request bit cycles: a plain VK_SHIFT is still the binary
     // toggle, which the client also uses when it decides not to cycle.
     const UINT cycle_request = Global::ModifiersDown & FanyImeTrilingualInput::CycleRequestMask;
@@ -984,7 +992,8 @@ void HandleImeKey(uint64_t client_id, uint64_t activation_epoch, uint64_t reques
         return;
     }
 
-    if (FanyImeIpc::IsEnglishModeToggleKey(Global::Keycode, Global::ModifiersDown))
+    if (FanyImeIpc::IsEnglishModeToggleKey(Global::Keycode, Global::ModifiersDown) &&
+        !ClientNegotiatedInputStateShortcuts(client_id))
     {
         SetEnglishInputMode(!g_english_input_mode);
         ClearState();

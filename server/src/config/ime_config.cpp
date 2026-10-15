@@ -21,6 +21,7 @@
 #include "clipboard/clipboard_history.h"
 #include "engine/common/helpcode_utils.h"
 #include "engine/core/data_path.h"
+#include "engine/contracts/input_state_shortcuts.h"
 #include "statistics/stats_store.h"
 #include "voice-input/voice_providers.h"
 
@@ -55,6 +56,13 @@ bool g_switch_language_shift_enabled = true;
 bool g_switch_language_ctrl_enabled = false;
 bool g_switch_language_ctrl_alt_space_enabled = true;
 bool g_character_set_shortcut_enabled = true;
+InputStateShortcutValues g_input_state_shortcuts = [] {
+    InputStateShortcutValues values;
+    const auto defaults = FanyImeInputStateShortcuts::Defaults();
+    for (std::size_t i = 0; i < values.size(); ++i)
+        values[i] = defaults[i];
+    return values;
+}();
 int g_candidate_page_size = 8;
 std::string g_candidate_font = "Noto Sans SC";
 std::string g_candidate_english_font = "Segoe UI";
@@ -687,6 +695,13 @@ bool LoadImeConfig()
             g_switch_language_ctrl_alt_space_enabled =
                 tbl["keybindings"]["switch_language_ctrl_alt_space"].value_or(legacy_ctrl_alt_space);
             g_character_set_shortcut_enabled = tbl["keybindings"]["toggle_character_set_ctrl_shift_f"].value_or(true);
+            for (std::size_t i = 0; i < g_input_state_shortcuts.size(); ++i)
+            {
+                const auto &definition = FanyImeInputStateShortcuts::Definitions[i];
+                const auto value = tbl["keybindings"][definition.key];
+                g_input_state_shortcuts[i] = value ? value.value_or(std::string(FanyImeKeyChord::InvalidValue))
+                                                   : std::string(definition.defaultBinding);
+            }
         }
         {
             const std::string mode = tbl["frequency_adjustment"]["mode"].value_or(std::string("promote"));

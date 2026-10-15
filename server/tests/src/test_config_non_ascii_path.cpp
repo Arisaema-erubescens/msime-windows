@@ -103,6 +103,49 @@ TEST_CASE(config_round_trips_under_non_ascii_profile_path)
         InitImeConfig();
         REQUIRE(fs::exists(data_dir / L"config.toml"));
 
+        REQUIRE_EQ(GetConfiguredInputStateShortcuts()[2], std::string("Ctrl+Period"));
+        for (const std::string binding : {"Ctrl+Shift+Period", "Ctrl+Comma", ""})
+        {
+            REQUIRE(SetConfiguredInputStateShortcut(2, binding));
+            InitImeConfig();
+            REQUIRE_EQ(GetConfiguredInputStateShortcuts()[2], binding);
+        }
+        const auto before_invalid_hotkey = ReadText(data_dir / L"config.toml");
+        REQUIRE(!SetConfiguredInputStateShortcut(2, "Ctrl+Shift+KeyF"));
+        REQUIRE(!SetConfiguredInputStateShortcut(2, "Ctrl+Alt+Period"));
+        REQUIRE(!SetConfiguredInputStateShortcut(2, "Alt+KeyJ"));
+        REQUIRE(!SetConfiguredInputStateShortcut(2, "Alt+Shift+KeyJ"));
+        REQUIRE_EQ(ReadText(data_dir / L"config.toml"), before_invalid_hotkey);
+        REQUIRE_EQ(GetConfiguredInputStateShortcuts()[2], std::string());
+        auto manual_config = before_invalid_hotkey;
+        const std::string empty_binding = "toggle_punctuation = \"\"";
+        const auto binding_position = manual_config.find(empty_binding);
+        REQUIRE(binding_position != std::string::npos);
+        manual_config.replace(binding_position, empty_binding.size(), "toggle_punctuation = true");
+        WriteText(data_dir / L"config.toml", manual_config);
+        InitImeConfig();
+        REQUIRE_EQ(GetConfiguredInputStateShortcuts()[2], std::string("!invalid"));
+        REQUIRE(SetConfiguredInputStateShortcut(2, "Ctrl+Period"));
+        for (const std::size_t index : {0u, 1u, 2u})
+        {
+            const std::string original = GetConfiguredInputStateShortcuts()[index];
+            REQUIRE(SetConfiguredInputStateShortcut(index, ""));
+            InitImeConfig();
+            REQUIRE_EQ(GetConfiguredInputStateShortcuts()[index], std::string());
+            REQUIRE(!SetConfiguredInputStateShortcut(index, "Alt+KeyJ"));
+            REQUIRE(!SetConfiguredInputStateShortcut(index, "Alt+Shift+KeyJ"));
+            REQUIRE(SetConfiguredInputStateShortcut(index, "Ctrl+Shift+KeyG"));
+            InitImeConfig();
+            REQUIRE_EQ(GetConfiguredInputStateShortcuts()[index], std::string("Ctrl+Shift+KeyG"));
+            REQUIRE(SetConfiguredInputStateShortcut(index, original));
+        }
+        REQUIRE(!SetConfiguredInputStateShortcut(2, "Ctrl+Shift+Space"));
+        REQUIRE(SetConfiguredInputStateShortcut(1, ""));
+        REQUIRE(SetConfiguredInputStateShortcut(2, "Ctrl+Shift+Space"));
+        REQUIRE(!SetConfiguredInputStateShortcut(1, "Ctrl+Shift+Space"));
+        REQUIRE(SetConfiguredInputStateShortcut(2, "Ctrl+Period"));
+        REQUIRE(SetConfiguredInputStateShortcut(1, "Ctrl+Shift+Space"));
+
         REQUIRE(SetConfiguredInputMode("japanese"));
         REQUIRE(SetConfiguredInputScheme("wubi"));
         for (const std::string &position : {"top-left", "top", "top-right", "bottom-left", "bottom", "bottom-right"})

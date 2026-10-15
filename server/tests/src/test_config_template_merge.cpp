@@ -47,6 +47,27 @@ TEST_CASE(shortcut_config_upgrade_preserves_word_selection_and_adds_defaults)
     REQUIRE(merged.find("toggle_character_set_ctrl_shift_f = true") != std::string::npos);
 }
 
+TEST_CASE(input_state_shortcut_upgrade_preserves_custom_and_disabled_bindings)
+{
+    std::ifstream input(MSIME_DEFAULT_CONFIG_PATH, std::ios::binary);
+    REQUIRE(static_cast<bool>(input));
+    const std::string installed((std::istreambuf_iterator<char>(input)), {});
+    const std::string legacy = "[keybindings]\nswitch_language_shift = true\n";
+    const auto added = toml::parse(MergeConfigIntoTemplate(installed, legacy, legacy));
+    for (const auto &definition : FanyImeInputStateShortcuts::Definitions)
+    {
+        REQUIRE_EQ(added["keybindings"][definition.key].value_or(std::string()),
+                   std::string(definition.defaultBinding));
+        for (const std::string binding : {"Ctrl+Shift+KeyG", ""})
+        {
+            const std::string configured = legacy + std::string(definition.key) + " = \"" + binding + "\"\n";
+            const auto merged = toml::parse(MergeConfigIntoTemplate(installed, configured, legacy));
+            REQUIRE_EQ(merged["keybindings"][definition.key].value_or(std::string("missing")), binding);
+            REQUIRE(merged["keybindings"]["switch_language_shift"].value_or(false));
+        }
+    }
+}
+
 TEST_CASE(config_merge_adds_default_caret_state_indicator)
 {
     const std::string template_text = "[general]\nfloating_toolbar = true\ncaret_state_indicator = "
