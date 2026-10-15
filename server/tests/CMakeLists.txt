@@ -128,6 +128,8 @@ set(TEST_SOURCE_FILES
     "${CMAKE_SOURCE_DIR}/src/utils/ime_paths.cpp"
     "${CMAKE_SOURCE_DIR}/src/utils/network_proxy.cpp"
     "${CMAKE_SOURCE_DIR}/src/settings/dictionary_validation.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/test_settings_mouse_input.cpp"
+    "${CMAKE_SOURCE_DIR}/src/settings/settings_mouse_input.cpp"
     # The catalog/download/delete behaviors under test live in collocation_model.cpp, so the
     # activation-fallback and id-guard cases link the real translation unit.
     "${CMAKE_SOURCE_DIR}/src/settings/collocation_model.cpp"
@@ -145,6 +147,8 @@ target_include_directories(${TEST_EXECUTABLE_NAME}
     "${CMAKE_SOURCE_DIR}/src"
     "${MSIME_VENDOR_DIR}"
     "${MSIME_ENGINE_DIR}/utfcpp/source"
+    # settings_mouse_input.h only needs the WebView2 enum declarations.
+    "${WEBVIEW2_VCPKG_ROOT}/include"
 )
 
 # test_default_config_credentials reads the config the installer actually ships, so the check is
