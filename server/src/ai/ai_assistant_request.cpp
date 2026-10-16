@@ -9,8 +9,13 @@ namespace AiAssistant::detail
 nlohmann::json BuildRequestBody(const Request &request)
 {
     const auto &config = request.config;
+    // Which vendor answers is a property of the endpoint, not of the label in the settings UI: a
+    // slot can hold any OpenAI-compatible endpoint, and DeepSeek's thinking.type makes MiniMax
+    // reject the request outright instead of silently returning no suggestion.
+    const auto vendor = VoiceInput::VendorForRequest(config.provider, config.endpoint);
     const bool openai_reasoning = ChatCompletions::IsOpenAiReasoningRequest(config.provider, config.model);
-    const bool thinking = VoiceInput::UsesDeepSeekThinking(config.provider, config.thinking);
+    const bool thinking = vendor == VoiceInput::ChatVendor::DeepSeek &&
+                          VoiceInput::IsValidThinkingLevel(config.thinking) && config.thinking != "disabled";
     nlohmann::json input = {{"segmented_pinyin", request.pinyin_segments},
                             {"context", request.context},
                             {"candidate_limit", config.candidate_limit}};
@@ -33,10 +38,10 @@ nlohmann::json BuildRequestBody(const Request &request)
     {
         body["reasoning_effort"] = ChatCompletions::kOpenAiReasoningEffort;
     }
-    else if (config.provider == "deepseek")
+    else if (vendor == VoiceInput::ChatVendor::DeepSeek)
     {
         // DeepSeek thinking can add hundreds of reasoning tokens and noticeably delay
-        // an IME suggestion. Keep custom OpenAI-compatible providers untouched.
+        // an IME suggestion. Every other service gets a plain OpenAI-compatible request.
         body["thinking"] = {{"type", "disabled"}};
     }
     return body;
@@ -44,7 +49,7 @@ nlohmann::json BuildRequestBody(const Request &request)
 
 long RequestTimeoutMs(const AiAssistantConfig &config)
 {
-    return VoiceInput::UsesDeepSeekThinking(config.provider, config.thinking) ||
+    return VoiceInput::UsesDeepSeekThinking(config.provider, config.endpoint, config.thinking) ||
                    ChatCompletions::IsOpenAiReasoningRequest(config.provider, config.model)
                ? ChatCompletions::kReasoningTimeoutMs
                : ChatCompletions::kDefaultTimeoutMs;

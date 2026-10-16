@@ -308,7 +308,9 @@
           "service": {
             "type": "string",
             "enum": [
-              "ai.assistant"
+              "ai.assistant",
+              "voice.asr",
+              "voice.polish"
             ]
           },
           "config": {
@@ -322,6 +324,55 @@
           "requestId",
           "service",
           "config"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "aiProviderSync": {
+      "surfaces": [
+        "settings"
+      ],
+      "data": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "endpoint": {
+                  "type": "string"
+                },
+                "token": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "endpoint",
+                "token",
+                "model"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "requestId",
+          "entries"
         ],
         "additionalProperties": false
       }
@@ -1012,6 +1063,25 @@
           "items": {
             "type": "string"
           }
+        }
+      },
+      "required": [
+        "requestId",
+        "ok",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "aiProviderSyncResult": {
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
         }
       },
       "required": [

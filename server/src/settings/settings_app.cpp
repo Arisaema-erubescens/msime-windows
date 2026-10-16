@@ -42,6 +42,8 @@
 #include <shellapi.h>
 #include <wrl.h>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -437,6 +439,35 @@ static nlohmann::json CustomShuangpinSchemasJson()
     return schemas;
 }
 
+// The provider registry as sent to the settings page: one entry per user-defined service. Built-in
+// ids stay config.toml-authoritative, so their endpoint/model come from the parsed config rather
+// than a possibly-stale store copy. Every token comes from config.toml; the store holds none.
+nlohmann::json ProviderEntriesJson(const AiAssistantConfig &ai)
+{
+    nlohmann::json array = nlohmann::json::array();
+    for (const auto &entry : ai.providers)
+    {
+        nlohmann::json item = {{"id", entry.id},
+                               {"name", entry.name},
+                               {"endpoint", entry.endpoint},
+                               {"token", ""},
+                               {"model", entry.model}};
+        if (AiAssistant::ProviderStore::IsBuiltinProvider(entry.id))
+        {
+            const auto endpoint = ai.endpoints.find(entry.id);
+            const auto model = ai.models.find(entry.id);
+            if (endpoint != ai.endpoints.end())
+                item["endpoint"] = endpoint->second;
+            if (model != ai.models.end())
+                item["model"] = model->second;
+        }
+        if (const auto token = ai.tokens.find(entry.id); token != ai.tokens.end())
+            item["token"] = token->second;
+        array.push_back(std::move(item));
+    }
+    return array;
+}
+
 // Index of the input-state shortcut written by a config path, or Definitions.size().
 std::size_t InputStateShortcutIndex(const std::string &path)
 {
@@ -792,6 +823,7 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
             {"model", ai.model},
             {"endpoints", ai.endpoints},
             {"models", ai.models},
+            {"providers", ProviderEntriesJson(ai)},
             {"candidate_limit", ai.candidate_limit},
             {"thinking", ai.thinking},
             {"prompt", ai.prompt},
@@ -1737,6 +1769,37 @@ void HandleClientMessage(HWND hwnd, const std::string &raw)
                     throw std::runtime_error("Invalid API model list response");
                 auto message = string_to_wstring(json::serialize(response));
                 return [message = std::move(message)] { PostToPage(message); };
+            });
+        }
+        else if (type == "aiProviderSync")
+        {
+            const auto &data = value.at("data").as_object();
+            const std::string request_id = json::value_to<std::string>(data.at("requestId"));
+            std::vector<AiAssistant::AiProvider> entries;
+            for (const auto &item : data.at("entries").as_array())
+            {
+                const auto &object = item.as_object();
+                AiAssistant::AiProvider entry;
+                entry.id = json::value_to<std::string>(object.at("id"));
+                entry.name = json::value_to<std::string>(object.at("name"));
+                entry.endpoint = json::value_to<std::string>(object.at("endpoint"));
+                entry.token = json::value_to<std::string>(object.at("token"));
+                entry.model = json::value_to<std::string>(object.at("model"));
+                entries.push_back(std::move(entry));
+            }
+            const bool ok = SetAiAssistantProviders(entries);
+            const std::string result_message = ok ? "已保存 " + std::to_string(entries.size()) + " 个服务商"
+                                                  : "保存失败：服务商列表为空或包含无效条目。";
+            json::value response = {{"type", "aiProviderSyncResult"},
+                                    {"requestId", request_id},
+                                    {"ok", ok},
+                                    {"message", result_message},
+                                    {"protocolVersion", metasequoia::webview::Version}};
+            if (!metasequoia::webview::Validate(response, "server"))
+                throw std::runtime_error("Invalid AI provider sync response");
+            auto message = string_to_wstring(json::serialize(response));
+            g_worker->Submit([message = std::move(message)]() -> SerialTaskQueue::Completion {
+                return [message] { PostToPage(message); };
             });
         }
         else if (type == "openKeyboardPanel")
