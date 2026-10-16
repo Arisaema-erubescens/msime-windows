@@ -41,6 +41,7 @@ export type CandidateAppearanceConfig = {
   tsf_preedit_shuangpin_quanpin?: boolean;
   ui_backend?: string;
   settings_window_linger?: string;
+  settings_ui_backend?: string;
   system_fonts?: string[];
 };
 
@@ -528,6 +529,7 @@ export function applyAppearanceConfig(
   }
   applyDropdownValue('uiBackendBtn', 'uiBackendMenu', candidateAppearance?.ui_backend);
   applyDropdownValue('settingsLingerBtn', 'settingsLingerMenu', candidateAppearance?.settings_window_linger);
+  applyDropdownValue('settingsBackendBtn', 'settingsBackendMenu', candidateAppearance?.settings_ui_backend);
   populateFontMenus(candidateAppearance?.system_fonts);
   renderFallbackFonts();
   syncColorControls(candidateAppearance?.cand_text_color);
@@ -597,6 +599,8 @@ export async function setupAppearance() {
   setupDropdownMenu('uiBackendBtn', 'uiBackendMenu', '', true, 'appearance.ui_backend');
   setupRestartServerButton();
   setupDropdownMenu('settingsLingerBtn', 'settingsLingerMenu', '', true, 'appearance.settings_window_linger');
+  // The host reopens the settings window in the chosen renderer once the value is saved.
+  setupDropdownMenu('settingsBackendBtn', 'settingsBackendMenu', '', true, 'appearance.settings_ui_backend');
 
   // 候选项排列方式
   setupDropdownMenu('arrangeBtn', 'arrangeMenu', 'changeCandidateArrange');

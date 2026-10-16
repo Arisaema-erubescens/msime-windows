@@ -64,6 +64,7 @@ function applyConfigData(data: Record<string, any>, target?: string): void {
           tsf_preedit_shuangpin_quanpin: data?.appearance?.tsf_preedit_shuangpin_quanpin,
           ui_backend: data?.appearance?.ui_backend,
           settings_window_linger: data?.appearance?.settings_window_linger,
+          settings_ui_backend: data?.appearance?.settings_ui_backend,
           system_fonts: data?.appearance?.system_fonts
         }
       );

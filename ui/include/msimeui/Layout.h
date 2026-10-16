@@ -231,7 +231,41 @@ class WrapPanel : public Panel
 class ScrollViewer : public Visual
 {
   public:
+    struct Appearance
+    {
+        // Width the scrollbar takes from the content while it is shown; 0 lays the
+        // bar over the content.
+        float reservedWidth = 20.0f;
+        // Hit area along the right edge, and the drawn thumb inside it.
+        float trackWidth = 10.0f;
+        float thumbWidth = 10.0f;
+        // Gap between the thumb and the track ends / the right edge.
+        float thumbInset = 0.0f;
+        float thumbRightInset = 0.0f;
+        float thumbMinLength = 36.0f;
+        float cornerRadius = 4.0f;
+        bool drawTrack = true;
+        // Alpha 0 falls back to ThemeManager's track / thumb colors.
+        D2D1_COLOR_F trackColor = D2D1::ColorF(0, 0.0f);
+        D2D1_COLOR_F thumbColor = D2D1::ColorF(0, 0.0f);
+        D2D1_COLOR_F thumbHoverColor = D2D1::ColorF(0, 0.0f);
+        // Thumb turns to the hover color only while the pointer is over the thumb
+        // itself (WebKit) rather than anywhere over the track.
+        bool hoverThumbOnly = false;
+        float wheelStep = 72.0f;
+        // Wheel scrolling glides there over this time; 0 jumps.
+        double smoothScrollMs = 0.0;
+    };
+
     explicit ScrollViewer(std::shared_ptr<Visual> content);
+
+    void SetAppearance(const Appearance &appearance);
+    float GetScrollOffset() const;
+    float GetMaxScrollOffset() const;
+    // Jumps without animation, clamped to the content.
+    void SetScrollOffset(float offset);
+    // Scrolls just enough to bring `rect` (DIPs, window space) into view.
+    void ScrollIntoView(const RectF &rect);
 
     SizeF Measure(const SizeF &availableSize) override;
     void Arrange(const RectF &finalRect) override;
@@ -251,15 +285,23 @@ class ScrollViewer : public Visual
   private:
     void RefreshViewport();
     void ClampScrollOffset();
+    void ApplyScrollOffset(float offset);
     RectF GetScrollbarTrackRect() const;
     RectF GetScrollbarThumbRect() const;
     bool HasVerticalScrollbar() const;
     void UpdateContentLayout();
 
     std::shared_ptr<Visual> content_;
+    Appearance appearance_{};
     SizeF measuredContent_ = {};
     float scrollOffsetY_ = 0.0f;
+    // Smooth wheel scrolling: the offset glides from `scrollFrom_` towards `scrollTarget_`.
+    float scrollFrom_ = 0.0f;
+    float scrollTarget_ = 0.0f;
+    double scrollStartMs_ = 0.0;
+    bool scrollAnimating_ = false;
     bool scrollbarHovered_ = false;
+    bool thumbHovered_ = false;
     bool scrollbarDragging_ = false;
     float scrollbarDragOffsetY_ = 0.0f;
 };
@@ -356,6 +398,32 @@ struct ShadowPass
     }
 };
 
+// Gaussian drop shadow of a rounded rectangle, blurred once into a bitmap and reused.
+// Far enough from the corners a blurred edge no longer changes along it, so the bitmap
+// is built for a box just long enough to reach that straight stretch and drawn
+// nine-sliced: a box that only grows or shrinks keeps the same bitmap.
+class ShadowCache
+{
+  public:
+    // `scale` shrinks the shadow geometry, `opacity` dims every pass. Returns false when
+    // nothing could be drawn (no device context behind `target`).
+    bool Render(ID2D1RenderTarget *target, const RectF &bounds, float radius, const ShadowPass *passes, size_t count,
+                float scale = 1.0f, float opacity = 1.0f);
+    void Reset();
+
+  private:
+    Microsoft::WRL::ComPtr<ID2D1RenderTarget> target_;
+    Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap_;
+    // Size of the box the bitmap was blurred for, not of the box drawn now.
+    SizeF size_ = {};
+    float radius_ = 0.0f;
+    float scale_ = 0.0f;
+    float opacity_ = 0.0f;
+    float dpiX_ = 0.0f;
+    float dpiY_ = 0.0f;
+    std::vector<ShadowPass> passes_;
+};
+
 class Card : public Panel
 {
   public:
@@ -388,7 +456,6 @@ class Card : public Panel
 
   private:
     void RenderShadow(ID2D1RenderTarget *target);
-    bool RenderCachedShadow(ID2D1RenderTarget *target, const ShadowPass *passes, size_t count);
     void RenderBackgroundImage(DeviceResources &deviceResources, ID2D1RenderTarget *target,
                                const D2D1_ROUNDED_RECT &shape);
 
@@ -409,21 +476,8 @@ class Card : public Panel
     SizeF childSize_ = {};
 
     // All blur passes composed into one bitmap. Rebuilding the blur inputs and
-    // effects dominated the card's repaints; the bitmap is reused while the key
-    // below matches and belongs to cachedShadowTarget_. Far enough from the
-    // corners a blurred edge no longer changes along it, so the bitmap is built
-    // for a card just long enough to reach that straight stretch and drawn
-    // nine-sliced: a card that only grows or shrinks keeps the same bitmap.
-    Microsoft::WRL::ComPtr<ID2D1RenderTarget> cachedShadowTarget_;
-    Microsoft::WRL::ComPtr<ID2D1Bitmap> cachedShadowBitmap_;
-    // Size of the card the bitmap was blurred for, not of the card drawn now.
-    SizeF cachedShadowSize_ = {};
-    float cachedShadowRadius_ = 0.0f;
-    float cachedShadowScale_ = 0.0f;
-    float cachedShadowOpacity_ = 0.0f;
-    float cachedShadowDpiX_ = 0.0f;
-    float cachedShadowDpiY_ = 0.0f;
-    std::vector<ShadowPass> cachedShadowPasses_;
+    // effects dominated the card's repaints.
+    ShadowCache shadowCache_;
 };
 
 class TextBlock : public Visual

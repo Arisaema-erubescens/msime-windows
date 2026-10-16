@@ -375,3 +375,22 @@ bool SetConfiguredSettingsWindowLinger(const std::string &linger)
     g_settings_window_linger = linger;
     return true;
 }
+
+const std::string &GetConfiguredSettingsUiBackend()
+{
+    return g_settings_ui_backend;
+}
+
+bool SetConfiguredSettingsUiBackend(const std::string &backend)
+{
+    if (!IsValidSettingsUiBackend(backend))
+    {
+        return false;
+    }
+    if (!WriteConfiguredValue("appearance", "settings_ui_backend", EscapeTomlBasicString(backend)))
+    {
+        return false;
+    }
+    g_settings_ui_backend = backend;
+    return true;
+}

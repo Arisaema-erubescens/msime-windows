@@ -210,6 +210,7 @@ bool g_candidate_fixed_badge = true;
 std::string g_candidate_fixed_badge_style = "paperclip";
 std::string g_candidate_ai_badge_style = "robot";
 std::string g_settings_window_linger = "off";
+std::string g_settings_ui_backend = "webview2";
 std::string g_theme_mode = "system";
 std::string g_theme_settings = "follow";
 std::string g_theme_cand = "follow";
@@ -306,6 +307,11 @@ bool IsValidSettingsWindowLinger(const std::string &linger)
 {
     return linger == "off" || linger == "1m" || linger == "5m" || linger == "10m" || linger == "30m" ||
            linger == "60m" || linger == "forever";
+}
+
+bool IsValidSettingsUiBackend(const std::string &backend)
+{
+    return backend == "webview2" || backend == "d2d";
 }
 
 bool IsValidTranslationTargetLanguage(const std::string &language)
@@ -744,6 +750,10 @@ bool LoadImeConfig()
         {
             const std::string linger = tbl["appearance"]["settings_window_linger"].value_or(std::string("off"));
             g_settings_window_linger = IsValidSettingsWindowLinger(linger) ? linger : "off";
+        }
+        {
+            const std::string backend = tbl["appearance"]["settings_ui_backend"].value_or(std::string("webview2"));
+            g_settings_ui_backend = IsValidSettingsUiBackend(backend) ? backend : "webview2";
         }
         {
             const std::string theme_mode = tbl["appearance"]["theme_mode"].value_or(std::string("system"));

@@ -3,7 +3,11 @@
 #include "msimeui/Fonts.h"
 
 #include <algorithm>
+#include <cmath>
+#include <d2d1_3.h>
+#include <functional>
 #include <iterator>
+#include <shlwapi.h>
 #include <windows.h>
 
 namespace msimeui
@@ -16,11 +20,80 @@ UINT AlignSwapExtent(UINT value)
     value = (std::max)(value, 1U);
     return ((value + kBucket - 1U) / kBucket) * kBucket;
 }
+
+uint64_t QuantizeChannel(float value)
+{
+    return static_cast<uint64_t>(std::lround(std::clamp(value, 0.0f, 1.0f) * 65535.0f));
+}
+
+RectF IntersectRect(const RectF &lhs, const RectF &rhs)
+{
+    const float left = (std::max)(lhs.x, rhs.x);
+    const float top = (std::max)(lhs.y, rhs.y);
+    const float right = (std::min)(lhs.x + lhs.width, rhs.x + rhs.width);
+    const float bottom = (std::min)(lhs.y + lhs.height, rhs.y + rhs.height);
+    return {left, top, (std::max)(right - left, 0.0f), (std::max)(bottom - top, 0.0f)};
+}
 } // namespace
 
-bool DeviceResources::IsSameColor(const D2D1_COLOR_F &lhs, const D2D1_COLOR_F &rhs)
+uint64_t DeviceResources::ColorKey(const D2D1_COLOR_F &color)
 {
-    return lhs.r == rhs.r && lhs.g == rhs.g && lhs.b == rhs.b && lhs.a == rhs.a;
+    return (QuantizeChannel(color.r) << 48) | (QuantizeChannel(color.g) << 32) | (QuantizeChannel(color.b) << 16) |
+           QuantizeChannel(color.a);
+}
+
+void DeviceResources::BeginFrame()
+{
+    ++frame_;
+    clipStack_.clear();
+    TrimBrushCache();
+}
+
+void DeviceResources::TrimBrushCache()
+{
+    if (brushCache_.size() <= kBrushCacheSoftLimit)
+    {
+        return;
+    }
+    // Only brushes untouched in the current frame go: a caller may still hold one it
+    // fetched a moment ago.
+    for (auto it = brushCache_.begin(); it != brushCache_.end();)
+    {
+        it = it->second.lastFrame + 1 < frame_ ? brushCache_.erase(it) : std::next(it);
+    }
+}
+
+void DeviceResources::PushClip(const RectF &rect, D2D1_ANTIALIAS_MODE mode)
+{
+    if (ID2D1RenderTarget *target = GetRenderTarget())
+    {
+        target->PushAxisAlignedClip(D2D1::RectF(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height), mode);
+    }
+    clipStack_.push_back(clipStack_.empty() ? rect : IntersectRect(clipStack_.back(), rect));
+}
+
+void DeviceResources::PopClip()
+{
+    if (clipStack_.empty())
+    {
+        return;
+    }
+    clipStack_.pop_back();
+    if (ID2D1RenderTarget *target = GetRenderTarget())
+    {
+        target->PopAxisAlignedClip();
+    }
+}
+
+bool DeviceResources::IsVisible(const RectF &rect) const
+{
+    if (clipStack_.empty())
+    {
+        return true;
+    }
+    const RectF &clip = clipStack_.back();
+    return rect.x < clip.x + clip.width && rect.x + rect.width > clip.x && rect.y < clip.y + clip.height &&
+           rect.y + rect.height > clip.y;
 }
 
 FLOAT DeviceResources::DpiForHwnd() const
@@ -149,9 +222,11 @@ bool DeviceResources::BindCompositionSurface()
     }
 
     const FLOAT dpi = DpiForHwnd();
-    const D2D1_BITMAP_PROPERTIES1 props =
-        D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
-                                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), dpi, dpi);
+    const D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
+        D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                          compositionOpaque_ ? D2D1_ALPHA_MODE_IGNORE : D2D1_ALPHA_MODE_PREMULTIPLIED),
+        dpi, dpi);
     if (FAILED(deviceContext_->CreateBitmapFromDxgiSurface(surface.Get(), &props, dxgiBitmap_.GetAddressOf())))
     {
         return false;
@@ -159,6 +234,19 @@ bool DeviceResources::BindCompositionSurface()
     deviceContext_->SetTarget(dxgiBitmap_.Get());
     deviceContext_->SetDpi(dpi, dpi);
     return true;
+}
+
+void DeviceResources::SetCompositionOpaque(bool opaque)
+{
+    if (compositionOpaque_ == opaque)
+    {
+        return;
+    }
+    compositionOpaque_ = opaque;
+    if (composition_)
+    {
+        DiscardTarget();
+    }
 }
 
 bool DeviceResources::EnsureForComposition(HWND hwnd)
@@ -228,7 +316,7 @@ bool DeviceResources::EnsureForComposition(HWND hwnd)
         desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
         desc.BufferCount = 2;
         desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-        desc.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
+        desc.AlphaMode = compositionOpaque_ ? DXGI_ALPHA_MODE_IGNORE : DXGI_ALPHA_MODE_PREMULTIPLIED;
         desc.Scaling = DXGI_SCALING_STRETCH;
         if (FAILED(factory->CreateSwapChainForComposition(d3dDevice_.Get(), &desc, nullptr, swapChain_.GetAddressOf())))
         {
@@ -316,6 +404,8 @@ void DeviceResources::DiscardTarget()
     d3dDevice_.Reset();
     brushCache_.clear();
     bitmapCache_.clear();
+    svgCache_.clear();
+    clipStack_.clear();
     composition_ = false;
 }
 
@@ -365,23 +455,24 @@ ID2D1SolidColorBrush *DeviceResources::GetSolidColorBrush(const D2D1_COLOR_F &co
         return nullptr;
     }
 
-    for (auto &entry : brushCache_)
+    const uint64_t key = ColorKey(color);
+    auto found = brushCache_.find(key);
+    if (found != brushCache_.end() && found->second.brush)
     {
-        if (entry.brush && IsSameColor(entry.color, color))
-        {
-            return entry.brush.Get();
-        }
+        found->second.lastFrame = frame_;
+        return found->second.brush.Get();
     }
 
     BrushCacheEntry entry;
-    entry.color = color;
+    entry.lastFrame = frame_;
     if (FAILED(target->CreateSolidColorBrush(color, entry.brush.GetAddressOf())))
     {
         return nullptr;
     }
 
-    brushCache_.push_back(std::move(entry));
-    return brushCache_.back().brush.Get();
+    ID2D1SolidColorBrush *brush = entry.brush.Get();
+    brushCache_[key] = std::move(entry);
+    return brush;
 }
 
 IDWriteTextFormat *DeviceResources::GetTextFormat(const std::wstring &fontFamily, float fontSize,
@@ -496,5 +587,93 @@ ID2D1Bitmap *DeviceResources::GetBitmapFromFile(const std::wstring &filePath, D2
         *size = bitmapCache_.back().size;
     }
     return bitmapCache_.back().bitmap.Get();
+}
+
+ID2D1Bitmap *DeviceResources::GetSvgBitmap(const std::string &markup, const SizeF &sizeDips)
+{
+    ID2D1RenderTarget *target = GetRenderTarget();
+    if (!target || markup.empty() || sizeDips.width <= 0.0f || sizeDips.height <= 0.0f)
+    {
+        return nullptr;
+    }
+
+    float dpiX = 96.0f;
+    float dpiY = 96.0f;
+    target->GetDpi(&dpiX, &dpiY);
+    const size_t hash = std::hash<std::string>{}(markup);
+    for (auto it = svgCache_.begin(); it != svgCache_.end(); ++it)
+    {
+        if (it->markupHash == hash && it->dpi == dpiX && it->size.width == sizeDips.width &&
+            it->size.height == sizeDips.height && it->markup == markup && it->bitmap)
+        {
+            if (std::next(it) != svgCache_.end())
+            {
+                std::rotate(it, std::next(it), svgCache_.end());
+            }
+            return svgCache_.back().bitmap.Get();
+        }
+    }
+
+    // Rasterize once into a bitmap of the target's own pixel format and DPI; drawing a
+    // bitmap afterwards is far cheaper than walking the SVG tree every frame, and it can
+    // take an opacity like any other bitmap.
+    Microsoft::WRL::ComPtr<ID2D1BitmapRenderTarget> raster;
+    if (FAILED(
+            target->CreateCompatibleRenderTarget(D2D1::SizeF(sizeDips.width, sizeDips.height), raster.GetAddressOf())))
+    {
+        return nullptr;
+    }
+    Microsoft::WRL::ComPtr<ID2D1DeviceContext5> context;
+    if (FAILED(raster.As(&context)))
+    {
+        return nullptr;
+    }
+    Microsoft::WRL::ComPtr<IStream> stream;
+    stream.Attach(SHCreateMemStream(reinterpret_cast<const BYTE *>(markup.data()), static_cast<UINT>(markup.size())));
+    Microsoft::WRL::ComPtr<ID2D1SvgDocument> document;
+    if (!stream || FAILED(context->CreateSvgDocument(stream.Get(), D2D1::SizeF(sizeDips.width, sizeDips.height),
+                                                     document.GetAddressOf())))
+    {
+        return nullptr;
+    }
+    // Scale the drawing to the requested box like an <img> does: the root's own
+    // width/height would otherwise draw it at its intrinsic size inside the viewport.
+    Microsoft::WRL::ComPtr<ID2D1SvgElement> root;
+    document->GetRoot(root.GetAddressOf());
+    if (root)
+    {
+        if (!root->IsAttributeSpecified(L"viewBox"))
+        {
+            D2D1_SVG_LENGTH width = {sizeDips.width, D2D1_SVG_LENGTH_UNITS_NUMBER};
+            D2D1_SVG_LENGTH height = {sizeDips.height, D2D1_SVG_LENGTH_UNITS_NUMBER};
+            root->GetAttributeValue(L"width", D2D1_SVG_ATTRIBUTE_POD_TYPE_LENGTH, &width, sizeof(width));
+            root->GetAttributeValue(L"height", D2D1_SVG_ATTRIBUTE_POD_TYPE_LENGTH, &height, sizeof(height));
+            const D2D1_SVG_VIEWBOX viewBox = {0.0f, 0.0f, width.value, height.value};
+            root->SetAttributeValue(L"viewBox", D2D1_SVG_ATTRIBUTE_POD_TYPE_VIEWBOX, &viewBox, sizeof(viewBox));
+        }
+        const D2D1_SVG_LENGTH width = {sizeDips.width, D2D1_SVG_LENGTH_UNITS_NUMBER};
+        const D2D1_SVG_LENGTH height = {sizeDips.height, D2D1_SVG_LENGTH_UNITS_NUMBER};
+        root->SetAttributeValue(L"width", D2D1_SVG_ATTRIBUTE_POD_TYPE_LENGTH, &width, sizeof(width));
+        root->SetAttributeValue(L"height", D2D1_SVG_ATTRIBUTE_POD_TYPE_LENGTH, &height, sizeof(height));
+    }
+
+    raster->BeginDraw();
+    raster->Clear(D2D1::ColorF(0, 0.0f));
+    context->DrawSvgDocument(document.Get());
+    SvgCacheEntry entry;
+    if (FAILED(raster->EndDraw()) || FAILED(raster->GetBitmap(entry.bitmap.GetAddressOf())))
+    {
+        return nullptr;
+    }
+    entry.markupHash = hash;
+    entry.markup = markup;
+    entry.size = sizeDips;
+    entry.dpi = dpiX;
+    if (svgCache_.size() >= kMaxCachedSvgBitmaps)
+    {
+        svgCache_.erase(svgCache_.begin());
+    }
+    svgCache_.push_back(std::move(entry));
+    return svgCache_.back().bitmap.Get();
 }
 } // namespace msimeui

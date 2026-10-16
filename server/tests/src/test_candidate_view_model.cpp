@@ -214,7 +214,10 @@ TEST_CASE(ui_backend_policy_keeps_settings_web_and_small_windows_native_by_defau
         REQUIRE(Resolve(surface, "sciter") == Backend::Native);
         REQUIRE(Resolve(surface, "webview2") == Backend::WebView2);
     }
-    REQUIRE(Resolve(Surface::Settings, "d2d") == Backend::WebView2);
+    REQUIRE(Resolve(Surface::Settings, "") == Backend::WebView2);
+    REQUIRE(Resolve(Surface::Settings, "webview2") == Backend::WebView2);
+    REQUIRE(Resolve(Surface::Settings, "sciter") == Backend::WebView2);
+    REQUIRE(Resolve(Surface::Settings, "d2d") == Backend::Native);
     REQUIRE(!IsSupported("sciter"));
     REQUIRE(!IsSupported("unknown"));
     REQUIRE(IsSupported("d2d"));

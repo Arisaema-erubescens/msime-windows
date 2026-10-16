@@ -592,6 +592,10 @@ bool SetConfiguredCandidateAiBadgeStyle(const std::string &style);
 // "off" | "1m" | "5m" | "10m" | "30m" | "60m" | "forever"，默认 "10m"。
 const std::string &GetConfiguredSettingsWindowLinger();
 bool SetConfiguredSettingsWindowLinger(const std::string &linger);
+// "webview2" | "d2d" — renderer of the settings window, applied when it next opens.
+// Direct2D is experimental; WebView2 stays the default.
+const std::string &GetConfiguredSettingsUiBackend();
+bool SetConfiguredSettingsUiBackend(const std::string &backend);
 // "d2d" | "webview2" — candidate, floating toolbar, and tray menu renderer.
 // Changing this writes config immediately; the process snapshot does not switch
 // until the IME server is restarted.

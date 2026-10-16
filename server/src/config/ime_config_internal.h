@@ -247,6 +247,7 @@ extern bool g_candidate_fixed_badge;
 extern std::string g_candidate_fixed_badge_style;
 extern std::string g_candidate_ai_badge_style;
 extern std::string g_settings_window_linger;
+extern std::string g_settings_ui_backend;
 extern std::string g_theme_mode;
 extern std::string g_theme_settings;
 extern std::string g_theme_cand;
@@ -281,6 +282,7 @@ bool IsValidCandidateSkinId(const std::string &skin);
 bool IsValidCandidateFixedBadgeStyle(const std::string &style);
 bool IsValidCandidateAiBadgeStyle(const std::string &style);
 bool IsValidSettingsWindowLinger(const std::string &linger);
+bool IsValidSettingsUiBackend(const std::string &backend);
 bool IsValidTranslationTargetLanguage(const std::string &language);
 std::string AiAssistantTokenSlotKey(std::string_view provider);
 // ime_config_services.cpp：按当前各段全局配置重建候选词翻译快照。改动 provider、腾讯云、
