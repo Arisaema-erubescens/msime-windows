@@ -38,19 +38,27 @@ examples/skin-examples/
 │  │  └─ assets/
 │  │     ├─ character.png     # 卡片上方的装饰图
 │  │     └─ background.png    # 卡片背景图
-│  └─ canvas-demo/            # schema_version 2 + canvas 基底的全贴图样例
+│  ├─ canvas-demo/            # schema_version 2 + canvas 基底的全贴图样例
+│  │  ├─ skin.toml
+│  │  └─ assets/
+│  │     ├─ panel.png         # 九宫格面板（2 倍图）
+│  │     ├─ leaf.png          # 面板下层挂件
+│  │     └─ sparkle.apng      # 面板上层的循环 APNG 挂件
+│  └─ sakura-night/           # v2 实机演示「夜樱」：面板后的月亮、APNG 花瓣、GIF 星星
 │     ├─ skin.toml
 │     └─ assets/
-│        ├─ panel.png         # 九宫格面板（2 倍图）
-│        ├─ leaf.png          # 面板下层挂件
-│        └─ sparkle.apng      # 面板上层的循环 APNG 挂件
+│        ├─ panel.png         # 九宫格面板（2 倍图，四角小樱花不随拉伸变形）
+│        ├─ moon.png          # 面板下层挂件
+│        ├─ petals.apng       # 面板上层的循环 APNG 挂件
+│        └─ stars.gif         # 面板上层的循环 GIF 挂件
 ├─ schema/                    # manifest 字段说明
+├─ tools/                     # 生成样例图片的脚本（需要 Pillow）
 ├─ tests/                     # CI 用的 manifest 与安装脚本测试
 ├─ preview.html               # 本地预览
 └─ install.ps1                # 样例安装脚本
 ```
 
-只有 `skins/<id>/` 会被安装，`preview.html`、`schema/`、`tests/` 和安装脚本都只是制作工具。
+只有 `skins/<id>/` 会被安装，`preview.html`、`schema/`、`tools/`、`tests/` 和安装脚本都只是制作工具。
 
 ## 样例皮肤能演示什么
 
@@ -137,6 +145,20 @@ z_index = 2                      # z_index < 1 画在面板之下，其余画在
 - 文字离面板外缘的距离用 `content_insets_dip`，挂件伸出卡片时用 `outer_insets_dip` 给窗口留出空白。
 - 动图在系统关闭「动画效果」时只显示第一帧。动图解码后合计不超过 64 MB、最多 1024 帧，超出时只显示第一帧。
 - 样例里的三张图都是程序生成的几何图形，随本目录以 MIT 授权，可以直接改用。
+
+`sakura-night`（夜樱）是一个更完整的实机演示，把 v2 的能力都用上了：
+
+- 紫夜玻璃九宫格面板，四角的小樱花落在 24 像素切片内，候选框怎么伸缩都不变形。
+- 月亮挂在右上角、`z_index = -1` 画在面板之后，只露出伸出面板的那一截。
+- 右侧飘落的花瓣是 24 帧 × 70 ms 的循环 APNG，左下闪烁的星星是 8 帧 × 150 ms 的循环 GIF。
+- 用 `content_insets_dip` 让文字避开边框和四角花纹，用 `outer_insets_dip` 给伸出去的挂件留出窗口空间，用 `line_gap_dip` 拉开预编辑行与候选。
+- 左上角刻意不放挂件：预编辑文字从那里开始，挂件压上去会挡字。
+
+它的图片都由 `tools/gen_sakura_night.py` 生成（需要 Pillow），重新运行会得到同样的文件：
+
+```powershell
+python tools/gen_sakura_night.py skins/sakura-night
+```
 
 ## 制作约束
 
