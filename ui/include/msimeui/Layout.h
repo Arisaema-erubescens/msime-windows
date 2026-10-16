@@ -295,8 +295,8 @@ class ScrollViewer : public Visual
     Appearance appearance_{};
     SizeF measuredContent_ = {};
     float scrollOffsetY_ = 0.0f;
-    // Smooth wheel scrolling: the offset glides from `scrollFrom_` towards `scrollTarget_`.
-    float scrollFrom_ = 0.0f;
+    // Smooth wheel scrolling: the offset glides towards `scrollTarget_`; `scrollStartMs_`
+    // is the time of the last glide step.
     float scrollTarget_ = 0.0f;
     double scrollStartMs_ = 0.0;
     bool scrollAnimating_ = false;

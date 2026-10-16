@@ -817,12 +817,7 @@ class ApiField : public msimeui::Panel
                 FillRounded(dr, eye, 5.0f, WithAlpha(p.text, 0.08f));
             const D2D1_COLOR_F color = eyeHot_ ? p.text : p.textMuted;
             const std::string markup = TintSvg(revealed_ ? kEyeHide : kEyeShow, color);
-            if (ID2D1Bitmap *bitmap = dr.GetSvgBitmap(markup, {18.0f, 18.0f}))
-            {
-                const float x = eye.x + 7.0f;
-                const float y = eye.y + 7.0f;
-                dr.GetRenderTarget()->DrawBitmap(bitmap, D2D1::RectF(x, y, x + 18.0f, y + 18.0f));
-            }
+            DrawSvg(dr, markup, {eye.x + 7.0f, eye.y + 7.0f, 18.0f, 18.0f});
         }
     }
 

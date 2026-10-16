@@ -212,10 +212,16 @@
   font-family: inherit;
   font-size: 12px;
   cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease, transform .05s ease;
 }
 
-.about-update-button:hover {
+.about-update-button:hover:not(:disabled) {
   background: var(--button-secondary-hover);
+  border-color: var(--border-strong);
+}
+
+.about-update-button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .about-update-button:disabled {

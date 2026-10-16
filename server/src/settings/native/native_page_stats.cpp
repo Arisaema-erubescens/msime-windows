@@ -1,6 +1,7 @@
 #include "settings/native/native_page_help_widgets.h"
 
 #include "msimeui/DeviceResources.h"
+#include "msimeui/Scene.h"
 #include "msimeui/Window.h"
 
 #include <algorithm>
@@ -464,12 +465,91 @@ class SpeedGrid : public msimeui::Visual
     std::vector<Item> items_;
 };
 
-// `.stats-calendar-scroll` with the month labels and the week columns. The page keeps the
-// scroller pinned to today; here the columns that do not fit are cut off on the left.
+// The cell `title` of the heatmap, shown as an overlay above the hovered cell so that
+// neither the content scroller nor the sections below can cover it.
+class CalendarTip : public msimeui::Visual
+{
+  public:
+    // Cleared by the scene when it drops its popups (page switch, a click elsewhere).
+    bool shown = false;
+
+    void Set(const std::wstring &text, const RectF &anchor)
+    {
+        if (text != text_)
+        {
+            text_ = text;
+            layout_.Set(text_, DocStyle(kFontCaption));
+        }
+        anchor_ = anchor;
+    }
+
+    void SetAnchor(const RectF &anchor)
+    {
+        anchor_ = anchor;
+    }
+
+    SizeF Measure(const SizeF &) override
+    {
+        return {};
+    }
+    void Arrange(const RectF &) override
+    {
+    }
+    void LayoutOverlay(const SizeF &viewportSize) override
+    {
+        viewport_ = viewportSize;
+    }
+    // Never takes the pointer: the cell under it keeps its hover.
+    bool HitTest(const PointF &) const override
+    {
+        return false;
+    }
+    msimeui::Visual *FindVisualAt(const PointF &) override
+    {
+        return nullptr;
+    }
+    msimeui::Visual *FindFocusableAt(const PointF &) override
+    {
+        return nullptr;
+    }
+
+    void Render(msimeui::DeviceResources &dr) override
+    {
+        if (text_.empty())
+            return;
+        const Palette &p = CurrentPalette();
+        const float border = CssBorder();
+        const SizeF text = layout_.Measure(kUnboundedWidth);
+        const float width = text.width + 16.0f + border * 2.0f;
+        const float height = text.height + 8.0f + border * 2.0f;
+        float x = anchor_.x + (anchor_.width - width) * 0.5f;
+        float y = anchor_.y - height - 6.0f;
+        if (viewport_.width > 0.0f)
+            x = std::clamp(x, 4.0f, std::max(viewport_.width - width - 4.0f, 4.0f));
+        // Flip below the cell when there is no room above it (under the title bar).
+        if (y < 36.0f)
+            y = anchor_.y + anchor_.height + 6.0f;
+        const RectF box = {x, y, width, height};
+        FillRounded(dr, box, 4.0f, p.tooltipBg);
+        StrokeRounded(dr, box, 4.0f, p.tooltipBorder, 1.0f);
+        layout_.Draw(dr, {x + 8.0f + border, y + 4.0f + border}, p.tooltipText, kUnboundedWidth);
+    }
+
+  private:
+    static constexpr float kUnboundedWidth = 10000.0f;
+    std::wstring text_;
+    TextLayout layout_;
+    RectF anchor_ = {};
+    SizeF viewport_ = {};
+};
+
+// `.stats-calendar-scroll` with the month labels and the week columns. It scrolls
+// sideways under the page's 8px `::-webkit-scrollbar` and starts pinned to today like
+// pinCalendarToToday; it stays pinned until the user scrolls away from the right end.
 class CalendarView : public msimeui::Visual
 {
   public:
-    CalendarView()
+    CalendarView() : tip_(std::make_shared<CalendarTip>())
     {
         SetMargin({0.0f, 12.0f, 0.0f, 0.0f});
     }
@@ -479,6 +559,8 @@ class CalendarView : public msimeui::Visual
         chars_ = std::move(chars);
         maxChars_ = maxChars;
         today_ = todayDayKey;
+        // The columns may have moved under the pointer; the next move shows it again.
+        HideTip();
         InvalidateMeasure();
         InvalidateVisual();
     }
@@ -493,8 +575,7 @@ class CalendarView : public msimeui::Visual
         const int weeks = CalendarWeeks(availableSize.width);
         cell_ = CalendarCell(availableSize.width, weeks + 1);
         overflow_ = ContentWidth(availableSize.width) > availableSize.width + 0.5f;
-        return {availableSize.width,
-                15.0f + 7.0f * cell_ + 6.0f * kCalendarGap + 4.0f + (overflow_ ? kScrollbarHeight : 0.0f)};
+        return {availableSize.width, GridHeight() + 15.0f + 4.0f + (overflow_ ? kScrollbarHeight : 0.0f)};
     }
 
     void Arrange(const RectF &finalRect) override
@@ -507,29 +588,21 @@ class CalendarView : public msimeui::Visual
         if (!today_)
             return;
         const Palette &p = CurrentPalette();
-        const int weeks = CalendarWeeks(bounds_.width);
         const int64_t today = DayNumber(today_);
-        int64_t start = today - (weeks * 7 - 1);
-        start -= (WeekdayOf(start) + 6) % 7;
-        std::vector<int64_t> weekStarts;
-        for (int64_t w = start; w <= today; w += 7)
-            weekStarts.push_back(w);
+        const int64_t start = FirstDay(bounds_.width);
+        const size_t columns = static_cast<size_t>((today - start) / 7 + 1);
         const float column = cell_ + kCalendarGap;
-        const float contentWidth = static_cast<float>(weekStarts.size()) * column - kCalendarGap;
-        // Pinned to the right end (today) like pinCalendarToToday.
-        const float x0 = bounds_.x + std::min(0.0f, bounds_.width - contentWidth);
-        ID2D1RenderTarget *target = dr.GetRenderTarget();
-        target->PushAxisAlignedClip(ToD2D({bounds_.x, bounds_.y, bounds_.width, bounds_.height}),
-                                    D2D1_ANTIALIAS_MODE_ALIASED);
+        const float x0 = ContentLeft();
+        dr.PushClip({bounds_.x, bounds_.y, bounds_.width, bounds_.height});
 
         // Month labels: a column containing the 1st of a month; the first column gets
         // the starting month when the next boundary is far enough away.
-        std::vector<std::wstring> labels(weekStarts.size());
-        for (size_t i = 0; i < weekStarts.size(); ++i)
+        std::vector<std::wstring> labels(columns);
+        for (size_t i = 0; i < columns; ++i)
         {
             for (int d = 0; d < 7; ++d)
             {
-                const Civil c = CivilFromDays(weekStarts[i] + d);
+                const Civil c = CivilFromDays(start + static_cast<int64_t>(i) * 7 + d);
                 if (c.day == 1)
                 {
                     labels[i] = std::to_wstring(c.month) + L"月";
@@ -549,95 +622,282 @@ class CalendarView : public msimeui::Visual
                 }
             }
             if (static_cast<int>(boundary) >= kMinMonthLabelGapWeeks)
-                labels[0] = std::to_wstring(CivilFromDays(weekStarts[0]).month) + L"月";
+                labels[0] = std::to_wstring(CivilFromDays(start).month) + L"月";
         }
         TextStyle month = DocStyle(10.0f, DWRITE_FONT_WEIGHT_NORMAL, 1.5f);
         for (size_t i = 0; i < labels.size(); ++i)
         {
-            if (labels[i].empty())
+            const float x = x0 + static_cast<float>(i) * column;
+            if (labels[i].empty() || x > bounds_.x + bounds_.width || x + 40.0f < bounds_.x)
                 continue;
             TextLayout text;
             text.Set(labels[i], month);
-            text.Draw(dr, {x0 + static_cast<float>(i) * column, bounds_.y}, p.textSubtle, 200.0f);
+            text.Draw(dr, {x, bounds_.y}, p.textSubtle, 200.0f);
         }
 
-        const float gridTop = bounds_.y + 15.0f;
-        for (size_t i = 0; i < weekStarts.size(); ++i)
+        for (size_t i = 0; i < columns; ++i)
         {
+            const float x = x0 + static_cast<float>(i) * column;
+            if (x > bounds_.x + bounds_.width || x + cell_ < bounds_.x)
+                continue;
             for (int d = 0; d < 7; ++d)
             {
-                const int64_t day = weekStarts[i] + d;
-                const RectF cell = {x0 + static_cast<float>(i) * column, gridTop + d * (cell_ + kCalendarGap), cell_,
-                                    cell_};
+                const int64_t day = start + static_cast<int64_t>(i) * 7 + d;
+                const RectF cell = CellRect(i, d);
                 if (day > today)
                 {
                     DrawDashedOutline(dr, cell, p.border);
                     continue;
                 }
-                const auto it = chars_.find(DayKeyOf(day));
-                FillRounded(dr, cell, 3.0f, LevelColor(CalendarLevel(it == chars_.end() ? 0 : it->second, maxChars_)));
+                FillRounded(dr, cell, 3.0f, LevelColor(CalendarLevel(CharsOn(day), maxChars_)));
             }
         }
-        target->PopAxisAlignedClip();
+        dr.PopClip();
+
         if (overflow_)
-            RenderScrollbar(dr, gridTop + 7.0f * cell_ + 6.0f * kCalendarGap + 4.0f, contentWidth);
+        {
+            // ::-webkit-scrollbar-thumb: no track, 2px radius, hover color on the thumb.
+            const bool hot = dragging_ || thumbHot_;
+            FillRounded(dr, ThumbRect(), 2.0f, hot ? p.scrollbarThumbHover : p.scrollbarThumb);
+        }
+        // Keep the tooltip on its cell when the page scrolls under a still pointer.
+        if (tip_->shown && hoverDay_ >= start && hoverDay_ <= today)
+            tip_->SetAnchor(
+                CellRect(static_cast<size_t>((hoverDay_ - start) / 7), static_cast<int>((hoverDay_ - start) % 7)));
+    }
+
+    bool OnMouseDown(const POINT &point, WPARAM) override
+    {
+        if (!window_ || !overflow_)
+            return false;
+        const PointF dip = window_->ClientPixelsToDips(point);
+        if (!Contains(TrackRect(), dip))
+            return false;
+        HideTip();
+        const RectF thumb = ThumbRect();
+        if (Contains(thumb, dip))
+        {
+            dragging_ = true;
+            dragGrab_ = dip.x - thumb.x;
+        }
+        else
+        {
+            // A click on the track pages towards it, as Chrome does.
+            const float page = std::max(bounds_.width * 0.875f, 40.0f);
+            SetScroll(Scroll() + (dip.x < thumb.x ? -page : page));
+        }
+        InvalidateVisual();
+        return true;
+    }
+
+    bool OnMouseUp(const POINT &, WPARAM) override
+    {
+        if (!dragging_)
+            return false;
+        dragging_ = false;
+        InvalidateVisual();
+        return true;
+    }
+
+    bool OnMouseMove(const POINT &point, WPARAM) override
+    {
+        if (!window_)
+            return false;
+        const PointF dip = window_->ClientPixelsToDips(point);
+        if (dragging_)
+        {
+            const RectF track = TrackRect();
+            const float travel = track.width - ThumbRect().width;
+            const float maxScroll = MaxScroll();
+            if (travel > 0.0f)
+                SetScroll((dip.x - dragGrab_ - track.x) / travel * maxScroll);
+            return true;
+        }
+        const bool thumbHot = overflow_ && Contains(ThumbRect(), dip);
+        if (thumbHot != thumbHot_)
+        {
+            thumbHot_ = thumbHot;
+            InvalidateVisual();
+        }
+        UpdateTip(dip);
+        return true;
+    }
+
+    void OnMouseLeave() override
+    {
+        HideTip();
+        if (thumbHot_)
+        {
+            thumbHot_ = false;
+            InvalidateVisual();
+        }
+    }
+
+    bool OnMouseWheel(const POINT &, short delta, WPARAM keyState) override
+    {
+        HideTip();
+        // Shift+wheel scrolls sideways; a plain wheel keeps scrolling the page.
+        if (!overflow_ || !(keyState & MK_SHIFT))
+            return false;
+        SetScroll(Scroll() - static_cast<float>(delta) / WHEEL_DELTA * 100.0f);
+        return true;
     }
 
   private:
-    static constexpr float kScrollbarHeight = 15.0f;
-    static constexpr float kScrollbarButton = 15.0f;
+    static constexpr float kScrollbarHeight = 8.0f; // ::-webkit-scrollbar { height: 8px }
+    static constexpr float kThumbMinLength = 24.0f;
 
-    // Number of week columns a width shows, starting on the Monday on or before the
-    // first day so each column is one week.
-    float ContentWidth(float width) const
+    // The Monday on or before the first day, so each column is one week.
+    int64_t FirstDay(float width) const
     {
         const int weeks = CalendarWeeks(width);
-        int64_t columns = weeks;
+        int64_t start = DayNumber(today_) - (weeks * 7 - 1);
+        start -= (WeekdayOf(start) + 6) % 7;
+        return start;
+    }
+
+    float ContentWidth(float width) const
+    {
+        int64_t columns = CalendarWeeks(width);
         if (today_)
-        {
-            const int64_t today = DayNumber(today_);
-            int64_t start = today - (weeks * 7 - 1);
-            start -= (WeekdayOf(start) + 6) % 7;
-            columns = (today - start) / 7 + 1;
-        }
+            columns = (DayNumber(today_) - FirstDay(width)) / 7 + 1;
         return static_cast<float>(columns) * (cell_ + kCalendarGap) - kCalendarGap;
     }
 
-    // Chrome's classic horizontal scrollbar under `.stats-calendar-scroll`, scrolled to
-    // the right end like pinCalendarToToday.
-    void RenderScrollbar(msimeui::DeviceResources &dr, float top, float contentWidth)
+    float GridHeight() const
     {
-        const bool light = CurrentPalette().light;
-        const D2D1_COLOR_F track = light ? Hex(0xFCFCFC) : Hex(0x2C2C2C);
-        const D2D1_COLOR_F thumb = light ? Hex(0x8B8B8B) : Hex(0x9F9F9F);
-        const D2D1_COLOR_F arrow = light ? Hex(0x8B8B8B) : Hex(0x9F9F9F);
-        const RectF bar = {bounds_.x, top, bounds_.width, kScrollbarHeight};
-        FillRect(dr, bar, track);
-        ID2D1RenderTarget *target = dr.GetRenderTarget();
-        ID2D1SolidColorBrush *brush = dr.GetSolidColorBrush(arrow);
-        Microsoft::WRL::ComPtr<ID2D1Factory> factory;
-        target->GetFactory(factory.GetAddressOf());
-        for (int side = 0; side < 2 && brush && factory; ++side)
+        return 7.0f * cell_ + 6.0f * kCalendarGap;
+    }
+
+    float MaxScroll() const
+    {
+        return std::max(ContentWidth(bounds_.width) - bounds_.width, 0.0f);
+    }
+
+    float Scroll() const
+    {
+        return pinned_ ? MaxScroll() : std::clamp(scroll_, 0.0f, MaxScroll());
+    }
+
+    void SetScroll(float value)
+    {
+        const float maxScroll = MaxScroll();
+        const float previous = Scroll();
+        scroll_ = std::clamp(value, 0.0f, maxScroll);
+        pinned_ = scroll_ >= maxScroll - 0.5f;
+        if (Scroll() != previous)
+            InvalidateVisual();
+    }
+
+    float ContentLeft() const
+    {
+        return bounds_.x - Scroll();
+    }
+
+    RectF CellRect(size_t column, int day) const
+    {
+        return {ContentLeft() + static_cast<float>(column) * (cell_ + kCalendarGap),
+                bounds_.y + 15.0f + static_cast<float>(day) * (cell_ + kCalendarGap), cell_, cell_};
+    }
+
+    RectF TrackRect() const
+    {
+        return {bounds_.x, bounds_.y + 15.0f + GridHeight() + 4.0f, bounds_.width, kScrollbarHeight};
+    }
+
+    RectF ThumbRect() const
+    {
+        const RectF track = TrackRect();
+        const float content = std::max(ContentWidth(bounds_.width), 1.0f);
+        const float length = std::min(std::max(kThumbMinLength, track.width * track.width / content), track.width);
+        const float maxScroll = MaxScroll();
+        const float x = track.x + (maxScroll > 0.0f ? (track.width - length) * Scroll() / maxScroll : 0.0f);
+        return {x, track.y, length, track.height};
+    }
+
+    int64_t CharsOn(int64_t day) const
+    {
+        const auto it = chars_.find(DayKeyOf(day));
+        return it == chars_.end() ? 0 : it->second;
+    }
+
+    // Day number of the cell under `point`, 0 between cells and outside the grid.
+    int64_t DayAt(const PointF &point) const
+    {
+        if (!today_ || !Contains({bounds_.x, bounds_.y + 15.0f, bounds_.width, GridHeight()}, point))
+            return 0;
+        const float column = cell_ + kCalendarGap;
+        const float dx = point.x - ContentLeft();
+        const float dy = point.y - (bounds_.y + 15.0f);
+        const int64_t c = static_cast<int64_t>(std::floor(dx / column));
+        const int64_t d = static_cast<int64_t>(std::floor(dy / column));
+        if (c < 0 || d < 0 || d > 6 || dx - c * column >= cell_ || dy - d * column >= cell_)
+            return 0;
+        const int64_t start = FirstDay(bounds_.width);
+        const int64_t day = start + c * 7 + d;
+        return day <= start + static_cast<int64_t>((DayNumber(today_) - start) / 7) * 7 + 6 ? day : 0;
+    }
+
+    void UpdateTip(const PointF &point)
+    {
+        const int64_t day = DayAt(point);
+        if (!day)
         {
-            const float cx = side == 0 ? bar.x + kScrollbarButton * 0.5f : bar.x + bar.width - kScrollbarButton * 0.5f;
-            const float cy = bar.y + bar.height * 0.5f;
-            const float dx = side == 0 ? -3.5f : 3.5f;
-            Microsoft::WRL::ComPtr<ID2D1PathGeometry> path;
-            Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
-            if (FAILED(factory->CreatePathGeometry(path.GetAddressOf())) || FAILED(path->Open(sink.GetAddressOf())))
-                break;
-            sink->BeginFigure(D2D1::Point2F(cx + dx, cy), D2D1_FIGURE_BEGIN_FILLED);
-            sink->AddLine(D2D1::Point2F(cx - dx, cy - 4.0f));
-            sink->AddLine(D2D1::Point2F(cx - dx, cy + 4.0f));
-            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-            sink->Close();
-            target->FillGeometry(path.Get(), brush);
+            HideTip();
+            return;
         }
-        const float innerX = bar.x + kScrollbarButton;
-        const float innerWidth = std::max(bar.width - kScrollbarButton * 2.0f, 0.0f);
-        const float length = std::max(17.0f, innerWidth * bar.width / std::max(contentWidth, 1.0f) - 4.0f);
-        const RectF thumbRect = {innerX + innerWidth - length - 3.0f, bar.y + 3.0f, length, bar.height - 6.0f};
-        FillRounded(dr, thumbRect, thumbRect.height * 0.5f, thumb);
+        if (day == hoverDay_)
+            return;
+        hoverDay_ = day;
+        if (!tip_->shown)
+        {
+            // The tooltip waits 500ms on a cell before it shows; once it is up it follows
+            // the pointer from cell to cell at once.
+            if (window_ && window_->GetHandle())
+                tipDelay_ = std::make_unique<UiTimer>(window_->GetHandle(), 500, [this]() {
+                    tipDelay_.reset();
+                    ShowTip();
+                });
+            return;
+        }
+        ShowTip();
+    }
+
+    void ShowTip()
+    {
+        const int64_t day = hoverDay_;
+        if (!day)
+            return;
+        // stats.ts: `${formatDayKey(dayKey)}：${chars > 0 ? `${formatNumber(chars)} 字` : '无记录'}`
+        const int64_t chars = CharsOn(day);
+        const std::wstring text = FormatDayKey(DayKeyOf(day)) + L"：" +
+                                  (chars > 0 ? FormatNumber(static_cast<double>(chars)) + L" 字" : L"无记录");
+        const int64_t start = FirstDay(bounds_.width);
+        tip_->Set(text, CellRect(static_cast<size_t>((day - start) / 7), static_cast<int>((day - start) % 7)));
+        msimeui::Scene *scene = window_ ? window_->GetScene() : nullptr;
+        if (!scene)
+            return;
+        if (!tip_->shown)
+        {
+            std::weak_ptr<CalendarTip> weak = tip_;
+            scene->AddPopup(tip_, [weak]() {
+                if (auto tip = weak.lock())
+                    tip->shown = false;
+            });
+            tip_->shown = true;
+        }
+        window_->Invalidate();
+    }
+
+    void HideTip()
+    {
+        hoverDay_ = 0;
+        tipDelay_.reset();
+        if (!tip_->shown)
+            return;
+        tip_->shown = false;
+        if (msimeui::Scene *scene = window_ ? window_->GetScene() : nullptr)
+            scene->RemovePopup(tip_.get(), false);
     }
 
     static void DrawDashedOutline(msimeui::DeviceResources &dr, const RectF &cell, const D2D1_COLOR_F &color)
@@ -671,6 +931,15 @@ class CalendarView : public msimeui::Visual
     int64_t today_ = 0;
     float cell_ = kCalendarCell;
     bool overflow_ = false;
+    float scroll_ = 0.0f;
+    bool pinned_ = true;
+    bool dragging_ = false;
+    float dragGrab_ = 0.0f;
+    bool thumbHot_ = false;
+    int64_t hoverDay_ = 0;
+    std::shared_ptr<CalendarTip> tip_;
+    // Pending show of the tooltip; destroyed (and the timer killed) with the view.
+    std::unique_ptr<UiTimer> tipDelay_;
 };
 
 // `.stats-legend`: 少 ▢▢▢▢▢ 多, cells as large as the calendar's.

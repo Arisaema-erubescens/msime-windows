@@ -288,6 +288,30 @@ void PopOpacity(msimeui::DeviceResources &dr)
     }
 }
 
+void DrawSvg(msimeui::DeviceResources &dr, const std::string &markup, const RectF &box, float opacity)
+{
+    ID2D1RenderTarget *target = dr.GetRenderTarget();
+    if (!target || markup.empty() || box.width <= 0.0f || box.height <= 0.0f)
+        return;
+    const float scale = DpiOf(dr) / 96.0f;
+    D2D1_MATRIX_3X2_F transform;
+    target->GetTransform(&transform);
+    RectF dest = box;
+    // Only a translation keeps device pixels on a grid the box can be rounded to.
+    if (transform._11 == 1.0f && transform._22 == 1.0f && transform._12 == 0.0f && transform._21 == 0.0f)
+    {
+        const float width = std::max(std::round(box.width * scale), 1.0f) / scale;
+        const float height = std::max(std::round(box.height * scale), 1.0f) / scale;
+        // Keep the box centered where it was, then round its origin in device space.
+        const float x = box.x + (box.width - width) * 0.5f + transform._31;
+        const float y = box.y + (box.height - height) * 0.5f + transform._32;
+        dest = {std::round(x * scale) / scale - transform._31, std::round(y * scale) / scale - transform._32, width,
+                height};
+    }
+    if (ID2D1Bitmap *bitmap = dr.GetSvgBitmap(markup, {dest.width, dest.height}))
+        target->DrawBitmap(bitmap, ToD2D(dest), opacity);
+}
+
 // ---------------------------------------------------------------------------------
 // Text
 // ---------------------------------------------------------------------------------
@@ -1941,8 +1965,7 @@ void Dropdown::Render(msimeui::DeviceResources &dr)
     if (!arrow.empty())
     {
         static std::string lightArrow = InvertSvgColors(arrow, 0.25f);
-        if (ID2D1Bitmap *bitmap = dr.GetSvgBitmap(p.light ? lightArrow : arrow, {18.0f, 18.0f}))
-            dr.GetRenderTarget()->DrawBitmap(bitmap, D2D1::RectF(arrowX, arrowY, arrowX + 18.0f, arrowY + 18.0f));
+        DrawSvg(dr, p.light ? lightArrow : arrow, {arrowX, arrowY, 18.0f, 18.0f});
     }
     if (disabled_)
         PopOpacity(dr);
@@ -2625,11 +2648,8 @@ void Button::Render(msimeui::DeviceResources &dr)
     float x = bounds_.x + (bounds_.width - contentWidth) * 0.5f;
     if (!icon_.empty())
     {
-        if (ID2D1Bitmap *bitmap = dr.GetSvgBitmap(TintSvg(icon_, color), {iconSize_, iconSize_}))
-        {
-            const float y = bounds_.y + (bounds_.height - iconSize_) * 0.5f;
-            dr.GetRenderTarget()->DrawBitmap(bitmap, D2D1::RectF(x, y, x + iconSize_, y + iconSize_));
-        }
+        const float y = bounds_.y + (bounds_.height - iconSize_) * 0.5f;
+        DrawSvg(dr, TintSvg(icon_, color), {x, y, iconSize_, iconSize_});
         x += iconSize_ + iconGap_;
     }
     if (!text_.empty())
@@ -3290,8 +3310,7 @@ void SvgImage::Render(msimeui::DeviceResources &dr)
     }
     const float x = bounds_.x + (bounds_.width - width_) * 0.5f;
     const float y = bounds_.y + (bounds_.height - height_) * 0.5f;
-    if (ID2D1Bitmap *bitmap = dr.GetSvgBitmap(*markup, {width_, height_}))
-        dr.GetRenderTarget()->DrawBitmap(bitmap, D2D1::RectF(x, y, x + width_, y + height_), opacity_);
+    DrawSvg(dr, *markup, {x, y, width_, height_}, opacity_);
 }
 
 BitmapImage::BitmapImage(std::wstring path, float width, float height, float radius)

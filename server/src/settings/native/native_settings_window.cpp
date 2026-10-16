@@ -1,5 +1,6 @@
 #include "settings/native/native_settings_window.h"
 
+#include "settings/native/native_page_help_widgets.h"
 #include "settings/native/native_settings_controls.h"
 #include "settings/native/native_settings_model.h"
 #include "settings/native/native_settings_pages.h"
@@ -46,7 +47,8 @@ msimeui::ScrollViewer::Appearance WebKitScrollbar(float reserved)
     appearance.thumbColor = p.scrollbarThumb;
     appearance.thumbHoverColor = p.scrollbarThumbHover;
     appearance.hoverThumbOnly = true;
-    appearance.wheelStep = 100.0f;
+    // Shorter than Chrome's 100px notch: the glide below carries the motion instead.
+    appearance.wheelStep = 60.0f;
     appearance.smoothScrollMs = 160.0;
     return appearance;
 }
@@ -384,9 +386,7 @@ class NavItem : public msimeui::Visual
         const bool emphasized = hovered_ || selected_;
         const float iconX = bounds_.x + 12.0f + 1.0f;
         const float iconY = bounds_.y + (bounds_.height - 24.0f) * 0.5f + 1.5f + 1.0f;
-        if (ID2D1Bitmap *bitmap = dr.GetSvgBitmap(ThemedSvg(icon_, p.light), {22.0f, 22.0f}))
-            dr.GetRenderTarget()->DrawBitmap(bitmap, D2D1::RectF(iconX, iconY, iconX + 22.0f, iconY + 22.0f),
-                                             emphasized ? 1.0f : 0.9f);
+        DrawSvg(dr, ThemedSvg(icon_, p.light), {iconX, iconY, 22.0f, 22.0f}, emphasized ? 1.0f : 0.9f);
 
         const float textX = bounds_.x + 12.0f + 24.0f + 15.0f;
         const SizeF text = title_.Measure(bounds_.width);
@@ -501,9 +501,17 @@ class Sidebar : public msimeui::Panel
             SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0);
             return !enabled;
         }();
-        if (!positioned_ || !animate || reduceMotion || !hasLayout_)
+        if (!hasLayout_)
         {
             pendingSnap_ = true;
+        }
+        else if (!positioned_ || !animate || reduceMotion)
+        {
+            // Snap now: an unchanged sidebar keeps its arrange cache, so Arrange may not
+            // run again to take a pending snap.
+            indicator_.Snap(TargetOffset(index));
+            positioned_ = true;
+            pendingSnap_ = false;
         }
         else
         {
@@ -800,7 +808,12 @@ class DialogFrame : public msimeui::Container
         // invalidate the measure pass that is running.
         const float padding = 24.0f + CssBorder();
         padding_ = {padding, padding, padding, padding};
-        return msimeui::Container::Measure(availableSize);
+        // The explicit width only clamps the result; measure the content at it too, or
+        // wrapped text is measured one line short and overlaps what follows.
+        SizeF available = availableSize;
+        if (HasExplicitWidth())
+            available.width = std::min(available.width, explicitWidth_);
+        return msimeui::Container::Measure(available);
     }
 
     void Render(msimeui::DeviceResources &dr) override
@@ -1262,10 +1275,32 @@ class SettingsWindowImpl : public HostServices
     {
         if (HandleCaption(message, wParam, lParam, result))
             return true;
+        if (message == BackgroundJobMessage())
+        {
+            CompleteBackgroundJob(wParam);
+            result = 0;
+            return true;
+        }
 
         switch (message)
         {
         case WM_ERASEBKGND:
+            // Until Direct2D has drawn a frame, fill with the theme's window color: the
+            // class brush is white, and that is what a dark window would flash first.
+            // Afterwards Direct2D covers every pixel and erasing would only flicker.
+            if (!painted_)
+            {
+                const D2D1_COLOR_F c = CurrentPalette().chromeBg;
+                RECT client{};
+                GetClientRect(hwnd_, &client);
+                if (HBRUSH brush = CreateSolidBrush(RGB(static_cast<BYTE>(c.r * 255.0f + 0.5f),
+                                                        static_cast<BYTE>(c.g * 255.0f + 0.5f),
+                                                        static_cast<BYTE>(c.b * 255.0f + 0.5f))))
+                {
+                    FillRect(reinterpret_cast<HDC>(wParam), &client, brush);
+                    DeleteObject(brush);
+                }
+            }
             result = 1;
             return true;
         case WM_ACTIVATE:
@@ -1317,6 +1352,9 @@ class SettingsWindowImpl : public HostServices
             window_->DispatchImportedMessage(message, wParam, lParam);
             return false;
         case WM_PAINT:
+            result = window_->DispatchImportedMessage(message, wParam, lParam);
+            painted_ = true;
+            return true;
         case WM_LBUTTONDOWN:
         case WM_LBUTTONUP:
         case WM_LBUTTONDBLCLK:
@@ -1436,6 +1474,8 @@ class SettingsWindowImpl : public HostServices
     }
 
     HWND hwnd_ = nullptr;
+    // Direct2D has drawn at least one frame (see WM_ERASEBKGND).
+    bool painted_ = false;
     SettingsWindow::Callbacks callbacks_;
     SettingsModel model_;
     PageContext context_;

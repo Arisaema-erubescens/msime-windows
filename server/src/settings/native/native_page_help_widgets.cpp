@@ -4,7 +4,6 @@
 #include "msimeui/Window.h"
 
 #include <algorithm>
-#include <atomic>
 #include <cmath>
 #include <map>
 #include <mutex>
@@ -520,44 +519,46 @@ namespace
 {
 struct BackgroundJob
 {
-    std::atomic<bool> done{false};
     std::string result;
     std::function<void(const std::string &)> callback;
-    HWND hwnd = nullptr;
 };
 
-std::map<UINT_PTR, std::shared_ptr<BackgroundJob>> &Jobs()
+// Only touched on the window thread; the worker hands its job back by id.
+std::map<WPARAM, std::shared_ptr<BackgroundJob>> &Jobs()
 {
-    static std::map<UINT_PTR, std::shared_ptr<BackgroundJob>> jobs;
+    static std::map<WPARAM, std::shared_ptr<BackgroundJob>> jobs;
     return jobs;
-}
-
-void CALLBACK JobProc(HWND hwnd, UINT, UINT_PTR id, DWORD)
-{
-    const auto it = Jobs().find(id);
-    if (it == Jobs().end())
-    {
-        KillTimer(hwnd, id);
-        return;
-    }
-    if (!it->second->done.load())
-        return;
-    const std::shared_ptr<BackgroundJob> job = it->second;
-    Jobs().erase(it);
-    KillTimer(hwnd, id);
-    if (job->callback)
-        job->callback(job->result);
 }
 } // namespace
 
+UINT BackgroundJobMessage()
+{
+    static const UINT message = RegisterWindowMessageW(L"MetasequoiaImeSettings.BackgroundJobDone");
+    return message;
+}
+
+void CompleteBackgroundJob(WPARAM id)
+{
+    const auto it = Jobs().find(id);
+    if (it == Jobs().end())
+        return;
+    const std::shared_ptr<BackgroundJob> job = it->second;
+    Jobs().erase(it);
+    if (job->callback)
+        job->callback(job->result);
+}
+
 void RunInBackground(HWND hwnd, std::function<std::string()> work, std::function<void(const std::string &)> done)
 {
+    static WPARAM nextId = 0;
+    const WPARAM id = ++nextId;
     auto job = std::make_shared<BackgroundJob>();
     job->callback = std::move(done);
-    job->hwnd = hwnd;
-    const UINT_PTR id = reinterpret_cast<UINT_PTR>(job.get());
     Jobs()[id] = job;
-    std::thread([job, work = std::move(work)]() {
+    // The result comes back as a posted message rather than through a polling timer:
+    // Windows holds back WM_TIMER for a window that is covered or minimized, which left
+    // the about page's update check hanging until the next input arrived.
+    std::thread([hwnd, id, job, work = std::move(work)]() {
         std::string result;
         try
         {
@@ -567,8 +568,7 @@ void RunInBackground(HWND hwnd, std::function<std::string()> work, std::function
         {
         }
         job->result = std::move(result);
-        job->done.store(true);
+        PostMessageW(hwnd, BackgroundJobMessage(), id, 0);
     }).detach();
-    SetTimer(hwnd, id, 60, &JobProc);
 }
 } // namespace native_settings

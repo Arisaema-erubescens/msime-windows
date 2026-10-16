@@ -195,6 +195,25 @@
   margin-top: 12px;
 }
 
+/* 与页面竖向滚动条同一套样式：8px、无箭头、无轨道、2px 圆角 */
+.stats-calendar-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.stats-calendar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.stats-calendar-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border-radius: 2px;
+  transition: background-color 0.2s;
+}
+
+.stats-calendar-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
 .stats-calendar-months {
   display: grid;
   grid-auto-flow: column;

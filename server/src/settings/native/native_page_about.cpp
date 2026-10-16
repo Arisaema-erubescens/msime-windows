@@ -420,12 +420,15 @@ VisualPtr BuildAboutPage(PageContext &context)
         state->statusBox = std::make_shared<Hideable>(state->status, false);
         state->statusBox->SetMargin({0.0f, 3.0f, 0.0f, 0.0f});
         left->Add(state->statusBox);
-        // .about-update-button: padding 7px 13px, fully rounded, 12px.
+        // .about-update-button: padding 7px 13px, fully rounded, 12px; border-strong on
+        // hover and pressed down 1px, like .default-ime-button.
         CssButton::Style style;
         style.paddingX = 13.0f;
         style.paddingY = 7.0f;
         style.radius = 99.0f;
         style.fontSize = 12.0f;
+        style.transitionMs = 150.0;
+        style.pressShift = true;
         style.disabledOpacity = 0.65f;
         state->check = std::make_shared<CssButton>(L"检查更新", style);
         PageContext *ctx = &context;
@@ -476,6 +479,8 @@ VisualPtr BuildAboutPage(PageContext &context)
                             L"日志会在内存中限量缓冲，并通过独立管道批量汇总到桌面的“水杉IME诊断日志."
                             L"log”；不记录按键、输入内容或候选文本。",
                             BindToggle(context, "general.tsf_diagnostic_log")));
-    return page.Build();
+    // The button's handler only holds the state weakly (the state holds the button), so
+    // the page has to own it or the first click finds it gone.
+    return std::make_shared<OwnerBox>(page.Build(), state);
 }
 } // namespace native_settings

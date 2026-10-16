@@ -1253,18 +1253,30 @@ void ScrollViewer::Render(DeviceResources &deviceResources)
 
     if (scrollAnimating_ && window_)
     {
-        const double elapsed = window_->GetFrameTime() - scrollStartMs_;
-        const float t = static_cast<float>(std::clamp(elapsed / appearance_.smoothScrollMs, 0.0, 1.0));
-        // Same curve Chromium uses for wheel-driven smooth scrolling.
-        const float eased = Easing{0.25f, 0.1f, 0.25f, 1.0f}(t);
-        const float offset =
-            std::clamp(scrollFrom_ + (scrollTarget_ - scrollFrom_) * eased, 0.0f, GetMaxScrollOffset());
+        // Exponential approach towards the target, advanced by the real frame time. Unlike
+        // a fixed-duration curve restarted on every notch, the speed never drops back to
+        // zero when the next notch arrives, so a run of notches reads as one motion.
+        const double now = window_->GetFrameTime();
+        const double dt = std::clamp(now - scrollStartMs_, 0.0, 50.0);
+        scrollStartMs_ = now;
+        const double tau = std::max(appearance_.smoothScrollMs / 3.0, 1.0);
+        const float k = static_cast<float>(1.0 - std::exp(-dt / tau));
+        const float maxOffset = GetMaxScrollOffset();
+        scrollTarget_ = std::clamp(scrollTarget_, 0.0f, maxOffset);
+        float offset = scrollOffsetY_ + (scrollTarget_ - scrollOffsetY_) * k;
+        const float pixel = 96.0f / std::max(static_cast<float>(window_->GetDpi()), 1.0f);
+        const bool done = std::fabs(scrollTarget_ - offset) < pixel * 0.5f;
+        if (done)
+        {
+            offset = scrollTarget_;
+        }
+        offset = std::clamp(offset, 0.0f, maxOffset);
         if (offset != scrollOffsetY_)
         {
             scrollOffsetY_ = offset;
             UpdateContentLayout();
         }
-        if (t >= 1.0f)
+        if (done)
         {
             scrollAnimating_ = false;
             window_->RefreshHover();
@@ -1480,10 +1492,13 @@ bool ScrollViewer::OnMouseWheel(const POINT &point, short delta, WPARAM keyState
     {
         return true;
     }
-    scrollFrom_ = scrollOffsetY_;
     scrollTarget_ = target;
-    scrollStartMs_ = NowMs();
-    scrollAnimating_ = true;
+    if (!scrollAnimating_)
+    {
+        // Frame clock of the glide; the first frame advances from now.
+        scrollStartMs_ = NowMs();
+        scrollAnimating_ = true;
+    }
     window_->RequestAnimationFrame();
     return true;
 }
@@ -1561,8 +1576,16 @@ void ScrollViewer::UpdateContentLayout()
     }
 
     const float scrollbarReserve = HasVerticalScrollbar() ? appearance_.reservedWidth : 0.0f;
-    content_->ArrangeInLayout({bounds_.x, bounds_.y - scrollOffsetY_, std::max(bounds_.width - scrollbarReserve, 0.0f),
-                               measuredContent_.height});
+    // Content moves in whole device pixels: a glide passes through fractional offsets,
+    // which would resample text and hairlines differently on every frame.
+    float offset = scrollOffsetY_;
+    if (window_)
+    {
+        const float scale = window_->GetDpi() / 96.0f;
+        offset = std::round(offset * scale) / scale;
+    }
+    content_->ArrangeInLayout(
+        {bounds_.x, bounds_.y - offset, std::max(bounds_.width - scrollbarReserve, 0.0f), measuredContent_.height});
 
     if (window_)
     {

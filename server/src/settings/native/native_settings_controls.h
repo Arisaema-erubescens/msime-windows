@@ -48,6 +48,9 @@ void DrawChevron(msimeui::DeviceResources &dr, PointF center, float size, float 
 // Wraps PushLayer for CSS `opacity` on a subtree. Pair with PopOpacity.
 void PushOpacity(msimeui::DeviceResources &dr, float opacity);
 void PopOpacity(msimeui::DeviceResources &dr);
+// Draws an SVG into `box`, rounded to whole device pixels so the rasterized bitmap is
+// copied 1:1 instead of being resampled (which blurs thin strokes).
+void DrawSvg(msimeui::DeviceResources &dr, const std::string &markup, const RectF &box, float opacity = 1.0f);
 
 // Text antialiasing for a block of drawing; restored on scope exit.
 class ScopedTextAntialias

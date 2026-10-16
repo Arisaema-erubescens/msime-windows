@@ -6,7 +6,9 @@
 #include <cmath>
 #include <d2d1_3.h>
 #include <functional>
+#include <future>
 #include <iterator>
+#include <mutex>
 #include <shlwapi.h>
 #include <windows.h>
 
@@ -34,7 +36,48 @@ RectF IntersectRect(const RectF &lhs, const RectF &rhs)
     const float bottom = (std::min)(lhs.y + lhs.height, rhs.y + rhs.height);
     return {left, top, (std::max)(right - left, 0.0f), (std::max)(bottom - top, 0.0f)};
 }
+
+Microsoft::WRL::ComPtr<ID3D11Device> CreateD3DDevice()
+{
+    const UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+    Microsoft::WRL::ComPtr<ID3D11Device> device;
+    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags, nullptr, 0, D3D11_SDK_VERSION,
+                                 device.GetAddressOf(), nullptr, nullptr)))
+    {
+        device.Reset();
+        if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, flags, nullptr, 0, D3D11_SDK_VERSION,
+                                     device.GetAddressOf(), nullptr, nullptr)))
+        {
+            device.Reset();
+        }
+    }
+    return device;
+}
+
+// A Direct3D 11 device is free-threaded, so one created on the prewarm thread can be
+// used by the window thread.
+std::mutex g_prewarmMutex;
+std::future<Microsoft::WRL::ComPtr<ID3D11Device>> g_prewarmedDevice;
+
+Microsoft::WRL::ComPtr<ID3D11Device> TakePrewarmedDevice()
+{
+    std::future<Microsoft::WRL::ComPtr<ID3D11Device>> pending;
+    {
+        std::lock_guard lock(g_prewarmMutex);
+        pending = std::move(g_prewarmedDevice);
+    }
+    return pending.valid() ? pending.get() : nullptr;
+}
 } // namespace
+
+void DeviceResources::PrewarmComposition()
+{
+    std::lock_guard lock(g_prewarmMutex);
+    if (!g_prewarmedDevice.valid())
+    {
+        g_prewarmedDevice = std::async(std::launch::async, &CreateD3DDevice);
+    }
+}
 
 uint64_t DeviceResources::ColorKey(const D2D1_COLOR_F &color)
 {
@@ -274,18 +317,15 @@ bool DeviceResources::EnsureForComposition(HWND hwnd)
         DiscardTarget();
         composition_ = true;
 
-        UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
-        D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
-        Microsoft::WRL::ComPtr<ID3D11DeviceContext> ignored;
-        if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags, nullptr, 0, D3D11_SDK_VERSION,
-                                     d3dDevice_.GetAddressOf(), &featureLevel, ignored.GetAddressOf())))
+        d3dDevice_ = TakePrewarmedDevice();
+        if (!d3dDevice_)
         {
-            if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, flags, nullptr, 0, D3D11_SDK_VERSION,
-                                         d3dDevice_.GetAddressOf(), &featureLevel, ignored.GetAddressOf())))
-            {
-                composition_ = false;
-                return false;
-            }
+            d3dDevice_ = CreateD3DDevice();
+        }
+        if (!d3dDevice_)
+        {
+            composition_ = false;
+            return false;
         }
         if (FAILED(d3dDevice_.As(&dxgiDevice_)))
         {
@@ -616,10 +656,14 @@ ID2D1Bitmap *DeviceResources::GetSvgBitmap(const std::string &markup, const Size
 
     // Rasterize once into a bitmap of the target's own pixel format and DPI; drawing a
     // bitmap afterwards is far cheaper than walking the SVG tree every frame, and it can
-    // take an opacity like any other bitmap.
+    // take an opacity like any other bitmap. The pixel size is rounded rather than left to
+    // D2D, which rounds up: a box of 27.0001 px would get a 28 px bitmap squeezed into it.
+    const D2D1_SIZE_U pixelSize =
+        D2D1::SizeU(static_cast<UINT32>(std::max(std::lround(sizeDips.width * dpiX / 96.0f), 1L)),
+                    static_cast<UINT32>(std::max(std::lround(sizeDips.height * dpiY / 96.0f), 1L)));
     Microsoft::WRL::ComPtr<ID2D1BitmapRenderTarget> raster;
-    if (FAILED(
-            target->CreateCompatibleRenderTarget(D2D1::SizeF(sizeDips.width, sizeDips.height), raster.GetAddressOf())))
+    if (FAILED(target->CreateCompatibleRenderTarget(D2D1::SizeF(sizeDips.width, sizeDips.height), pixelSize,
+                                                    raster.GetAddressOf())))
     {
         return nullptr;
     }

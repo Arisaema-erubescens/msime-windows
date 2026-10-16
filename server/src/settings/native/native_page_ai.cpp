@@ -346,8 +346,7 @@ class ModelCombo : public msimeui::Visual
         static const std::string arrow = LoadAssetSvg(L"arrow.svg");
         static const std::string lightArrow = InvertSvgColors(arrow, 0.25f);
         const RectF a = ArrowRect();
-        if (ID2D1Bitmap *bitmap = dr.GetSvgBitmap(p.light ? lightArrow : arrow, {18.0f, 18.0f}))
-            dr.GetRenderTarget()->DrawBitmap(bitmap, ToD2D(a));
+        DrawSvg(dr, p.light ? lightArrow : arrow, a);
     }
 
     void Attach(msimeui::Window *window) override

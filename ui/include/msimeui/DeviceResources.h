@@ -34,6 +34,11 @@ class DeviceResources
     bool EnsureFactories();
     bool EnsureForWindow(HWND hwnd);
     bool EnsureForComposition(HWND hwnd);
+    // Starts creating the Direct3D device on a background thread; the next composition
+    // target created in the process takes it instead of creating its own. Bringing up
+    // the GPU driver takes a few hundred milliseconds, so a window that calls this early
+    // gets that time back on its first frame.
+    static void PrewarmComposition();
     // An opaque composition surface ignores alpha, which lets Direct2D draw ClearType
     // text. Takes effect when the composition surface is next created.
     void SetCompositionOpaque(bool opaque);

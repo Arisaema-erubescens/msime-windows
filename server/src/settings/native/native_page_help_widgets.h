@@ -203,8 +203,12 @@ class UiTimer
     std::function<void()> tick_;
 };
 
-// Runs `work` on a background thread and `done` back on the window thread.
+// Runs `work` on a background thread and `done` back on the window thread. The result
+// arrives as a posted BackgroundJobMessage(); the window passes it to
+// CompleteBackgroundJob.
 void RunInBackground(HWND hwnd, std::function<std::string()> work, std::function<void(const std::string &)> done);
+UINT BackgroundJobMessage();
+void CompleteBackgroundJob(WPARAM id);
 
 // Text styles of the document pages.
 TextStyle DocStyle(float size, DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_NORMAL, float lineHeight = 0.0f,

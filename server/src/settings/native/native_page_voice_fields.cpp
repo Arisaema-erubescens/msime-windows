@@ -139,12 +139,7 @@ class InputBox::Reveal : public msimeui::Visual
             FillRounded(dr, bounds_, 5.0f, Mix(p.text, 0.08f));
         const D2D1_COLOR_F color = hovered_ ? p.text : p.textMuted;
         const std::string markup = TintSvg(owner_->revealed_ ? kEyeHideSvg : kEyeShowSvg, color);
-        if (ID2D1Bitmap *bitmap = dr.GetSvgBitmap(markup, {18.0f, 18.0f}))
-        {
-            const float x = bounds_.x + 7.0f;
-            const float y = bounds_.y + 7.0f;
-            dr.GetRenderTarget()->DrawBitmap(bitmap, D2D1::RectF(x, y, x + 18.0f, y + 18.0f));
-        }
+        DrawSvg(dr, markup, {bounds_.x + 7.0f, bounds_.y + 7.0f, 18.0f, 18.0f});
     }
     bool OnMouseDown(const POINT &, WPARAM) override
     {

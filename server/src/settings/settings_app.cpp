@@ -13,6 +13,8 @@
 #include "settings/settings_splash.h"
 #include "settings/dictionary_manager.h"
 #include "settings/native/native_settings_window.h"
+
+#include "msimeui/DeviceResources.h"
 #include "settings/serial_task_queue.h"
 #include "window/ui_backend_policy.h"
 #include "statistics/stats_overview.h"
@@ -2494,6 +2496,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line, int show_
     // Developer overrides of appearance.settings_ui_backend for one run.
     const bool force_native = arguments.find(L"--d2d") != std::wstring::npos;
     const bool force_webview = arguments.find(L"--webview2") != std::wstring::npos;
+    // The Direct2D window's first frame spends ~200ms bringing up the GPU driver. Start
+    // that now, alongside the config load and the page build; the window takes the
+    // device when it first paints.
+    if (!force_webview)
+        msimeui::DeviceResources::PrewarmComposition();
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const HRESULT com_result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (FAILED(com_result))
@@ -2608,11 +2615,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line, int show_
         g_native = std::make_unique<native_settings::SettingsWindow>(hwnd, std::move(callbacks),
                                                                      g_open_about_on_ready ? "about-settings" : "");
         g_native->SetLightTheme(g_settings_light);
+        TraceStartup("ui: native window built");
         g_open_about_on_ready = false;
         // Lingering and the close path treat the frontend as started from here on.
         g_webview_content_started = true;
+        // Cloaked until the first frame is drawn, so the compositor never shows the
+        // surface before it is painted (white, whatever the theme).
+        BOOL cloak = TRUE;
+        DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, &cloak, sizeof(cloak));
         ShowWindow(hwnd, show_command == SW_HIDE ? SW_SHOWNORMAL : show_command);
         UpdateWindow(hwnd);
+        cloak = FALSE;
+        DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, &cloak, sizeof(cloak));
         TraceStartup("ui: native window shown");
     }
     else
