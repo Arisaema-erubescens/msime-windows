@@ -2453,7 +2453,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_pa
         {
             g_worker->Drain(!g_closing);
             if (g_closing && g_worker->Stopped())
-                DestroyWindow(hwnd);
+            {
+                // The Direct2D frontend leaves without destroying its window: see the
+                // end of wWinMain for why the process must skip the TSF teardown.
+                if (g_native)
+                    PostQuitMessage(0);
+                else
+                    DestroyWindow(hwnd);
+            }
         }
         return 0;
     case WM_CLOSE:
@@ -2649,7 +2656,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line, int show_
         DispatchMessageW(&message);
     }
     g_worker.reset(); // Drain accepted writes even if the window was destroyed externally.
-    CoUninitialize();
+    // The Direct2D frontend skips CoUninitialize like it skips DestroyWindow: both tear
+    // down this thread's TSF state (see below).
+    if (!use_native)
+        CoUninitialize();
     if (g_relaunch_after_exit)
     {
         // The renderer was switched: reopen in it once this instance no longer holds the
@@ -2662,6 +2672,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line, int show_
             module_path.resize(length);
             ShellExecuteW(nullptr, L"open", module_path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         }
+    }
+    if (use_native)
+    {
+        // The Direct2D window is a focused Win32 window, so this thread is an ordinary
+        // input client of the IME. Destroying the window or uninitializing COM lets TSF
+        // deactivate the text service here, which reports a terminal deactivation, and
+        // the Server hides the floating toolbar as if the user had switched input
+        // methods. The window the user returns to may not re-activate, so the toolbar
+        // stayed hidden until they clicked elsewhere. Every write has been drained
+        // above; end the process without that teardown, so the Server only sees the
+        // pipes close (a route suspension, which leaves the toolbar alone), as it does
+        // for the WebView2 frontend.
+        TerminateProcess(GetCurrentProcess(), static_cast<UINT>(message.wParam));
     }
     return static_cast<int>(message.wParam);
 }
