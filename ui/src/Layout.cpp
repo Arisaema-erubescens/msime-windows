@@ -2142,25 +2142,173 @@ void Card::SetBackgroundImage(std::wstring filePath, ImageStretch stretch, float
     InvalidateVisual();
 }
 
-void Card::SetBackgroundImageNineSlice(std::wstring filePath, float left, float top, float right, float bottom,
-                                       float opacity)
+namespace
+{
+Thickness NonNegative(const Thickness &value)
+{
+    return {(std::max)(0.0f, value.left), (std::max)(0.0f, value.top), (std::max)(0.0f, value.right),
+            (std::max)(0.0f, value.bottom)};
+}
+
+bool SameThickness(const Thickness &a, const Thickness &b)
+{
+    return a.left == b.left && a.top == b.top && a.right == b.right && a.bottom == b.bottom;
+}
+
+// Moves a DIP coordinate onto the nearest device pixel under the target's current transform,
+// when that transform only scales and translates.
+struct PixelSnapper
+{
+    explicit PixelSnapper(ID2D1RenderTarget *target)
+    {
+        float dpiX = 96.0f;
+        float dpiY = 96.0f;
+        target->GetDpi(&dpiX, &dpiY);
+        D2D1_MATRIX_3X2_F transform = {};
+        target->GetTransform(&transform);
+        enabled = transform._12 == 0.0f && transform._21 == 0.0f && transform._11 > 0.0f && transform._22 > 0.0f &&
+                  dpiX > 0.0f && dpiY > 0.0f;
+        scaleX = transform._11 * dpiX / 96.0f;
+        scaleY = transform._22 * dpiY / 96.0f;
+        offsetX = transform._31 * dpiX / 96.0f;
+        offsetY = transform._32 * dpiY / 96.0f;
+    }
+
+    float X(float value) const
+    {
+        return enabled ? (std::round(value * scaleX + offsetX) - offsetX) / scaleX : value;
+    }
+
+    float Y(float value) const
+    {
+        return enabled ? (std::round(value * scaleY + offsetY) - offsetY) / scaleY : value;
+    }
+
+    bool enabled = false;
+    float scaleX = 1.0f;
+    float scaleY = 1.0f;
+    float offsetX = 0.0f;
+    float offsetY = 0.0f;
+};
+} // namespace
+
+void DrawNineSlice(ID2D1RenderTarget *target, ID2D1Bitmap *bitmap, const RectF &destination, const NineSlice &nineSlice,
+                   float opacity)
+{
+    if (!target || !bitmap || destination.width <= 0.0f || destination.height <= 0.0f || opacity <= 0.0f)
+    {
+        return;
+    }
+    // Source rectangles are in the bitmap's DIPs; slices are image pixels.
+    const D2D1_SIZE_U pixels = bitmap->GetPixelSize();
+    const D2D1_SIZE_F dips = bitmap->GetSize();
+    if (pixels.width == 0 || pixels.height == 0 || dips.width <= 0.0f || dips.height <= 0.0f)
+    {
+        return;
+    }
+    const float srcW = static_cast<float>(pixels.width);
+    const float srcH = static_cast<float>(pixels.height);
+    const float toDipX = dips.width / srcW;
+    const float toDipY = dips.height / srcH;
+    const Thickness slice = NonNegative(nineSlice.slice);
+    // A slice past the image edge means the whole image (CSS).
+    const float sl = (std::min)(slice.left, srcW);
+    const float st = (std::min)(slice.top, srcH);
+    const float sr = (std::min)(slice.right, srcW);
+    const float sb = (std::min)(slice.bottom, srcH);
+
+    Thickness width = NonNegative(nineSlice.width);
+    // CSS border-image-width: when opposite widths overlap, all four shrink by one factor.
+    float factor = 1.0f;
+    if (width.left + width.right > destination.width)
+    {
+        factor = (std::min)(factor, destination.width / (width.left + width.right));
+    }
+    if (width.top + width.bottom > destination.height)
+    {
+        factor = (std::min)(factor, destination.height / (width.top + width.bottom));
+    }
+    width = {width.left * factor, width.top * factor, width.right * factor, width.bottom * factor};
+
+    const PixelSnapper snap(target);
+    const float x0 = snap.X(destination.x);
+    const float x3 = snap.X(destination.x + destination.width);
+    const float x1 = (std::min)(snap.X(destination.x + width.left), x3);
+    const float x2 = (std::max)(snap.X(destination.x + destination.width - width.right), x1);
+    const float y0 = snap.Y(destination.y);
+    const float y3 = snap.Y(destination.y + destination.height);
+    const float y1 = (std::min)(snap.Y(destination.y + width.top), y3);
+    const float y2 = (std::max)(snap.Y(destination.y + destination.height - width.bottom), y1);
+
+    const float dx[4] = {x0, x1, x2, x3};
+    const float dy[4] = {y0, y1, y2, y3};
+    // When the left and right slices meet or cross, the top, bottom and middle parts are empty.
+    const float sourceLeft[3] = {0.0f, sl, srcW - sr};
+    const float sourceRight[3] = {sl, srcW - sr, srcW};
+    const float sourceTop[3] = {0.0f, st, srcH - sb};
+    const float sourceBottom[3] = {st, srcH - sb, srcH};
+    // DrawBitmap with a source rectangle still samples across its edges when it scales, which
+    // bleeds the neighbouring part into every seam. An image brush clamped to the part does not.
+    ComPtr<ID2D1DeviceContext> context;
+    target->QueryInterface(IID_PPV_ARGS(context.GetAddressOf()));
+    for (int row = 0; row < 3; ++row)
+    {
+        for (int col = 0; col < 3; ++col)
+        {
+            if (row == 1 && col == 1 && !nineSlice.fill)
+            {
+                continue;
+            }
+            const float sourceWidth = sourceRight[col] - sourceLeft[col];
+            const float sourceHeight = sourceBottom[row] - sourceTop[row];
+            if (sourceWidth <= 0.0f || sourceHeight <= 0.0f || dx[col + 1] <= dx[col] || dy[row + 1] <= dy[row])
+            {
+                continue;
+            }
+            const D2D1_RECT_F source = D2D1::RectF(sourceLeft[col] * toDipX, sourceTop[row] * toDipY,
+                                                   sourceRight[col] * toDipX, sourceBottom[row] * toDipY);
+            const D2D1_RECT_F part = D2D1::RectF(dx[col], dy[row], dx[col + 1], dy[row + 1]);
+            ComPtr<ID2D1ImageBrush> brush;
+            if (context)
+            {
+                // An image brush puts the top-left of its source rectangle at the brush origin.
+                const float scaleX = (part.right - part.left) / (source.right - source.left);
+                const float scaleY = (part.bottom - part.top) / (source.bottom - source.top);
+                const D2D1_MATRIX_3X2_F transform =
+                    D2D1::Matrix3x2F::Scale(scaleX, scaleY) * D2D1::Matrix3x2F::Translation(part.left, part.top);
+                context->CreateImageBrush(bitmap,
+                                          D2D1::ImageBrushProperties(source, D2D1_EXTEND_MODE_CLAMP,
+                                                                     D2D1_EXTEND_MODE_CLAMP,
+                                                                     D2D1_INTERPOLATION_MODE_LINEAR),
+                                          D2D1::BrushProperties(opacity, transform), brush.GetAddressOf());
+            }
+            if (brush)
+            {
+                context->FillRectangle(part, brush.Get());
+            }
+            else
+            {
+                target->DrawBitmap(bitmap, part, opacity, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, &source);
+            }
+        }
+    }
+}
+
+void Card::SetBackgroundNineSlice(std::wstring filePath, const NineSlice &nineSlice, float opacity)
 {
     const float clamped = std::clamp(opacity, 0.0f, 1.0f);
-    const float l = (std::max)(0.0f, left);
-    const float t = (std::max)(0.0f, top);
-    const float r = (std::max)(0.0f, right);
-    const float b = (std::max)(0.0f, bottom);
-    if (backgroundImage_ == filePath && backgroundNineSlice_ && sliceLeft_ == l && sliceTop_ == t && sliceRight_ == r &&
-        sliceBottom_ == b && backgroundOpacity_ == clamped)
+    NineSlice normalized = nineSlice;
+    normalized.slice = NonNegative(nineSlice.slice);
+    normalized.width = NonNegative(nineSlice.width);
+    if (backgroundImage_ == filePath && backgroundNineSlice_ && SameThickness(nineSlice_.slice, normalized.slice) &&
+        SameThickness(nineSlice_.width, normalized.width) && nineSlice_.fill == normalized.fill &&
+        backgroundOpacity_ == clamped)
     {
         return;
     }
     backgroundImage_ = std::move(filePath);
     backgroundNineSlice_ = true;
-    sliceLeft_ = l;
-    sliceTop_ = t;
-    sliceRight_ = r;
-    sliceBottom_ = b;
+    nineSlice_ = normalized;
     backgroundOpacity_ = clamped;
     InvalidateVisual();
 }
@@ -2173,9 +2321,15 @@ void Card::RenderBackgroundImage(DeviceResources &deviceResources, ID2D1RenderTa
         return;
     }
     D2D1_SIZE_F sourceSize = {};
-    ID2D1Bitmap *bitmap = deviceResources.GetBitmapFromFile(backgroundImage_, &sourceSize);
+    ID2D1Bitmap *bitmap = deviceResources.GetImageFrame(backgroundImage_, &sourceSize);
     if (!bitmap || sourceSize.width <= 0.0f || sourceSize.height <= 0.0f)
     {
+        return;
+    }
+    if (backgroundNineSlice_)
+    {
+        // Like CSS border-image, the panel image ignores the corner radius.
+        DrawNineSlice(target, bitmap, bounds_, nineSlice_, backgroundOpacity_);
         return;
     }
 
@@ -2210,44 +2364,6 @@ void Card::RenderBackgroundImage(DeviceResources &deviceResources, ID2D1RenderTa
         return;
     }
     target->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), clip.Get()), layer.Get());
-    if (backgroundNineSlice_)
-    {
-        // 九宫格：四角原样、四边单向拉伸、中心双向拉伸。切片单位与源图像素一致，
-        // 图像按 96 DPI 绘制时 1 源像素 = 1 DIP。
-        const float srcW = sourceSize.width;
-        const float srcH = sourceSize.height;
-        const float l = (std::min)(sliceLeft_, srcW);
-        const float t = (std::min)(sliceTop_, srcH);
-        const float r = (std::min)(sliceRight_, srcW - l);
-        const float b = (std::min)(sliceBottom_, srcH - t);
-        const float dl = (std::min)(l, bounds_.width);
-        const float dt = (std::min)(t, bounds_.height);
-        const float dr = (std::min)(r, bounds_.width - dl);
-        const float db = (std::min)(b, bounds_.height - dt);
-        const float sx[3] = {0.0f, l, srcW - r};
-        const float sw[3] = {l, srcW - l - r, r};
-        const float dx[3] = {bounds_.x, bounds_.x + dl, bounds_.x + bounds_.width - dr};
-        const float dw[3] = {dl, bounds_.width - dl - dr, dr};
-        const float sy[3] = {0.0f, t, srcH - b};
-        const float sh[3] = {t, srcH - t - b, b};
-        const float dy[3] = {bounds_.y, bounds_.y + dt, bounds_.y + bounds_.height - db};
-        const float dh[3] = {dt, bounds_.height - dt - db, db};
-        for (int row = 0; row < 3; ++row)
-        {
-            for (int col = 0; col < 3; ++col)
-            {
-                if (sw[col] <= 0.0f || sh[row] <= 0.0f || dw[col] <= 0.0f || dh[row] <= 0.0f)
-                {
-                    continue;
-                }
-                target->DrawBitmap(bitmap, D2D1::RectF(dx[col], dy[row], dx[col] + dw[col], dy[row] + dh[row]),
-                                   backgroundOpacity_, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
-                                   D2D1::RectF(sx[col], sy[row], sx[col] + sw[col], sy[row] + sh[row]));
-            }
-        }
-        target->PopLayer();
-        return;
-    }
     target->DrawBitmap(bitmap,
                        D2D1::RectF(destination.x, destination.y, destination.x + destination.width,
                                    destination.y + destination.height),

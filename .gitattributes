@@ -13,6 +13,10 @@
 *.mp3 binary
 *.onnx binary
 *.png binary
+# Skin images, animated ones included (schema 2 skins accept APNG, GIF and WebP).
+*.apng binary
+*.gif binary
+*.webp binary
 
 # The vendored Google Pinyin dictionary sources are UTF-16 and carry a .txt suffix. The heuristic
 # does classify them today, on the NUL bytes UTF-16 puts in every ASCII character, but they are

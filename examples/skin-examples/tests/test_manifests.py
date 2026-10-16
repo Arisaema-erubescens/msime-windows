@@ -11,6 +11,10 @@ SKINS_DIR = Path(os.environ.get("MSIME_SKINS_DIR", ROOT / "skins")).resolve()
 BUILTIN_SKINS = ("fluent", "wechat", "graphite", "willow_green", "autumn_osmanthus", "microsoft")
 # Mirrors the Server catalog: community bases shared with msime, adapted onto fluent at load time.
 SHARED_BASES = ("system", "shuishan", "light", "paper", "night", "ink")
+# The full-texture base: only a base for schema_version 2 skins, never a skin of its own.
+CANVAS_BASE = "canvas"
+# Images v2 tables may reference (border_image.source, decorations.image).
+V2_IMAGE_SUFFIXES = (".png", ".apng", ".gif", ".webp")
 
 
 class ManifestTests(unittest.TestCase):
@@ -26,17 +30,39 @@ class ManifestTests(unittest.TestCase):
                 # Mirrors the Server catalog: name, version and base are required, author is not.
                 for key in ("name", "version", "base"):
                     self.assertTrue(data[key].strip(), key)
-                self.assertIn(data["base"], BUILTIN_SKINS + SHARED_BASES)
+                self.assertIn(data["base"], BUILTIN_SKINS + SHARED_BASES + (CANVAS_BASE,))
+                # Mirrors the Server catalog: canvas needs schema 2, and schema 2 needs canvas (otherwise the
+                # catalog loads the skin as schema 1 and ignores every v2 table).
+                self.assertEqual(data["schema_version"] == 2, data["base"] == CANVAS_BASE, "schema 2 <=> canvas")
                 window = data.get("candidate_window", {})
                 assets = {key: data.get(key) for key in ("toolbar_stylesheet", "preview")}
                 for table in ("decoration", "background"):
                     if table in window:
                         assets[f"candidate_window.{table}.image"] = window[table]["image"]
+                v2_images = []
                 if "border_image" in window:
                     assets["candidate_window.border_image.source"] = window["border_image"]["source"]
-                for i, dec in enumerate(window.get("decorations", [])):
+                    v2_images.append(window["border_image"]["source"])
+                    for key in ("slice_dip", "stretch_dip", "width_dip"):
+                        if key in window["border_image"]:
+                            values = window["border_image"][key]
+                            self.assertIn(len(values), (1, 2, 4), key)
+                            self.assertTrue(all(0 <= v <= 500 for v in values), key)
+                    self.assertIsInstance(window["border_image"].get("fill", True), bool, "fill")
+                decorations = window.get("decorations", [])
+                self.assertLessEqual(len(decorations), 32, "decorations")
+                for i, dec in enumerate(decorations):
                     if "image" in dec:
                         assets[f"candidate_window.decorations[{i}].image"] = dec["image"]
+                        v2_images.append(dec["image"])
+                    self.assertIn(dec.get("anchor", "right"), ("top-left", "top-right", "bottom-left", "bottom-right",
+                                                               "left", "right", "top", "bottom", "center"))
+                    self.assertIsInstance(dec.get("z_index", 2), int, "z_index")
+                    self.assertTrue(-1000 <= dec.get("z_index", 2) <= 1000, "z_index")
+                    for key in ("offset_x_dip", "offset_y_dip"):
+                        self.assertTrue(-2000 <= dec.get(key, 0) <= 2000, key)
+                for image in v2_images:
+                    self.assertTrue(image.lower().endswith(V2_IMAGE_SUFFIXES), image)
                 if "decoration" in window:
                     for key in ("top_inset_dip", "width_dip"):
                         self.assertGreater(window["decoration"][key], 0, key)
@@ -46,7 +72,7 @@ class ManifestTests(unittest.TestCase):
                     asset = (path.parent / rel).resolve()
                     self.assertTrue(asset.is_relative_to(path.parent.resolve()), key)
                     self.assertTrue(asset.is_file(), f"Missing {key}: {asset}")
-                    if asset.suffix.lower() == ".png":
+                    if asset.suffix.lower() in V2_IMAGE_SUFFIXES:
                         self.assertLessEqual(asset.stat().st_size, 500 * 1024, key)
                 for scope in ("candidate_window", "toolbar"):
                     if "corner_radius_dip" in data.get(scope, {}):

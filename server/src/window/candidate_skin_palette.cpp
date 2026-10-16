@@ -128,6 +128,14 @@ CandidateSkinPalette ResolveCandidateSkinPalette(const std::string &skinId, bool
                         : CandidateSkinPalette{CandidateColorFromRgb(0x2C2C2C), CandidateColorFromRgb(0x1C1C1C),
                                                CandidateColorFromRgb(0xFFFFFF)};
     }
+    else if (CandidateSkinCatalog::IsCanvasBase(paletteSkinId))
+    {
+        // 全贴图基底：面板与描边透明，外观交给九宫格贴图。透明色仍带上 fluent 的底色 RGB，
+        // GDI 那类不能透明的使用方压平时得到的是可读的底色而不是黑色。文字取高对比的近白 / 近黑。
+        palette.surface = CandidateColorFromRgb(light ? 0xFFFFFF : 0x202020, 0.0f);
+        palette.border = D2D1::ColorF(0, 0.0f);
+        palette.text = CandidateColorFromRgb(light ? 0x1A1A1A : 0xF2F2F2);
+    }
     if (packageColors)
     {
         if (!packageColors->surface.empty())

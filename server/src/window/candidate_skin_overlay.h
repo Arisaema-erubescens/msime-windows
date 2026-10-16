@@ -12,6 +12,7 @@ class DeviceResources;
 
 // v2 皮肤的自由挂件层。它不参与布局（测量恒为 0），由父级摆到卡片那一格，
 // 内部按 anchor + offset 把挂件画到卡片边界之外，所以窗口必须按 outer_insets_dip 多留出空间。
+// 候选窗用两层：z_index 低于 kDecorationFrontZIndex 的一层排在卡片之前（面板之下），其余一层排在卡片之后。
 class CandidateSkinOverlay : public msimeui::Visual
 {
   public:
@@ -27,12 +28,13 @@ class CandidateSkinOverlay : public msimeui::Visual
         float heightDip = 0.0f;
     };
 
+    // 按绘制顺序给出，先给的在下面。
     void SetItems(std::vector<Item> items);
 
     msimeui::SizeF Measure(const msimeui::SizeF &availableSize) override;
     void Arrange(const msimeui::RectF &finalRect) override;
     void Render(msimeui::DeviceResources &deviceResources) override;
-    // 挂件纯装饰，叠在卡片那一格上方，点击必须穿透给候选。
+    // 挂件纯装饰，叠在卡片那一格上，点击必须穿透给候选。
     bool HitTest(const msimeui::PointF &point) const override;
 
   private:

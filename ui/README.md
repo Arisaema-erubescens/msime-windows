@@ -28,7 +28,7 @@
 
 ## 图片渲染
 
-`Image` 控件可以从文件加载 WIC 支持的图片格式，例如 PNG、JPEG、BMP、ICO、TIFF，以及 GIF 的静态首帧：
+`Image` 控件可以从文件加载 WIC 支持的图片格式，例如 PNG、JPEG、BMP、ICO、TIFF，以及 APNG、GIF 动图：
 
 ```cpp
 auto image = std::make_shared<msimeui::Image>(L"assets/sticker.png");
@@ -37,7 +37,19 @@ image->SetHeight(120.0f);
 image->SetStretch(msimeui::ImageStretch::Uniform);
 ```
 
-可用的缩放方式包括 `None`、`Fill`、`Uniform` 和 `UniformToFill`。位图按文件路径缓存在 `DeviceResources` 中，D2D 设备目标重建后会自动重新解码。当前 GIF 只显示第一帧，动画播放将在后续单独加入。
+可用的缩放方式包括 `None`、`Fill`、`Uniform` 和 `UniformToFill`。位图按文件路径缓存在 `DeviceResources` 中，D2D 设备目标重建后会自动重新解码。
+
+### 动图
+
+`AnimatedImage` 按 [APNG 规范](https://wiki.mozilla.org/APNG_Specification) 解析 `acTL` / `fcTL` / `fdAT`（校验序号、CRC 与帧边界），把每帧重建成独立 PNG 交给 WIC 解码，再按 `dispose_op` / `blend_op` 合成到整张画布上；GIF 走 WIC 多帧解码，按 `/grctlext` 的延时与处置方式、`/imgdesc` 的子矩形和 NETSCAPE 循环次数合成；WIC 编解码器暴露多帧的 WebP 按每帧 100 ms 播放。延时规则同浏览器：分母为 0 按 100，≤ 10 ms 按 100 ms；播完 `num_plays` 后停在最后一帧。损坏、超过 1024 帧或解码后超过 64 MB 的动画退回静态首帧，不引入第三方依赖。
+
+`Image`、`Card` 的背景与九宫格都通过 `DeviceResources::GetImageFrame` 取当前帧：
+
+- 帧时间在 `BeginFrame` 采样，`SetAnimationEpoch` 设起点；`GetNextAnimationDeadline()`（或 `Scene::GetNextFrameDeadline()`）给出下一次换帧的时刻，按需重绘的宿主据此排一次定时器。`msimeui::Window` 自己会这样做。
+- `SetAnimationsEnabled(false)` 按静态解码显示（APNG 的默认图、GIF 首帧，与 `GetBitmapFromFile` 相同）、不再给出截止时间；是否减少动画由宿主按系统设置决定。`ClearImageCaches()` 丢掉已解码的图片，磁盘上换过的文件下次绘制时重新读取。
+- 动图的每帧都是 GPU 位图，合计受 `SetAnimatedBitmapBudget`（默认 64 MB）约束，按最近绘制淘汰；单个动画超出预算时只显示首帧。设备丢失后按需重建。
+
+`DrawNineSlice` / `Card::SetBackgroundNineSlice` 实现 CSS `border-image`（`stretch`）：切片以源图像素计，边框宽度以 DIP 计，`fill` 决定是否画中心；各块用夹取到自身的图像画刷绘制并对齐设备像素，接缝不会互相渗色。
 
 ## 最近新增
 

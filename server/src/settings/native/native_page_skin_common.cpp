@@ -371,7 +371,7 @@ std::string SkinBase(const SettingsModel &model, const std::string &id)
     if (const Json *external = FindExternalSkin(model, id))
     {
         const std::string base = external->value("base", std::string("fluent"));
-        return IsBuiltinSkin(base) ? base : "fluent";
+        return IsBuiltinSkin(base) || base == "canvas" ? base : "fluent";
     }
     return "fluent";
 }
@@ -611,6 +611,21 @@ CandidateLook ResolveCandidateLook(const SettingsModel &model, const std::string
             k.wrapperGap = 2.0f;
         }
     }
+    else if (base == "canvas")
+    {
+        // The full-texture base of the candidate window (CandidatePresenter): no surface, frame,
+        // radius or shadow; neutral text and highlights that read on most textures.
+        k.bg = None();
+        k.border = None();
+        k.borderWidth = 0.0f;
+        k.radius = 0.0f;
+        k.edgeRadius = 0.0f;
+        k.text = light ? Hex(0x1A1A1A) : Hex(0xF2F2F2);
+        k.num = light ? Rgba(26, 26, 26, 0.6f) : Hex(0xF2F2F2, 0.62f);
+        k.hover = light ? Rgba(0, 0, 0, 0.06f) : Rgba(255, 255, 255, 0.09f);
+        k.selected = light ? Rgba(0, 0, 0, 0.10f) : Rgba(255, 255, 255, 0.16f);
+        k.shadowAlpha1 = k.shadowAlpha2 = 0.0f;
+    }
     k.bar = k.accent;
 
     // The generated CSS of an external skin (skin.ts candidatePreviewCss).
@@ -699,6 +714,38 @@ CandidateLook ResolveCandidateLook(const SettingsModel &model, const std::string
             k.decorationTop = decorationTop;
             k.decorationWidth = NumberOr(external, "decorationWidthDip", 0.0f, 4096.0f);
             k.decorationAlign = StringOr(external, "decorationAlign");
+        }
+        // canvas skins: content padding from the panel's outer edge, and the nine-sliced panel that
+        // replaces the frame's fill, stroke, radius and shadow.
+        const Json *canvas = external->contains("canvas") ? &(*external)["canvas"] : nullptr;
+        const auto edges = [](const Json *object, const char *key) {
+            Thickness result{};
+            if (object && object->is_object() && object->contains(key) && (*object)[key].is_array() &&
+                (*object)[key].size() == 4)
+            {
+                const Json &v = (*object)[key];
+                const auto at = [&v](size_t i) { return v[i].is_number() ? v[i].get<float>() : 0.0f; };
+                result = {at(3), at(0), at(1), at(2)}; // JSON is top, right, bottom, left
+            }
+            return result;
+        };
+        if (canvas && canvas->is_object())
+        {
+            k.containerPad = edges(canvas, "padding");
+            const Json *panel = canvas->contains("panel") ? &(*canvas)["panel"] : nullptr;
+            const std::string image = panel && panel->is_object() ? panel->value("image", std::string()) : "";
+            if (!image.empty())
+            {
+                k.panelImage = SkinResourcePath(model, skinId, image);
+                k.panelSlice = edges(panel, "slice");
+                k.panelWidth = edges(panel, "width");
+                k.panelFill = panel->value("fill", true);
+                k.bg = None();
+                k.border = None();
+                k.borderWidth = 0.0f;
+                k.radius = 0.0f;
+                k.shadowAlpha1 = k.shadowAlpha2 = 0.0f;
+            }
         }
     }
     return k;
@@ -1219,7 +1266,12 @@ void CandidatePreview::Render(msimeui::DeviceResources &dr)
         m.shadows[1].Render(target, box, k.radius, &second, 1);
     }
     FillRounded(dr, box, k.radius, k.bg);
-    if (!k.backgroundImage.empty())
+    if (!k.panelImage.empty())
+    {
+        if (ID2D1Bitmap *bitmap = CachedBitmap(dr, k.panelImage, nullptr))
+            msimeui::DrawNineSlice(target, bitmap, box, msimeui::NineSlice{k.panelSlice, k.panelWidth, k.panelFill});
+    }
+    else if (!k.backgroundImage.empty())
     {
         D2D1_SIZE_F size{};
         if (ID2D1Bitmap *bitmap = CachedBitmap(dr, k.backgroundImage, &size))

@@ -31,7 +31,8 @@ bool IsBuiltinSkin(const std::string &id);
 
 // External skin entry of appearance.external_candidate_skins, or null.
 const Json *FindExternalSkin(const SettingsModel &model, const std::string &id);
-// Base of a skin id: the id itself for a built-in skin, the manifest's base otherwise.
+// Base of a skin id: the id itself for a built-in skin, the manifest's base otherwise (a built-in
+// skin or canvas; shared bases arrive already mapped to fluent).
 std::string SkinBase(const SettingsModel &model, const std::string &id);
 // skins/<id>/<relative> under appearance.candidate_skin_directory.
 std::wstring SkinResourcePath(const SettingsModel &model, const std::string &id, const std::string &relative);
@@ -93,6 +94,11 @@ struct CandidateLook
     std::wstring decorationImage;
     std::string decorationAlign;
     float decorationTop = 0.0f, decorationWidth = 0.0f;
+    // Panel image of a canvas (schema 2) skin, nine-sliced over the frame like CSS border-image:
+    // slices in image pixels, widths in DIPs. Empty when the skin has none.
+    std::wstring panelImage;
+    Thickness panelSlice = {}, panelWidth = {};
+    bool panelFill = true;
 };
 
 CandidateLook ResolveCandidateLook(const SettingsModel &model, const std::string &skinId, bool light, bool horizontal,

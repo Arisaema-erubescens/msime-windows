@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -46,7 +47,7 @@ struct CandidateColors
     std::string menuHover;
 };
 
-// 悬浮工具栏的配色覆盖，D2D 与 WebView2 两个渲染器都读这一份。留空的项沿用基础皮肤。
+// 悬浮工具栏的配色覆盖。留空的项沿用基础皮肤。
 struct ToolbarColors
 {
     std::string background;
@@ -60,14 +61,16 @@ struct ToolbarColors
 struct BorderImage
 {
     std::string source;
-    // 四边切片大小（DIP）：top, right, bottom, left
+    // 切片线位置，以源图像素计（同 CSS border-image-slice 的数值，键名沿用 _dip）：1/2/4 个值，按 CSS
+    // 简写展开成上右下左。
     std::vector<double> sliceDip;
-    // 可拉伸区（上右下左，从面板外缘量起）：给出时覆盖 sliceDip。
+    // 可拉伸区（上右下左，同为源图像素，从图片外缘量起）：给出时覆盖 sliceDip。
     // 面板图里画死的装饰必须落在可拉伸区之外，否则会被横向拉长。
     std::vector<double> stretchDip;
-    // 四边宽度（DIP）：top, right, bottom, left；若为空则沿用 sliceDip
+    // 四边在屏幕上的绘制宽度（DIP，同 CSS border-image-width）；为空时取切片的数值当 DIP。
+    // 给 2 倍图时把它写成切片的一半，面板在 200% 缩放下仍按原图像素清晰显示。
     std::vector<double> widthDip;
-    // 是否填充中间内容区域
+    // 是否画九宫格中心块（CSS border-image-slice 的 fill）
     bool fill = true;
 };
 
@@ -79,6 +82,14 @@ struct InsetsDip
     double left = 0.0;
 };
 
+// 挂件 z_index 低于它的画在面板（卡片）之下，其余画在面板之上。面板自身相当于 z_index = 1，
+// 与样例预览页 .container 的 z-index: 1 一致。
+inline constexpr int kDecorationFrontZIndex = 1;
+inline constexpr int kDecorationZIndexLimit = 1000;
+inline constexpr double kDecorationOffsetLimitDip = 2000.0;
+// 挂件层数上限，挡住把几百张大图塞进一个皮肤的清单。
+inline constexpr size_t kMaxFreeDecorations = 32;
+
 struct FreeDecoration
 {
     std::string image;
@@ -88,13 +99,17 @@ struct FreeDecoration
     double offsetYDip = 0.0;
     double widthDip = 0.0;
     double heightDip = 0.0;
+    // -1000–1000；低于 kDecorationFrontZIndex 的在面板之下。同层按声明顺序叠放。
     int zIndex = 2;
 };
 
 struct Package
 {
-    // 皮肤规范版本：1 为通用现代卡片皮肤，2 为支持九宫格与自由挂件的高级皮肤。
+    // 皮肤规范版本：1 为通用现代卡片皮肤，2 为支持九宫格与自由挂件的高级皮肤。v2 必须以 canvas 为 base，
+    // 声明 2 而 base 不是 canvas 的按 1 处理（v2 字段全部忽略），并在 notices 里记一条。
     int schemaVersion = 1;
+    // 不妨碍加载的问题；Scan 把它们和加载失败一起列进 issues，设置页的诊断信息会显示。
+    std::vector<std::string> notices;
     std::string id;
     std::string name;
     std::string version;
@@ -136,7 +151,7 @@ struct Package
     ToolbarColors toolbarLight;
     // v2 专有特性：九宫格贴图边框
     std::optional<BorderImage> borderImage;
-    // v2 专有特性：面板内容/文字安全内边距，从面板外缘量起（渲染时扣掉边框宽度）。
+    // v2 专有特性：面板内容/文字安全内边距，从面板外缘量起；某一边小于九宫格边框宽度时按边框宽度算。
     std::optional<InsetsDip> contentInsetsDip;
     // v2 专有特性：预编辑行与候选行之间的行距（DIP，0–100）；未设置时沿用 base 的行距。
     std::optional<double> lineGapDip;
@@ -159,7 +174,7 @@ struct ScanResult
     std::vector<Issue> issues;
 };
 
-// 内置皮肤的设置清单：<skinsRoot>/default/<id>/skin.toml。外观仍由内置 CSS 与 D2D 配色决定，
+// 内置皮肤的设置清单：<skinsRoot>/default/<id>/skin.toml。外观仍由内置的 D2D 配色决定，
 // 清单只承载皮肤级的开关；外部皮肤没写的开关沿用它 base 的这份清单。
 struct DefaultSkin
 {
@@ -175,6 +190,13 @@ inline constexpr const char *kDefaultSkinsFolder = "default";
 inline constexpr bool kDefaultPageArrows = false;
 // 默认皮肤清单缺失或没写 fit_content 时的取值：卡片保留出厂最小宽度。
 inline constexpr bool kDefaultFitContent = false;
+
+// 全贴图基底：透明面板、无描边、无圆角、无阴影，外观完全来自九宫格面板图与挂件，是 v2 与自定义皮肤的地基。
+// 它只能作为外部皮肤的 base，不能单独选用（没有贴图时什么也看不见），也不在 BuiltInIds 里。
+inline constexpr const char *kCanvasBase = "canvas";
+bool IsCanvasBase(const std::string &base);
+// v2 图片（border_image.source、decorations.image）允许的扩展名：.png、.apng、.gif、.webp，不分大小写。
+bool IsAnimatableImagePath(const std::string &path);
 
 // 六个内置皮肤的 ID，按设置页的展示顺序。
 const std::vector<std::string> &BuiltInIds();

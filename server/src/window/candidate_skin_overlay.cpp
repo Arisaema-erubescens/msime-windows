@@ -27,7 +27,6 @@ bool CandidateSkinOverlay::HitTest(const msimeui::PointF & /*point*/) const
     return false;
 }
 
-// TODO(v2 皮肤): v2 自由挂件暂定 WebView2 独占，D2D 这里尚未按 z_index 分层，全部按声明顺序画在卡片之上。
 void CandidateSkinOverlay::Render(msimeui::DeviceResources &deviceResources)
 {
     if (items_.empty() || bounds_.width <= 0.0f || bounds_.height <= 0.0f)
@@ -41,8 +40,9 @@ void CandidateSkinOverlay::Render(msimeui::DeviceResources &deviceResources)
     }
     for (const Item &item : items_)
     {
+        // 动图按动画时钟取当前帧，并把下一次换帧时间报给宿主。
         D2D1_SIZE_F sourceSize = {};
-        ID2D1Bitmap *bitmap = deviceResources.GetBitmapFromFile(item.path, &sourceSize);
+        ID2D1Bitmap *bitmap = deviceResources.GetImageFrame(item.path, &sourceSize);
         if (!bitmap || sourceSize.width <= 0.0f || sourceSize.height <= 0.0f)
         {
             continue;
@@ -95,7 +95,13 @@ void CandidateSkinOverlay::Render(msimeui::DeviceResources &deviceResources)
         }
         x += item.offsetXDip;
         y += item.offsetYDip;
-        const D2D1_RECT_F destination = D2D1::RectF(x, y, x + width, y + height);
+        // 图片在 width × height 的框里等比缩放、居中（CSS background-size: contain），比例不同也不变形。
+        const float scale = (std::min)(width / sourceSize.width, height / sourceSize.height);
+        const float drawWidth = sourceSize.width * scale;
+        const float drawHeight = sourceSize.height * scale;
+        const float left = x + (width - drawWidth) * 0.5f;
+        const float top = y + (height - drawHeight) * 0.5f;
+        const D2D1_RECT_F destination = D2D1::RectF(left, top, left + drawWidth, top + drawHeight);
         const D2D1_RECT_F source = D2D1::RectF(0.0f, 0.0f, sourceSize.width, sourceSize.height);
         target->DrawBitmap(bitmap, destination, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, &source);
     }

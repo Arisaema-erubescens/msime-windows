@@ -424,6 +424,24 @@ class ShadowCache
     std::vector<ShadowPass> passes_;
 };
 
+// CSS `border-image` with `border-image-repeat: stretch`. The source image is cut along `slice`
+// (image pixels, like the numbers of `border-image-slice`) and drawn into borders `width` wide
+// (DIPs, like `border-image-width`): corners scale from slice to width, edges stretch along
+// their length, the middle stretches both ways and is drawn only with `fill`.
+struct NineSlice
+{
+    Thickness slice;
+    Thickness width;
+    bool fill = true;
+};
+
+// Draws `bitmap` nine-sliced into `destination` (DIPs). Bitmap sizes are read in DIPs at 96 DPI,
+// one DIP per image pixel, as DeviceResources creates them. Slices larger than the image are
+// clamped to it, and when two opposite widths do not fit into the box they are all scaled down
+// by the same factor, as CSS does. Part edges land on device pixels so the parts meet seamlessly.
+void DrawNineSlice(ID2D1RenderTarget *target, ID2D1Bitmap *bitmap, const RectF &destination, const NineSlice &nineSlice,
+                   float opacity = 1.0f);
+
 class Card : public Panel
 {
   public:
@@ -442,13 +460,13 @@ class Card : public Panel
     // Turns the drop shadow off entirely; enabled by default.
     void SetShadowEnabled(bool enabled);
     // Draws an image file over the fill and under the children, clipped to the rounded
-    // card shape. An empty path removes it.
+    // card shape. An empty path removes it. Animated images play (DeviceResources::GetImageFrame).
     void SetBackgroundImage(std::wstring filePath, ImageStretch stretch = ImageStretch::UniformToFill,
                             float opacity = 1.0f);
-    // 九宫格背景：四边按切片原样绘制，其余单向/双向拉伸，用来铺「面板即贴图」的 v2 皮肤。
-    // 切片单位与源图像素一致；给出后覆盖 SetBackgroundImage 的普通背景。
-    void SetBackgroundImageNineSlice(std::wstring filePath, float left, float top, float right, float bottom,
-                                     float opacity = 1.0f);
+    // Nine-sliced panel image (see NineSlice) over the fill and under the stroke and children.
+    // Like CSS border-image it is not clipped to the corner radius. Replaces SetBackgroundImage.
+    // Animated images play, though a panel is usually best left still.
+    void SetBackgroundNineSlice(std::wstring filePath, const NineSlice &nineSlice, float opacity = 1.0f);
 
     SizeF Measure(const SizeF &availableSize) override;
     void Arrange(const RectF &finalRect) override;
@@ -465,10 +483,7 @@ class Card : public Panel
     ImageStretch backgroundStretch_ = ImageStretch::UniformToFill;
     float backgroundOpacity_ = 1.0f;
     bool backgroundNineSlice_ = false;
-    float sliceLeft_ = 0.0f;
-    float sliceTop_ = 0.0f;
-    float sliceRight_ = 0.0f;
-    float sliceBottom_ = 0.0f;
+    NineSlice nineSlice_;
     float shadowScale_ = 1.0f;
     float shadowOpacity_ = 1.0f;
     std::vector<ShadowPass> shadowPasses_;

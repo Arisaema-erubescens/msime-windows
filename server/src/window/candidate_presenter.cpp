@@ -8,6 +8,7 @@
 #include "ipc/ipc.h"
 #include "log/candidate_diag_log.h"
 #include "skin/candidate_skin_catalog.h"
+#include "window/candidate_skin_layers.h"
 #include "window/candidate_skin_overlay.h"
 #include "utils/common_utils.h"
 #include "utils/ime_utils.h"
@@ -34,6 +35,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cctype>
 #include <filesystem>
@@ -67,8 +69,7 @@ int AlignHostPixels(int value)
 }
 
 // Recompute half-screen DIP limits against `scale` when it differs from the
-// monitor-derived scale, so clamping and window sizing stay on one scale
-// (mirrors the webview path's rasterization-scale composition).
+// monitor-derived scale, so clamping and window sizing stay on one scale.
 HalfScreenDipLimits ApplyScaleToHalfScreenLimits(POINT pt, FLOAT scale)
 {
     HalfScreenDipLimits limits = QueryHalfScreenDipLimitsForPoint(pt);
@@ -151,8 +152,7 @@ struct CandSkinTokens
 constexpr float kTranslationPosAlpha = 0x80 / 255.0f;
 constexpr float kTranslationSeparatorAlpha = 0x73 / 255.0f;
 
-// 内置皮肤的翻译配色取自 Notion 调色板（https://docs.super.so/notion-colors），与
-// ui-html/webview2/candwnd/skins/<skin>/*.css 里的 .cand-translation 同值。词性用相邻的另一个色相再调淡，
+// 内置皮肤的翻译配色取自 Notion 调色板（https://docs.super.so/notion-colors）。词性用相邻的另一个色相再调淡，
 // 和英文单词区分开；分隔符是单词色降不透明度。
 void SetTranslationColors(CandSkinTokens &tokens, UINT rgb, UINT posRgb)
 {
@@ -191,7 +191,6 @@ void ApplyPackageColors(const CandidateSkinCatalog::CandidateColors &colors, Can
     apply(colors.selectedText, tokens.rowTextSelected);
     apply(colors.selectedNumber, tokens.rowLabelSelected);
     // 包换了翻译色就不再用基础皮肤的词性/分隔符配色：普通行回到与翻译同色，选中行跟随 selected_translation。
-    // 与 WebView2 端的 `color: inherit` 重置一致。
     if (!colors.translation.empty())
     {
         tokens.translationPos = D2D1::ColorF(0, 0.0f);
@@ -249,6 +248,8 @@ constexpr float kShadowPadTop = 20.0f;
 constexpr float kShadowPadRight = 32.0f;
 constexpr float kShadowPadBottom = 40.0f;
 constexpr float kCandidateMinWidthDip = 160.0f;
+// body（预编辑行、候选列表、竖排翻页行）各行之间的固定行距。
+constexpr float kBodyRowSpacingDip = 2.0f;
 
 msimeui::ImageStretch BackgroundStretch(const std::string &fit)
 {
@@ -269,8 +270,7 @@ msimeui::HorizontalAlignment DecorationAlignment(const std::string &align)
 }
 // Below this fraction of the kept extent, the page really got smaller (fewer or
 // shorter candidates) and the card follows it; above it, the difference is a
-// late addition coming or going and the card keeps its size. Mirrors
-// kStickyShrinkRatio in the WebView2 candidate script.
+// late addition coming or going and the card keeps its size.
 constexpr float kStickyCardShrinkRatio = 0.7f;
 
 float StickyCardExtent(float kept, float natural)
@@ -327,6 +327,45 @@ D2D1_COLOR_F WithAlpha(D2D1_COLOR_F color, float alpha)
     return color;
 }
 
+// 候选窗 HWND 上的动图帧定时器。宿主自己的定时器编号见 ime_windows_internal.h（2–14），这里避开它们。
+constexpr UINT_PTR kCandidateAnimationTimerId = 0x0A11;
+
+// 系统「显示动画」关闭（设置 → 辅助功能 → 视觉效果 → 动画效果）时只显示动图首帧，与浏览器的
+// prefers-reduced-motion 同一个开关。读不到时按开启处理。
+bool SystemAnimationsEnabled()
+{
+    BOOL enabled = TRUE;
+    if (!SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0))
+    {
+        return true;
+    }
+    return enabled != FALSE;
+}
+
+std::vector<CandidateSkinOverlay::Item> OverlayItems(const std::vector<CandidateSkinCatalog::FreeDecoration> &layer,
+                                                     const std::wstring &packageRoot)
+{
+    std::vector<CandidateSkinOverlay::Item> items;
+    for (const CandidateSkinCatalog::FreeDecoration &dec : layer)
+    {
+        CandidateSkinOverlay::Item item;
+        item.path = packageRoot + string_to_wstring(dec.image);
+        item.anchor = dec.anchor;
+        item.offsetXDip = static_cast<float>(dec.offsetXDip);
+        item.offsetYDip = static_cast<float>(dec.offsetYDip);
+        item.widthDip = static_cast<float>(dec.widthDip);
+        item.heightDip = static_cast<float>(dec.heightDip);
+        items.push_back(std::move(item));
+    }
+    return items;
+}
+
+msimeui::Thickness ToThickness(const CandidateSkinLayers::Edges &edges)
+{
+    return {static_cast<float>(edges.left), static_cast<float>(edges.top), static_cast<float>(edges.right),
+            static_cast<float>(edges.bottom)};
+}
+
 } // namespace
 
 struct CandidatePresenter::Impl
@@ -337,8 +376,10 @@ struct CandidatePresenter::Impl
     std::shared_ptr<msimeui::Image> decoration;
     std::shared_ptr<msimeui::Card> card;
     // 卡片与 v2 挂件层放在同一格里：挂件层测量为 0，格子仍由卡片决定，挂件按 anchor 画到卡片外沿。
+    // 网格按子元素顺序绘制：下层挂件、卡片、上层挂件。
     std::shared_ptr<msimeui::Grid> overlayGrid;
-    std::shared_ptr<CandidateSkinOverlay> skinOverlay;
+    std::shared_ptr<CandidateSkinOverlay> skinOverlayBack;
+    std::shared_ptr<CandidateSkinOverlay> skinOverlayFront;
     // 装饰图与卡片同列：列宽即卡片宽，装饰图在列内按 align 对齐，对应 CSS 里
     // .containerParent 为 fit-content、::before 相对它定位。
     std::shared_ptr<msimeui::StackPanel> cardColumn;
@@ -414,7 +455,7 @@ void CandidatePresenter::RebuildScene()
     impl_->list->SetOnItemActivated([this](size_t index) { CommitItem(index); });
     impl_->list->SetOnContextMenu(
         [this](size_t index, const POINT &clientPoint) { ShowItemContextMenu(index, clientPoint); });
-    impl_->body = std::make_shared<msimeui::StackPanel>(2.0f);
+    impl_->body = std::make_shared<msimeui::StackPanel>(kBodyRowSpacingDip);
     impl_->body->SetPadding({0.0f, 0.0f, 0.0f, 0.0f});
     impl_->body->AddChild(impl_->preedit);
     impl_->pager.reset();
@@ -456,11 +497,15 @@ void CandidatePresenter::RebuildScene()
     impl_->overlayGrid = std::make_shared<msimeui::Grid>();
     impl_->overlayGrid->AddRow(msimeui::GridLength{msimeui::GridUnitType::Auto, 1.0f});
     impl_->overlayGrid->AddColumn(msimeui::GridLength{msimeui::GridUnitType::Auto, 1.0f});
+    for (auto *overlay : {&impl_->skinOverlayBack, &impl_->skinOverlayFront})
+    {
+        *overlay = std::make_shared<CandidateSkinOverlay>();
+        (*overlay)->SetHorizontalAlignment(msimeui::HorizontalAlignment::Stretch);
+        (*overlay)->SetVerticalAlignment(msimeui::VerticalAlignment::Stretch);
+    }
+    impl_->overlayGrid->AddChild(impl_->skinOverlayBack, 0, 0);
     impl_->overlayGrid->AddChild(impl_->card, 0, 0);
-    impl_->skinOverlay = std::make_shared<CandidateSkinOverlay>();
-    impl_->skinOverlay->SetHorizontalAlignment(msimeui::HorizontalAlignment::Stretch);
-    impl_->skinOverlay->SetVerticalAlignment(msimeui::VerticalAlignment::Stretch);
-    impl_->overlayGrid->AddChild(impl_->skinOverlay, 0, 0);
+    impl_->overlayGrid->AddChild(impl_->skinOverlayFront, 0, 0);
     impl_->cardColumn = std::make_shared<msimeui::StackPanel>(0.0f);
     impl_->cardColumn->SetHorizontalAlignment(msimeui::HorizontalAlignment::Leading);
     impl_->cardColumn->SetHorizontalContentAlignment(msimeui::HorizontalAlignment::Stretch);
@@ -503,6 +548,11 @@ void CandidatePresenter::ApplySkin()
         return;
     }
     lastSkinFingerprint_ = skinKey;
+    // 换了皮肤：旧皮肤的动图不再续帧，新皮肤的动画从这一次显示重新起算。强制重载（重载代数变了）
+    // 也走到这里，丢掉已解码的图片，皮肤目录里换过的图才会重新读取。
+    StopAnimationFrames();
+    animationClockRunning_ = false;
+    impl_->resources.ClearImageCaches();
     CandSkinTokens tokens;
     if (candLight)
     {
@@ -515,7 +565,7 @@ void CandidatePresenter::ApplySkin()
         tokens.menuHover = ColorFromRgb(0xECECEC);
     }
     const std::wstring skinsRoot = AssetRoot() + L"\\skins";
-    // 外部皮肤用声明支持当前布局与主题的那一份；不支持或读不出来就回退 fluent，和 WebView2 端同一条规则。
+    // 外部皮肤用声明支持当前布局与主题的那一份；不支持或读不出来就回退 fluent。
     const std::string candidateLayout = GetConfiguredCandidateWindowLayout();
     const std::string candidateTheme = candLight ? "light" : "dark";
     std::optional<CandidateSkinCatalog::Package> package;
@@ -524,13 +574,10 @@ void CandidatePresenter::ApplySkin()
         package = CandidateSkinCatalog::LoadSupported(std::filesystem::path(skinsRoot), skinId, candidateLayout,
                                                       candidateTheme);
     }
-    // 自定义包的几何取自它的 base 皮肤，与 WebView2 端注入 base 皮肤 CSS 一致；颜色随后由包覆盖。
+    // 自定义包的几何取自它的 base 皮肤；颜色随后由包覆盖。
     const std::string baseSkin =
         package ? package->base : (CandidateSkinCatalog::IsBuiltIn(skinId) ? skinId : std::string("fluent"));
-    // Built-in skin palettes mirror ui-html/webview2/candwnd/skins/<skin>/;
-    // the WebView2 CSS is the reference for both the light and dark values.
-    // 横排时高亮内缩于外框，首项、尾项落在卡片四角上的那几个角与卡片同 R，其余角保持
-    // itemRadius，对应 CSS 横排的 .pinyin + .row-wrapper / .last-visible 规则。
+    // 横排时高亮内缩于外框，首项、尾项落在卡片四角上的那几个角与卡片同 R，其余角保持 itemRadius。
     const bool horizontalLayout = candidateLayout == "horizontal";
     // 翻页箭头改变的是场景结构（竖排多一行、横排多一列），开关或排列方式变了就整棵重建，
     // 再往下套用配色与尺寸。重建会清掉指纹，这里补回去。
@@ -724,7 +771,7 @@ void CandidatePresenter::ApplySkin()
     }
     else if (baseSkin == "microsoft")
     {
-        // 几何随字号缩放，对应 CSS 里以 em 写的尺寸（ui-html/webview2/candwnd/skins/microsoft/）。
+        // 几何随字号缩放（按 em 比例）。
         tokens.borderWidth = 1.0f;
         tokens.radius = 8.0f;
         tokens.containerPad = std::round(fontSize * 0.3f);
@@ -771,6 +818,22 @@ void CandidatePresenter::ApplySkin()
             tokens.menuHover = ColorFromRgb(0x383838);
         }
     }
+    else if (CandidateSkinCatalog::IsCanvasBase(baseSkin))
+    {
+        // 全贴图基底：面板透明、无描边、直角，外观交给九宫格贴图与挂件（阴影在下面按皮肤决定）。
+        // 文字与高亮取不依赖底色的中性色：深色主题近白字配白色半透明高亮，浅色主题近黑字配黑色半透明高亮，
+        // 叠在大多数贴图上都可读；皮肤用 [candidate.dark] / [candidate.light] 覆盖。
+        tokens.borderWidth = 0.0f;
+        tokens.radius = 0.0f;
+        tokens.containerPad = 5.0f;
+        tokens.itemRadius = 4.0f;
+        tokens.number = candLight ? D2D1::ColorF(26.0f / 255.0f, 26.0f / 255.0f, 26.0f / 255.0f, 0.6f)
+                                  : ColorFromRgb(0xF2F2F2, 0.62f);
+        tokens.selected = candLight ? D2D1::ColorF(0, 0.10f) : D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.16f);
+        tokens.hover = candLight ? D2D1::ColorF(0, 0.06f) : D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.09f);
+        // 翻译同 fluent：单词 Notion Purple，词性 Notion Pink。
+        SetTranslationColors(tokens, candLight ? 0x6940A5 : 0x9A6DD7, candLight ? 0xAD1A72 : 0xE255A1);
+    }
 
     if (package)
     {
@@ -797,16 +860,22 @@ void CandidatePresenter::ApplySkin()
     tokens.surface = palette.surface;
     tokens.border = palette.border;
     tokens.text = palette.text;
-    // 阴影跟皮肤走，与 WebView2 端同一参照：四套内置皮肤与自定义包共用的皮肤 CSS
-    // （ui-html/webview2/candwnd/skins/*/horizontal_*.css）带同一对 box-shadow——
+    // 阴影跟皮肤走：四套内置皮肤与自定义包共用同一对阴影——
     // light `8px 10px 24px rgba(0,0,0,.18), 2px 3px 8px rgba(0,0,0,.10)`，dark α .34/.22；
-    // σ = blur ÷ 2。默认皮肤（webview 端只有 body HTML，无 box-shadow）直接关阴影。
+    // σ = blur ÷ 2。默认皮肤直接关阴影。
+    // v2 面板贴图：有它时卡片自己的底色、描边、圆角和阴影都让给贴图（同 CSS border-image）。
+    const bool panelImage =
+        package && package->schemaVersion >= 2 && package->borderImage && !package->borderImage->source.empty();
+    const bool canvasBase = CandidateSkinCatalog::IsCanvasBase(baseSkin);
+    skinAnimates_ = package && package->schemaVersion >= 2;
     if (impl_->card)
     {
         const std::string shadow = package ? package->shadow : std::string{};
-        if (shadow != "none")
+        // canvas 默认没有阴影，皮肤写了 soft / strong 才有；面板贴图在时一律不画。
+        const bool shadowOn = shadow != "none" && !(canvasBase && shadow.empty()) && !panelImage;
+        if (shadowOn)
         {
-            // 外部皮肤的 shadow = soft / strong 按同一系数缩放两层不透明度，与 WebView2 端一致。
+            // 外部皮肤的 shadow = soft / strong 按同一系数缩放两层不透明度。
             const float scale = ShadowAlphaScale(shadow);
             const auto alpha = [scale](float value) { return (std::min)(value * scale, 1.0f); };
             const std::vector<msimeui::ShadowPass> shadowPasses = {
@@ -840,7 +909,7 @@ void CandidatePresenter::ApplySkin()
     const float preeditSize = static_cast<float>((std::max)(12, GetConfiguredCandidateWindowPreeditFontSize()));
     msimeui::CandidateList::Appearance appearance;
     appearance.fontFamily = string_to_wstring(ResolveSystemFontFamilyForCss(GetConfiguredCandidateEnglishFont()));
-    // 皮肤的 font_family 排在最前，用户配置的字体整体退为回退，与 WebView2 端的 font-family 列表同序。
+    // 皮肤的 font_family 排在最前，用户配置的字体整体退为回退。
     if (package && !package->fontFamily.empty())
     {
         appearance.fallbackFontFamilies.push_back(appearance.fontFamily);
@@ -879,10 +948,19 @@ void CandidatePresenter::ApplySkin()
     // 隐藏的预编辑行高度为 0，但 body 仍在它和列表之间留 2px 行距；贴角皮肤把它抵掉，
     // 让首项贴着卡片的内容顶边（秋桂四边内边距一致，杨柳青高亮直抵卡片顶边）。
     if (preeditHidden)
+    {
         impl_->preedit->SetMargin(
             {0.0f, 0.0f, 0.0f, tokens.outerItemRadius > 0.0f || tokens.trimHiddenPreeditGap ? -2.0f : 0.0f});
+    }
     else
-        impl_->preedit->SetMargin(tokens.preeditMargin);
+    {
+        msimeui::Thickness preeditMargin = tokens.preeditMargin;
+        // v2 的 line_gap_dip 只是预编辑行与候选之间的距离（原 CSS 的 .row.pinyin margin-bottom），
+        // 列表与翻页箭头之间仍是 body 的 2 DIP 行距，所以落在预编辑行的下外边距上，再抵掉那 2 DIP。
+        if (package && package->schemaVersion >= 2 && package->lineGapDip)
+            preeditMargin.bottom = static_cast<float>(*package->lineGapDip) - kBodyRowSpacingDip;
+        impl_->preedit->SetMargin(preeditMargin);
+    }
     appearance.textColor = palette.candidateText;
     appearance.labelColor = tokens.number;
     appearance.annotationColor = palette.candidateText;
@@ -982,7 +1060,7 @@ void CandidatePresenter::ApplySkin()
                                                ? msimeui::HorizontalAlignment::Stretch
                                                : msimeui::HorizontalAlignment::Leading);
 
-    // 装饰图与 WebView2 端的 .containerParent::before 同一几何：宽 width_dip、高 top_inset_dip 的盒子
+    // 装饰图是宽 width_dip、高 top_inset_dip 的盒子，
     // 底边贴着卡片顶边、不与卡片重叠，按 align 贴卡片左/中/右，图片在盒内等比居中（contain）。
     decorationTopDip_ = 0.0f;
     decorationWidthDip_ = 0.0f;
@@ -1034,32 +1112,16 @@ void CandidatePresenter::ApplySkin()
         impl_->frame->SetPadding({framePadLeft, framePadTop, framePadRight, framePadBottom});
     }
 
-    // v2 自由挂件交给 overlay 层绘制；它测量为 0，不参与卡片布局。
-    if (impl_->skinOverlay)
+    // v2 自由挂件交给两层 overlay 绘制，都测量为 0、不参与卡片布局：z_index 低于 kDecorationFrontZIndex 的
+    // 在卡片之前绘制（面板之下），其余在卡片之后（面板与文字之上）。同层按 z_index、再按声明顺序叠放。
     {
-        std::vector<CandidateSkinOverlay::Item> items;
-        if (package)
-        {
-            for (const CandidateSkinCatalog::FreeDecoration &dec : package->freeDecorations)
-            {
-                CandidateSkinOverlay::Item item;
-                item.path = packageRoot + string_to_wstring(dec.image);
-                item.anchor = dec.anchor;
-                item.offsetXDip = static_cast<float>(dec.offsetXDip);
-                item.offsetYDip = static_cast<float>(dec.offsetYDip);
-                item.widthDip = static_cast<float>(dec.widthDip);
-                item.heightDip = static_cast<float>(dec.heightDip);
-                items.push_back(std::move(item));
-            }
-        }
-        impl_->skinOverlay->SetItems(std::move(items));
-    }
-    // v2 的 line_gap_dip 落到预编辑行与候选列表之间的间距上。
-    // TODO(v2 皮肤): 暂定 WebView2 独占。SetSpacing 作用于 body 的全部子元素，竖排时列表与翻页栏之间也会被拉开，
-    // WebView2 只加在 .row.pinyin 下方。
-    if (impl_->body)
-    {
-        impl_->body->SetSpacing(package && package->lineGapDip ? static_cast<float>(*package->lineGapDip) : 2.0f);
+        CandidateSkinLayers::Layers layers;
+        if (package && package->schemaVersion >= 2)
+            layers = CandidateSkinLayers::SplitDecorations(package->freeDecorations);
+        if (impl_->skinOverlayBack)
+            impl_->skinOverlayBack->SetItems(OverlayItems(layers.below, packageRoot));
+        if (impl_->skinOverlayFront)
+            impl_->skinOverlayFront->SetItems(OverlayItems(layers.above, packageRoot));
     }
 
     msimeui::Brush brush;
@@ -1068,47 +1130,35 @@ void CandidatePresenter::ApplySkin()
     brush.strokeWidth = tokens.borderWidth;
     brush.radiusX = tokens.radius;
     brush.radiusY = tokens.radius;
+    if (panelImage)
+    {
+        brush.fill = D2D1::ColorF(0, 0.0f);
+        brush.stroke = D2D1::ColorF(0, 0.0f);
+        brush.strokeWidth = 0.0f;
+        brush.radiusX = 0.0f;
+        brush.radiusY = 0.0f;
+    }
     if (impl_->card)
     {
         impl_->card->SetBrush(brush);
-        if (package && package->contentInsetsDip)
+        if (package && package->schemaVersion >= 2)
         {
-            // v2 的 content_insets_dip 从面板外缘量起，D2D 侧直接落成卡片内边距（这里没有 CSS 的边框内缘概念）。
-            const CandidateSkinCatalog::InsetsDip &insets = *package->contentInsetsDip;
-            impl_->card->SetPadding(msimeui::Thickness{static_cast<float>(insets.left), static_cast<float>(insets.top),
-                                                       static_cast<float>(insets.right),
-                                                       static_cast<float>(insets.bottom)});
+            // 内容从面板外缘量起：content_insets_dip，或九宫格边宽加基底内边距，不会压到边框贴图上。
+            impl_->card->SetPadding(
+                ToThickness(CandidateSkinLayers::ResolveContentPadding(*package, tokens.containerPad)));
         }
         else
         {
             impl_->card->SetPadding(tokens.containerPad);
         }
         impl_->card->SetMinWidth(cardMinWidthDip_);
-        if (package && package->borderImage && !package->borderImage->source.empty())
+        if (panelImage)
         {
-            // v2 九宫格：四边原样、其余拉伸。切片按 1/2/4 值展开成「上右下左」。
-            // TODO(v2 皮肤): 暂定 WebView2 独占。D2D 尚未处理 width_dip 与 fill = false，九宫格仍叠在卡片底色、
-            // 描边与阴影之上并被卡片圆角裁剪；WebView2 会把这些清成透明、圆角归零。
-            const CandidateSkinCatalog::BorderImage &bi = *package->borderImage;
-            const std::vector<double> &values = bi.stretchDip.empty() ? bi.sliceDip : bi.stretchDip;
-            const auto expand4 = [](const std::vector<double> &v, float out[4]) {
-                if (v.size() == 1)
-                    out[0] = out[1] = out[2] = out[3] = static_cast<float>(v[0]);
-                else if (v.size() == 2)
-                {
-                    out[0] = out[2] = static_cast<float>(v[0]);
-                    out[1] = out[3] = static_cast<float>(v[1]);
-                }
-                else
-                {
-                    for (size_t i = 0; i < 4; ++i)
-                        out[i] = i < v.size() ? static_cast<float>(v[i]) : 0.0f;
-                }
-            };
-            float slice[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-            expand4(values, slice);
-            impl_->card->SetBackgroundImageNineSlice(packageRoot + string_to_wstring(bi.source), slice[3], slice[0],
-                                                     slice[1], slice[2], 1.0f);
+            // CSS border-image 语义：切片以源图像素计，边宽以 DIP 计，fill 决定是否画中心块。
+            const CandidateSkinLayers::NineSlice nine = CandidateSkinLayers::ResolveNineSlice(*package->borderImage);
+            impl_->card->SetBackgroundNineSlice(
+                packageRoot + string_to_wstring(package->borderImage->source),
+                msimeui::NineSlice{ToThickness(nine.slice), ToThickness(nine.width), nine.fill}, 1.0f);
         }
         else
         {
@@ -1133,7 +1183,7 @@ std::uint64_t CandidatePresenter::FillItemsFromUi()
         item.annotation = string_to_wstring(view.annotation);
         if (translationsEnabled)
         {
-            // 逐段转成 UTF-16 再拼起来，区间按拼出来的串计，与 WebView2 的 .cand-pos / .cand-sep 同一切法。
+            // 逐段转成 UTF-16 再拼起来，区间按拼出来的串计。
             for (const auto &segment : FanyImeIpc::SegmentTranslationGloss(view.translation))
             {
                 const std::wstring text = string_to_wstring(segment.text);
@@ -1584,6 +1634,7 @@ void CandidatePresenter::ShowFromGlobalState(POINT caret)
     if (caret.y == Global::INVALID_Y)
     {
         CloseContextMenu(false);
+        StopAnimationFrames();
         SetCandidateHostCloaked(true);
         ::is_global_wnd_cand_shown = true;
         Global::SetCandidateWindowRenderedVisible(true);
@@ -1592,6 +1643,14 @@ void CandidatePresenter::ShowFromGlobalState(POINT caret)
     }
     CloseContextMenu(false);
     ApplySkin();
+    // 减少动画的系统开关可能随时改，每次显示都重读；v1 皮肤从不播放。动画从候选窗出现时起算，
+    // 同一次显示里的按键不会让它重头开始。
+    impl_->resources.SetAnimationsEnabled(skinAnimates_ && SystemAnimationsEnabled());
+    if (!animationClockRunning_)
+    {
+        impl_->resources.SetAnimationEpoch(msimeui::DeviceResources::AnimationClock::now());
+        animationClockRunning_ = true;
+    }
     std::wstring preedit;
     size_t caretIndex = 0;
     if (GetConfiguredCandidateWindowPreeditStyle() != "empty")
@@ -1697,6 +1756,8 @@ void CandidatePresenter::ShowFromGlobalState(POINT caret)
     PlaceAndShow(caret, widthDip, heightDip, cardLeftDip, cardTopDip, scale);
     ::is_global_wnd_cand_shown = true;
     Global::SetCandidateWindowRenderedVisible(true);
+    // PlaceAndShow presented while the host was still being placed; it is placed and shown only now.
+    ScheduleAnimationFrame();
     // PlaceAndShow paints synchronously, so the page is on screen now. Echo the generation of the
     // snapshot that was actually rendered (not the latest published one) so a pending digit/space
     // selection can settle against the same page the user is looking at.
@@ -1710,6 +1771,8 @@ void CandidatePresenter::Hide()
         return;
     }
     CloseContextMenu(false);
+    StopAnimationFrames();
+    animationClockRunning_ = false;
     ::is_global_wnd_cand_shown = false;
     Global::SetCandidateWindowRenderedVisible(false);
     hoverArmed_ = false;
@@ -1759,6 +1822,8 @@ void CandidatePresenter::Present()
     {
         return;
     }
+    // Samples the animation clock for this frame and starts the next-frame deadline over.
+    impl_->resources.BeginFrame();
     target->BeginDraw();
     target->Clear(D2D1::ColorF(0, 0.0f));
     if (msimeui::Scene *scene = impl_->window->GetScene())
@@ -1784,6 +1849,39 @@ void CandidatePresenter::Present()
         return;
     }
     impl_->resources.Present();
+    ScheduleAnimationFrame();
+}
+
+void CandidatePresenter::ScheduleAnimationFrame()
+{
+    if (!hwnd_ || !impl_ || !impl_->window)
+    {
+        return;
+    }
+    const msimeui::Scene *scene = impl_->window->GetScene();
+    const auto deadline = scene ? scene->GetNextFrameDeadline() : std::nullopt;
+    // While placing, PlaceAndShow presents and schedules once the host is visible; a hidden or
+    // parked host has nothing on screen to animate.
+    if (!deadline || placingHost_ || !::is_global_wnd_cand_shown || !IsWindowVisible(hwnd_))
+    {
+        StopAnimationFrames();
+        return;
+    }
+    const auto wait =
+        std::chrono::ceil<std::chrono::milliseconds>(*deadline - msimeui::DeviceResources::AnimationClock::now());
+    const UINT delay = static_cast<UINT>((std::clamp)(wait.count(), static_cast<long long>(USER_TIMER_MINIMUM),
+                                                      static_cast<long long>(USER_TIMER_MAXIMUM)));
+    // One shot per frame, replacing any pending one. A little slack lets Windows batch the wake-up
+    // with others without visibly changing the frame timing.
+    SetCoalescableTimer(hwnd_, kCandidateAnimationTimerId, delay, nullptr, (std::min)(delay / 10U, 8U));
+}
+
+void CandidatePresenter::StopAnimationFrames()
+{
+    if (hwnd_)
+    {
+        KillTimer(hwnd_, kCandidateAnimationTimerId);
+    }
 }
 
 void CandidatePresenter::PresentEmptyFrame()
@@ -1840,6 +1938,18 @@ bool CandidatePresenter::HandleMessage(UINT message, WPARAM wParam, LPARAM lPara
     switch (message)
     {
     case WM_ERASEBKGND:
+        return true;
+    case WM_TIMER:
+        if (wParam != kCandidateAnimationTimerId)
+        {
+            return false;
+        }
+        // One-shot: the Present below schedules the next frame if anything still animates.
+        StopAnimationFrames();
+        if (::is_global_wnd_cand_shown && !placingHost_)
+        {
+            Present();
+        }
         return true;
     case WM_PAINT: {
         PAINTSTRUCT ps{};

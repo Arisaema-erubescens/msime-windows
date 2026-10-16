@@ -17,6 +17,7 @@ struct CandidateSkinPalette
 };
 
 // 基础皮肤的候选项高亮圆角，对应各皮肤 CSS 的 .cand border-radius；D2D 的 CandSkinTokens 用同一组值。
+// canvas 基底沿用 fluent 的 4，皮肤可用 item_corner_radius_dip 改。
 float CandidateSkinBaseItemRadiusDip(const std::string &baseSkinId);
 
 D2D1_COLOR_F CandidateColorFromRgb(UINT rgb, float alpha = 1.0f);

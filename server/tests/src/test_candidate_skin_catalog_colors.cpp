@@ -115,8 +115,8 @@ translation = 42
     std::filesystem::remove_all(root, ec);
 }
 
-// Candidate colours are pasted into the WebView2 stylesheet, so a value that could close the declaration or the
-// rule it lands in must reject the whole skin instead of rewriting the candidate window.
+// Candidate colours follow CSS colour syntax shared by every platform's skin.toml, so a value that could close a
+// declaration or rule must reject the whole skin.
 TEST_CASE(candidate_skin_catalog_rejects_candidate_color_that_escapes_css)
 {
     const auto root = WriteSkin(L"inject", R"(

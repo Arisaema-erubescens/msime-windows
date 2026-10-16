@@ -119,3 +119,24 @@ TEST_CASE(candidate_skin_palette_flattens_translucent_surface_before_border_and_
     REQUIRE_EQ(FlattenCandidateColor(flattened.border, flattened.surface), RGB(96, 0, 96));
     REQUIRE_EQ(FlattenCandidateColor(flattened.text, flattened.surface), RGB(191, 128, 191));
 }
+
+TEST_CASE(candidate_skin_palette_canvas_base_is_transparent_with_readable_text)
+{
+    for (const bool light : {false, true})
+    {
+        const CandidateSkinPalette palette = ResolveCandidateSkinPalette("canvas", light, "auto");
+        REQUIRE_EQ(palette.surface.a, 0.0f);
+        REQUIRE_EQ(palette.border.a, 0.0f);
+        REQUIRE_EQ(palette.text.a, 1.0f);
+        // GDI users flatten the transparent surface onto its own RGB: a readable fluent-like card.
+        REQUIRE_EQ(FlattenCandidateColor(palette.surface, palette.surface),
+                   light ? RGB(255, 255, 255) : RGB(32, 32, 32));
+        REQUIRE_EQ(FlattenCandidateColor(palette.text, palette.surface), light ? RGB(26, 26, 26) : RGB(242, 242, 242));
+        REQUIRE_EQ(CandidateSkinBaseItemRadiusDip("canvas"), 4.0f);
+    }
+    // A package surface still wins over the canvas default.
+    CandidateSkinCatalog::CandidateColors colors;
+    colors.surface = "#10203080";
+    const CandidateSkinPalette custom = ResolveCandidateSkinPalette("art", false, "auto", &colors, "canvas");
+    REQUIRE(std::abs(custom.surface.a - 128.0f / 255.0f) < 0.001f);
+}

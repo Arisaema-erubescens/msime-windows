@@ -360,6 +360,12 @@ void Scene::Render(DeviceResources &deviceResources)
             popup.visual->Render(deviceResources);
         }
     }
+    nextFrameDeadline_ = deviceResources.GetNextAnimationDeadline();
+}
+
+std::optional<std::chrono::steady_clock::time_point> Scene::GetNextFrameDeadline() const
+{
+    return nextFrameDeadline_;
 }
 
 Visual *Scene::FindVisualAt(const PointF &point)

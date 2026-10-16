@@ -77,7 +77,7 @@ void AdaptSharedBase(Package &package)
     {
         return;
     }
-    // 所有使用方（含设置预览）仍按本地 CSS / D2D 的 Fluent 结构处理，不能去查不存在的共享 CSS。
+    // 所有使用方（含设置预览）仍按 Fluent 的结构处理。
     package.base = "fluent";
     if (!base->theme)
     {
@@ -235,7 +235,8 @@ bool ReadResource(const toml::table &table, const char *key, std::string &out)
     return !table.contains(key) || (ReadString(table, key, out, 256, true) && IsSafeRelativeResource(out));
 }
 
-// 皮肤颜色会被拼进 WebView2 的 CSS 声明，只放行颜色值会用到的字符，挡住 `;`、`{}` 之类能跳出声明的写法。
+// 颜色按 CSS 颜色写法解析，只放行颜色值会用到的字符，挡住 `;`、`{}` 之类的写法：同一份 skin.toml
+// 在各平台通用，这里不能比别处宽松。
 bool ReadCssColor(const toml::table &table, const char *key, std::string &out)
 {
     return ReadString(table, key, out, 80, false) && std::all_of(out.begin(), out.end(), [](unsigned char ch) {
@@ -292,7 +293,7 @@ bool ReadColors(const toml::table *table, CandidateColors &out)
     return true;
 }
 
-// 字体族会被拼进 WebView2 的 font-family（加引号）与脚本字符串，挡住引号、反斜杠、分号、花括号、尖括号和控制字符；
+// 字体族挡住引号、反斜杠、分号、花括号、尖括号和控制字符，与各平台共用的 skin.toml 规则一致；
 // 字体名可以是中文，所以非 ASCII 字节一律放行。
 bool ReadFontFamily(const toml::table &table, const char *key, std::string &out)
 {
@@ -318,6 +319,60 @@ bool ReadOptionalBounded(const toml::table &table, const char *key, double maxim
     }
     const double value = BoundedNumber(table, key, maximum);
     if (value < 0.0)
+    {
+        return false;
+    }
+    out = value;
+    return true;
+}
+
+// v2 的四边数值（切片、边宽）：1、2 或 4 个 0–500 的数，按 CSS 简写展开。键不存在时什么也不做。
+bool ReadBoxValues(const toml::table &table, const char *key, std::vector<double> &out)
+{
+    const toml::node *node = table.get(key);
+    if (!node)
+    {
+        return true;
+    }
+    const auto *array = node->as_array();
+    if (!array || (array->size() != 1 && array->size() != 2 && array->size() != 4))
+    {
+        return false;
+    }
+    for (const auto &item : *array)
+    {
+        const auto number = item.value<double>();
+        if (!number || !std::isfinite(*number) || *number < 0.0 || *number > 500.0)
+        {
+            return false;
+        }
+        out.push_back(*number);
+    }
+    return true;
+}
+
+// 可正可负的可选数值，缺省保持 out 不变。
+bool ReadSignedNumber(const toml::table &table, const char *key, double limit, double &out)
+{
+    const toml::node *node = table.get(key);
+    if (!node)
+    {
+        return true;
+    }
+    double value = 0.0;
+    if (const auto *floating = node->as_floating_point())
+    {
+        value = floating->get();
+    }
+    else if (const auto *integer = node->as_integer())
+    {
+        value = static_cast<double>(integer->get());
+    }
+    else
+    {
+        return false;
+    }
+    if (!std::isfinite(value) || std::fabs(value) > limit)
     {
         return false;
     }
@@ -374,6 +429,24 @@ const std::vector<std::string> &BuiltInIds()
     static const std::vector<std::string> ids = {"fluent",       "wechat",           "graphite",
                                                  "willow_green", "autumn_osmanthus", "microsoft"};
     return ids;
+}
+
+bool IsCanvasBase(const std::string &base)
+{
+    return base == kCanvasBase;
+}
+
+bool IsAnimatableImagePath(const std::string &path)
+{
+    const auto dot = path.find_last_of('.');
+    if (dot == std::string::npos || path.find('/', dot) != std::string::npos)
+    {
+        return false;
+    }
+    std::string extension = path.substr(dot);
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return extension == ".png" || extension == ".apng" || extension == ".gif" || extension == ".webp";
 }
 
 bool IsBuiltIn(const std::string &id)
@@ -453,10 +526,23 @@ std::optional<Package> Load(const std::filesystem::path &skinsRoot, const std::s
             !ReadString(root, "author", package.author, 120, false) ||
             !ReadString(root, "description", package.description, 500, false) ||
             !ReadString(root, "base", package.base, 32, true) ||
-            (!IsBuiltIn(package.base) && !FindSharedBase(package.base)))
+            (!IsBuiltIn(package.base) && !FindSharedBase(package.base) && !IsCanvasBase(package.base)))
         {
             SetError(error, "manifest 的基本信息无效");
             return std::nullopt;
+        }
+        // canvas 没有自己的面板，只有 v2 的九宫格与挂件能让它可见；v1 皮肤用它只会得到一张透明卡片。
+        if (IsCanvasBase(package.base) && schemaVersion < 2)
+        {
+            SetError(error, "base = \"canvas\" 只能用于 schema_version = 2 的皮肤");
+            return std::nullopt;
+        }
+        // v2 字段只在 canvas 上生效：其他 base 的卡片几何与九宫格/挂件互相打架。这种皮肤仍可使用，按 v1 处理。
+        if (schemaVersion >= 2 && !IsCanvasBase(package.base))
+        {
+            package.schemaVersion = 1;
+            package.notices.push_back("schema_version = 2 需要 base = \"canvas\"，已按 schema_version = 1 "
+                                      "加载，九宫格、挂件等 v2 字段被忽略");
         }
         const auto *supports = root["supports"].as_table();
         if (!supports || !ReadEnumArray(*supports, "layouts", {"horizontal", "vertical"}, package.layouts) ||
@@ -563,64 +649,34 @@ std::optional<Package> Load(const std::filesystem::path &skinsRoot, const std::s
                 const auto *borderImageTable = borderImageNode->as_table();
                 BorderImage bi;
                 if (!borderImageTable || !borderImageTable->contains("source") ||
-                    !ReadResource(*borderImageTable, "source", bi.source))
+                    !ReadResource(*borderImageTable, "source", bi.source) || !IsAnimatableImagePath(bi.source))
                 {
-                    SetError(error, "candidate_window.border_image.source 无效");
+                    SetError(error, "candidate_window.border_image.source 无效（需为 .png、.apng、.gif 或 .webp）");
                     return std::nullopt;
                 }
-                const auto *sliceArr = (*borderImageTable)["slice_dip"].as_array();
-                if (!sliceArr || (sliceArr->size() != 1 && sliceArr->size() != 2 && sliceArr->size() != 4))
+                if (!borderImageTable->contains("slice_dip") ||
+                    !ReadBoxValues(*borderImageTable, "slice_dip", bi.sliceDip))
                 {
-                    SetError(error, "candidate_window.border_image.slice_dip 必须包含 1、2 或 4 个数值");
+                    SetError(error, "candidate_window.border_image.slice_dip 必须是 1、2 或 4 个 0–500 的数值");
                     return std::nullopt;
                 }
-                for (const auto &val : *sliceArr)
+                if (!ReadBoxValues(*borderImageTable, "stretch_dip", bi.stretchDip))
                 {
-                    const auto num = val.value<double>();
-                    if (!num || *num < 0.0 || *num > 500.0)
-                    {
-                        SetError(error, "candidate_window.border_image.slice_dip 超出范围");
-                        return std::nullopt;
-                    }
-                    bi.sliceDip.push_back(*num);
+                    SetError(error, "candidate_window.border_image.stretch_dip 必须是 1、2 或 4 个 0–500 的数值");
+                    return std::nullopt;
                 }
-                if (const auto *stretchArr = (*borderImageTable)["stretch_dip"].as_array())
+                if (!ReadBoxValues(*borderImageTable, "width_dip", bi.widthDip))
                 {
-                    if (stretchArr->size() != 1 && stretchArr->size() != 2 && stretchArr->size() != 4)
-                    {
-                        SetError(error, "candidate_window.border_image.stretch_dip 必须包含 1、2 或 4 个数值");
-                        return std::nullopt;
-                    }
-                    for (const auto &val : *stretchArr)
-                    {
-                        const auto num = val.value<double>();
-                        if (!num || *num < 0.0 || *num > 500.0)
-                        {
-                            SetError(error, "candidate_window.border_image.stretch_dip 超出范围");
-                            return std::nullopt;
-                        }
-                        bi.stretchDip.push_back(*num);
-                    }
+                    SetError(error, "candidate_window.border_image.width_dip 必须是 1、2 或 4 个 0–500 的数值");
+                    return std::nullopt;
                 }
-                if (const auto *widthArr = (*borderImageTable)["width_dip"].as_array())
+                std::optional<bool> fill;
+                if (!ReadOptionalBool(*borderImageTable, "fill", fill))
                 {
-                    if (widthArr->size() != 1 && widthArr->size() != 2 && widthArr->size() != 4)
-                    {
-                        SetError(error, "candidate_window.border_image.width_dip 必须包含 1、2 或 4 个数值");
-                        return std::nullopt;
-                    }
-                    for (const auto &val : *widthArr)
-                    {
-                        const auto num = val.value<double>();
-                        if (!num || *num < 0.0 || *num > 500.0)
-                        {
-                            SetError(error, "candidate_window.border_image.width_dip 超出范围");
-                            return std::nullopt;
-                        }
-                        bi.widthDip.push_back(*num);
-                    }
+                    SetError(error, "candidate_window.border_image.fill 必须是 true 或 false");
+                    return std::nullopt;
                 }
-                bi.fill = (*borderImageTable)["fill"].value_or(true);
+                bi.fill = fill.value_or(true);
                 package.borderImage = bi;
             }
 
@@ -680,13 +736,19 @@ std::optional<Package> Load(const std::filesystem::path &skinsRoot, const std::s
                     SetError(error, "candidate_window.decorations 必须是数组");
                     return std::nullopt;
                 }
+                if (decorationsArr->size() > kMaxFreeDecorations)
+                {
+                    SetError(error, "candidate_window.decorations 最多 32 层");
+                    return std::nullopt;
+                }
                 for (const auto &decNode : *decorationsArr)
                 {
                     const auto *decTable = decNode.as_table();
                     FreeDecoration dec;
-                    if (!decTable || !decTable->contains("image") || !ReadResource(*decTable, "image", dec.image))
+                    if (!decTable || !decTable->contains("image") || !ReadResource(*decTable, "image", dec.image) ||
+                        !IsAnimatableImagePath(dec.image))
                     {
-                        SetError(error, "candidate_window.decorations.image 无效");
+                        SetError(error, "candidate_window.decorations.image 无效（需为 .png、.apng、.gif 或 .webp）");
                         return std::nullopt;
                     }
                     if (decTable->contains("anchor") &&
@@ -698,12 +760,27 @@ std::optional<Package> Load(const std::filesystem::path &skinsRoot, const std::s
                         SetError(error, "candidate_window.decorations.anchor 无效");
                         return std::nullopt;
                     }
-                    // 这三个键可选，缺省时 table::get 返回空指针，必须经 node_view 取值
-                    dec.offsetXDip = (*decTable)["offset_x_dip"].value_or(0.0);
-                    dec.offsetYDip = (*decTable)["offset_y_dip"].value_or(0.0);
+                    // offset_x_dip、offset_y_dip、z_index 可选；写了就必须是范围内的数（z_index 为整数）。
+                    if (!ReadSignedNumber(*decTable, "offset_x_dip", kDecorationOffsetLimitDip, dec.offsetXDip) ||
+                        !ReadSignedNumber(*decTable, "offset_y_dip", kDecorationOffsetLimitDip, dec.offsetYDip))
+                    {
+                        SetError(error, "candidate_window.decorations 的 offset_x_dip / offset_y_dip 必须在 "
+                                        "-2000–2000 之间");
+                        return std::nullopt;
+                    }
+                    if (const toml::node *zNode = decTable->get("z_index"))
+                    {
+                        const auto *zValue = zNode->as_integer();
+                        if (!zValue || zValue->get() < -kDecorationZIndexLimit ||
+                            zValue->get() > kDecorationZIndexLimit)
+                        {
+                            SetError(error, "candidate_window.decorations.z_index 必须是 -1000–1000 的整数");
+                            return std::nullopt;
+                        }
+                        dec.zIndex = static_cast<int>(zValue->get());
+                    }
                     dec.widthDip = BoundedNumber(*decTable, "width_dip", 2000.0);
                     dec.heightDip = BoundedNumber(*decTable, "height_dip", 2000.0);
-                    dec.zIndex = static_cast<int>((*decTable)["z_index"].value_or(int64_t{2}));
                     if (dec.widthDip <= 0.0 || dec.heightDip <= 0.0)
                     {
                         SetError(error, "candidate_window.decorations 的 width_dip 与 height_dip 必须大于 0");
@@ -809,6 +886,11 @@ ScanResult Scan(const std::filesystem::path &skinsRoot)
         auto package = Load(skinsRoot, folder, &error);
         if (package)
         {
+            // 能用但有问题的皮肤照样列出来，问题另记一条，免得作者以为 v2 字段生效了。
+            for (const auto &notice : package->notices)
+            {
+                result.issues.push_back({folder, notice});
+            }
             result.packages.push_back(std::move(*package));
         }
         else

@@ -47,6 +47,10 @@ class CandidatePresenter
     void CloseFixSubmenu();
     void ExpandHostForMenu(POINT clientPoint);
     void RestoreHostAfterMenu();
+    // 动图的帧时钟：Present 之后按场景给出的下一次换帧时刻排一个一次性定时器，到点再 Present。
+    // 只在候选窗显示时排；隐藏、换皮肤、窗口销毁时停。
+    void ScheduleAnimationFrame();
+    void StopAnimationFrames();
 
     struct Impl;
     std::unique_ptr<Impl> impl_;
@@ -64,6 +68,10 @@ class CandidatePresenter
     float cardMinWidthDip_ = 160.0f;
     // 皮肤开了 fit_content：没有默认的 160，卡片宽度也不在同一输入里只增不减。
     bool fitContent_ = false;
+    // 只有 v2（canvas）皮肤播放动图；v1 皮肤的图片保持原先的静态首帧。
+    bool skinAnimates_ = false;
+    // 动画从候选窗这一次显示起算；隐藏或换皮肤后，下一次显示重新从第一帧开始。
+    bool animationClockRunning_ = false;
     std::string lastSkinFingerprint_;
     int lastHostWidthPx_ = 0;
     int lastHostHeightPx_ = 0;

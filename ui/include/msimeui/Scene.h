@@ -2,8 +2,10 @@
 
 #include "Layout.h"
 
+#include <chrono>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace msimeui
@@ -31,7 +33,13 @@ class Scene
     void InvalidateArrange();
     void InvalidateArrange(Visual *source);
     void InvalidateVisual();
+    // Hosts call DeviceResources::BeginFrame before this, so the animation clock and the
+    // next-frame deadline belong to this frame.
     void Render(DeviceResources &deviceResources);
+    // When the scene rendered last needs its next frame: the earliest change of an animated
+    // image it drew. Empty when nothing on screen animates. Hosts that render on demand
+    // schedule one repaint for it (msimeui::Window does so itself).
+    std::optional<std::chrono::steady_clock::time_point> GetNextFrameDeadline() const;
     Visual *FindVisualAt(const PointF &point);
     Visual *FindFocusableAt(const PointF &point);
     bool OnMouseWheel(const POINT &point, short delta, WPARAM keyState);
@@ -48,5 +56,6 @@ class Scene
     bool hasLastLayoutSize_ = false;
     bool measureDirty_ = true;
     bool arrangeDirty_ = true;
+    std::optional<std::chrono::steady_clock::time_point> nextFrameDeadline_;
 };
 } // namespace msimeui

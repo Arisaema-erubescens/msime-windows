@@ -4,10 +4,12 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <system_error>
+#include <vector>
 
 namespace
 {
@@ -187,7 +189,7 @@ TEST_CASE(candidate_skin_catalog_rejects_invalid_toolbar_tables)
     REQUIRE(LoadFails(L"tb-not-table", window + "[[toolbar]]\n"));
     REQUIRE(LoadFails(L"tb-theme-not-table", window + "[toolbar]\ndark = \"pink\"\n"));
     REQUIRE(LoadFails(L"tb-color-type", window + "[toolbar.dark]\nhandle = 7\n"));
-    // Toolbar colours are pasted into the WebView2 page's CSS, so anything that could end the declaration is refused.
+    // Toolbar colours use the same CSS colour rules, so anything that could end a declaration is refused.
     REQUIRE(LoadFails(L"tb-color-inject", window + "[toolbar.light]\nicon = \"red; } body { display: none\"\n"));
     REQUIRE(LoadFails(L"tb-radius", window + "[toolbar]\ncorner_radius_dip = 40\n"));
     REQUIRE(LoadFails(L"tb-radius-type", window + "[toolbar]\ncorner_radius_dip = \"8px\"\n"));
@@ -213,7 +215,7 @@ TEST_CASE(candidate_skin_catalog_reads_v2_features)
 id = "art"
 name = "Art"
 version = "2.0.0"
-base = "fluent"
+base = "canvas"
 
 [supports]
 layouts = ["horizontal"]
@@ -305,7 +307,7 @@ TEST_CASE(candidate_skin_catalog_defaults_optional_decoration_keys)
 id = "art"
 name = "Art"
 version = "2.0.0"
-base = "fluent"
+base = "canvas"
 
 [supports]
 layouts = ["horizontal"]
@@ -328,4 +330,198 @@ height_dip = 30
     REQUIRE_EQ(package->freeDecorations[0].zIndex, 2);
 
     fs::remove_all(skins_root, ec);
+}
+
+namespace
+{
+// A schema 2 skin with the given base and [candidate_window] body, plus the two images it may reference.
+std::filesystem::path WriteV2Skin(const std::wstring &leaf, const std::string &base, const std::string &window,
+                                  int schema = 2)
+{
+    namespace fs = std::filesystem;
+    const fs::path skins_root =
+        fs::temp_directory_path() / (L"msime-skin-canvas-" + std::to_wstring(GetCurrentProcessId())) / leaf / L"skins";
+    std::error_code ec;
+    fs::remove_all(skins_root, ec);
+    fs::create_directories(skins_root / L"art" / L"assets", ec);
+    REQUIRE(!ec);
+    for (const wchar_t *image : {L"assets\\panel.png", L"assets\\mascot.apng", L"assets\\spark.GIF",
+                                 L"assets\\leaf.webp", L"assets\\photo.jpg"})
+    {
+        std::ofstream file(skins_root / L"art" / image, std::ios::binary | std::ios::trunc);
+        REQUIRE(file.is_open());
+    }
+    std::ofstream manifest(skins_root / L"art" / L"skin.toml", std::ios::binary | std::ios::trunc);
+    REQUIRE(manifest.is_open());
+    manifest << "schema_version = " << schema << "\nid = \"art\"\nname = \"Art\"\nversion = \"2.0.0\"\nbase = \""
+             << base << "\"\n\n[supports]\nlayouts = [\"horizontal\", \"vertical\"]\nthemes = [\"dark\", \"light\"]\n\n"
+             << "[candidate_window]\n"
+             << window;
+    return skins_root;
+}
+
+constexpr const char *kPanel = R"toml(
+[candidate_window.border_image]
+source = "assets/panel.png"
+slice_dip = [12]
+)toml";
+
+bool V2LoadFails(const std::wstring &leaf, const std::string &window)
+{
+    const auto root = WriteV2Skin(leaf, "canvas", window);
+    std::string error;
+    const bool failed = !CandidateSkinCatalog::Load(root, "art", &error).has_value() && !error.empty();
+    RemoveSkin(root);
+    return failed;
+}
+} // namespace
+
+TEST_CASE(candidate_skin_catalog_canvas_is_a_base_only)
+{
+    REQUIRE(CandidateSkinCatalog::IsCanvasBase("canvas"));
+    REQUIRE(!CandidateSkinCatalog::IsCanvasBase("fluent"));
+    // It cannot be picked on its own: it is not one of the built-in skins.
+    REQUIRE(!CandidateSkinCatalog::IsBuiltIn("canvas"));
+    const auto &ids = CandidateSkinCatalog::BuiltInIds();
+    REQUIRE(std::find(ids.begin(), ids.end(), std::string("canvas")) == ids.end());
+
+    const auto root = WriteV2Skin(L"canvas-ok", "canvas", kPanel);
+    std::string error;
+    const auto package = CandidateSkinCatalog::Load(root, "art", &error);
+    REQUIRE(error.empty());
+    REQUIRE(package.has_value());
+    REQUIRE_EQ(package->base, std::string("canvas"));
+    REQUIRE_EQ(package->schemaVersion, 2);
+    REQUIRE(package->notices.empty());
+    REQUIRE(package->borderImage.has_value());
+    REQUIRE_EQ(package->borderImage->sliceDip, std::vector<double>({12.0}));
+    REQUIRE(package->borderImage->widthDip.empty());
+    REQUIRE(package->borderImage->fill);
+    RemoveSkin(root);
+}
+
+TEST_CASE(candidate_skin_catalog_v1_cannot_use_the_canvas_base)
+{
+    const auto root = WriteV2Skin(L"canvas-v1", "canvas", "", 1);
+    std::string error;
+    REQUIRE(!CandidateSkinCatalog::Load(root, "art", &error).has_value());
+    REQUIRE(!error.empty());
+    const auto catalog = CandidateSkinCatalog::Scan(root);
+    REQUIRE(catalog.packages.empty());
+    REQUIRE_EQ(catalog.issues.size(), size_t{1});
+    RemoveSkin(root);
+}
+
+TEST_CASE(candidate_skin_catalog_v2_without_canvas_loads_as_v1_and_reports_an_issue)
+{
+    // Even invalid v2 tables do not matter: they are not read at all.
+    const std::string window = std::string(kPanel) + R"toml(line_gap_dip = 6
+
+[candidate_window.outer_insets_dip]
+top = 20
+
+[[candidate_window.decorations]]
+image = "assets/mascot.apng"
+width_dip = 40
+height_dip = 40
+z_index = "high"
+)toml";
+    for (const char *base : {"fluent", "wechat", "paper"})
+    {
+        const auto root = WriteV2Skin(L"v2-fluent", base, window);
+        std::string error;
+        const auto package = CandidateSkinCatalog::Load(root, "art", &error);
+        REQUIRE(error.empty());
+        REQUIRE(package.has_value());
+        REQUIRE_EQ(package->schemaVersion, 1);
+        REQUIRE_EQ(package->notices.size(), size_t{1});
+        REQUIRE(!package->borderImage.has_value());
+        REQUIRE(!package->lineGapDip.has_value());
+        REQUIRE(!package->outerInsetsDip.has_value());
+        REQUIRE(package->freeDecorations.empty());
+
+        const auto catalog = CandidateSkinCatalog::Scan(root);
+        REQUIRE_EQ(catalog.packages.size(), size_t{1});
+        REQUIRE_EQ(catalog.issues.size(), size_t{1});
+        REQUIRE_EQ(catalog.issues.front().folder, std::string("art"));
+        REQUIRE_EQ(catalog.issues.front().reason, package->notices.front());
+        RemoveSkin(root);
+    }
+}
+
+TEST_CASE(candidate_skin_catalog_v2_accepts_animated_image_extensions_only)
+{
+    const auto root = WriteV2Skin(L"v2-ext", "canvas", R"toml(
+[candidate_window.border_image]
+source = "assets/mascot.apng"
+slice_dip = [4, 8]
+width_dip = [2, 4, 2, 4]
+fill = false
+
+[[candidate_window.decorations]]
+image = "assets/spark.GIF"
+width_dip = 10
+height_dip = 10
+
+[[candidate_window.decorations]]
+image = "assets/leaf.webp"
+anchor = "bottom-left"
+offset_x_dip = -12.5
+offset_y_dip = 3
+width_dip = 10
+height_dip = 10
+z_index = -4
+)toml");
+    std::string error;
+    const auto package = CandidateSkinCatalog::Load(root, "art", &error);
+    REQUIRE(error.empty());
+    REQUIRE(package.has_value());
+    REQUIRE(!package->borderImage->fill);
+    REQUIRE_EQ(package->borderImage->widthDip.size(), size_t{4});
+    REQUIRE_EQ(package->freeDecorations.size(), size_t{2});
+    REQUIRE_EQ(package->freeDecorations[1].offsetXDip, -12.5);
+    REQUIRE_EQ(package->freeDecorations[1].zIndex, -4);
+    RemoveSkin(root);
+
+    REQUIRE(CandidateSkinCatalog::IsAnimatableImagePath("a/b.PNG"));
+    REQUIRE(CandidateSkinCatalog::IsAnimatableImagePath("b.apng"));
+    REQUIRE(!CandidateSkinCatalog::IsAnimatableImagePath("b.jpg"));
+    REQUIRE(!CandidateSkinCatalog::IsAnimatableImagePath("png"));
+    REQUIRE(!CandidateSkinCatalog::IsAnimatableImagePath("a.png/b"));
+}
+
+TEST_CASE(candidate_skin_catalog_rejects_invalid_v2_values)
+{
+    const std::string panel = kPanel;
+    const std::string decoration = "\n[[candidate_window.decorations]]\nimage = \"assets/mascot.apng\"\n"
+                                   "width_dip = 40\nheight_dip = 40\n";
+    REQUIRE(
+        V2LoadFails(L"bi-jpg", "[candidate_window.border_image]\nsource = \"assets/photo.jpg\"\nslice_dip = [4]\n"));
+    REQUIRE(
+        V2LoadFails(L"bi-missing", "[candidate_window.border_image]\nsource = \"assets/none.png\"\nslice_dip = [4]\n"));
+    REQUIRE(V2LoadFails(L"bi-no-slice", "[candidate_window.border_image]\nsource = \"assets/panel.png\"\n"));
+    REQUIRE(V2LoadFails(L"bi-slice-3", panel + "stretch_dip = [1, 2, 3]\n"));
+    REQUIRE(V2LoadFails(L"bi-slice-neg", "[candidate_window.border_image]\nsource = \"assets/panel.png\"\n"
+                                         "slice_dip = [-1]\n"));
+    REQUIRE(V2LoadFails(L"bi-slice-big", panel + "width_dip = [501]\n"));
+    REQUIRE(V2LoadFails(L"bi-width-scalar", panel + "width_dip = 4\n"));
+    REQUIRE(V2LoadFails(L"bi-fill", panel + "fill = \"no\"\n"));
+    REQUIRE(V2LoadFails(L"insets", "line_gap_dip = 4\n[candidate_window.content_insets_dip]\nleft = -2\n"));
+    REQUIRE(V2LoadFails(L"gap", "line_gap_dip = 101\n"));
+    REQUIRE(V2LoadFails(L"outer", "[candidate_window.outer_insets_dip]\ntop = 501\n"));
+    REQUIRE(V2LoadFails(L"dec-ext", "\n[[candidate_window.decorations]]\nimage = \"assets/photo.jpg\"\n"
+                                    "width_dip = 4\nheight_dip = 4\n"));
+    REQUIRE(V2LoadFails(L"dec-anchor", decoration + "anchor = \"middle\"\n"));
+    REQUIRE(V2LoadFails(L"dec-size", "\n[[candidate_window.decorations]]\nimage = \"assets/mascot.apng\"\n"
+                                     "width_dip = 0\nheight_dip = 40\n"));
+    REQUIRE(V2LoadFails(L"dec-offset", decoration + "offset_x_dip = 2001\n"));
+    REQUIRE(V2LoadFails(L"dec-offset-type", decoration + "offset_y_dip = \"4px\"\n"));
+    REQUIRE(V2LoadFails(L"dec-z-float", decoration + "z_index = 1.5\n"));
+    REQUIRE(V2LoadFails(L"dec-z-range", decoration + "z_index = 1001\n"));
+    std::string many;
+    for (size_t i = 0; i <= CandidateSkinCatalog::kMaxFreeDecorations; ++i)
+    {
+        many += decoration;
+    }
+    REQUIRE(V2LoadFails(L"dec-many", many));
 }

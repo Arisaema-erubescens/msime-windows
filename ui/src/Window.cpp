@@ -6,6 +6,7 @@
 #include "DebugLog.h"
 
 #include <algorithm>
+#include <chrono>
 #include <d2d1.h>
 #include <dwmapi.h>
 #include <windowsx.h>
@@ -579,6 +580,12 @@ LRESULT Window::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_TIMER:
+        if (wParam == kImageAnimationTimerId)
+        {
+            KillTimer(hwnd_, kImageAnimationTimerId);
+            Invalidate();
+            return 0;
+        }
         if (focusedVisual_ && focusedVisual_->OnTimer(wParam))
         {
             return 0;
@@ -629,6 +636,7 @@ LRESULT Window::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 
     case WM_DESTROY:
         KillTimer(hwnd_, 1);
+        KillTimer(hwnd_, kImageAnimationTimerId);
         if (quitOnDestroy_)
         {
             PostQuitMessage(0);
@@ -683,6 +691,21 @@ void Window::OnPaint()
     painting_ = false;
 
     EndPaint(hwnd_, &paint);
+    // Animated images change at their own frame times, far apart compared with the display
+    // rate, so they get a one-shot timer for the next change instead of a frame loop.
+    const auto imageDeadline = deviceResources_.GetNextAnimationDeadline();
+    // An adopted HWND belongs to a host that may not route WM_TIMER back here; it schedules
+    // its own frames from the same deadline.
+    if (imageDeadline && !animationRequested_ && !adoptedHwnd_)
+    {
+        const auto wait =
+            std::chrono::ceil<std::chrono::milliseconds>(*imageDeadline - DeviceResources::AnimationClock::now());
+        SetTimer(hwnd_, kImageAnimationTimerId, static_cast<UINT>((std::max)(wait.count(), 1LL)), nullptr);
+    }
+    else
+    {
+        KillTimer(hwnd_, kImageAnimationTimerId);
+    }
     if (animationRequested_)
     {
         // The HWND target presents in step with the display; a composition swap chain

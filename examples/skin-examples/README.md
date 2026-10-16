@@ -33,11 +33,17 @@
 ```text
 examples/skin-examples/
 ├─ skins/
-│  └─ niya-demo/              # 一个皮肤一个文件夹，文件夹名 = id
-│     ├─ skin.toml            # 元信息、候选框、工具栏、授权
+│  ├─ niya-demo/              # 一个皮肤一个文件夹，文件夹名 = id
+│  │  ├─ skin.toml            # 元信息、候选框、工具栏、授权
+│  │  └─ assets/
+│  │     ├─ character.png     # 卡片上方的装饰图
+│  │     └─ background.png    # 卡片背景图
+│  └─ canvas-demo/            # schema_version 2 + canvas 基底的全贴图样例
+│     ├─ skin.toml
 │     └─ assets/
-│        ├─ character.png     # 卡片上方的装饰图
-│        └─ background.png    # 卡片背景图
+│        ├─ panel.png         # 九宫格面板（2 倍图）
+│        ├─ leaf.png          # 面板下层挂件
+│        └─ sparkle.apng      # 面板上层的循环 APNG 挂件
 ├─ schema/                    # manifest 字段说明
 ├─ tests/                     # CI 用的 manifest 与安装脚本测试
 ├─ preview.html               # 本地预览
@@ -103,12 +109,41 @@ icon = "#f6e4eb"
 
 完整字段见 [schema/README.md](schema/README.md)。
 
+## 全贴图皮肤（schema_version 2）
+
+`canvas-demo` 演示 v2 皮肤：`schema_version = 2`、`base = "canvas"`，候选框的外观全部来自贴图。
+
+```toml
+schema_version = 2
+base = "canvas"                  # v2 必须以 canvas 为 base
+
+[candidate_window.border_image]
+source = "assets/panel.png"      # 64×64 的 2 倍图
+slice_dip = [20]                 # 切片线，按源图像素
+width_dip = [10]                 # 边框绘制宽度，按 DIP：2 倍图写切片的一半，200% 缩放下逐像素清晰
+
+[[candidate_window.decorations]]
+image = "assets/sparkle.apng"    # APNG / GIF 动图会播放
+anchor = "top-right"
+offset_x_dip = 10
+offset_y_dip = -12
+width_dip = 24
+height_dip = 24
+z_index = 2                      # z_index < 1 画在面板之下，其余画在面板之上
+```
+
+- `canvas` 本身透明、无描边、无圆角、无阴影，不能单独选用；面板图、挂件和配色都由皮肤给出。
+- 面板四角画死的花纹要落在切片之内，否则会被拉伸。中心块可以用 `fill = false` 留空。
+- 文字离面板外缘的距离用 `content_insets_dip`，挂件伸出卡片时用 `outer_insets_dip` 给窗口留出空白。
+- 动图在系统关闭「动画效果」时只显示第一帧。动图解码后合计不超过 64 MB、最多 1024 帧，超出时只显示第一帧。
+- 样例里的三张图都是程序生成的几何图形，随本目录以 MIT 授权，可以直接改用。
+
 ## 制作约束
 
 - 只用 `skin.toml` 和本地图片，不支持自定义 JavaScript，也不再读取 `cand.css` 或工具栏 CSS。
 - 图片路径相对于皮肤目录，不能指向目录之外。
 - `id` 只能包含小写字母、数字、点、下划线和连字符，最长 64 个字符。
-- 单张图片建议不超过 500 KB（CI 会检查）。
+- 单张图片建议不超过 500 KB（CI 会检查 PNG、APNG、GIF 和 WebP）。
 
 ## 测试
 

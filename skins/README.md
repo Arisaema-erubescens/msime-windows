@@ -19,7 +19,7 @@
 
 ## 默认皮肤设置（`default/`）
 
-[`default/`](default/) 不是外部皮肤，而是六个内置皮肤（`fluent`、`wechat`、`graphite`、`willow_green`、`autumn_osmanthus`、`microsoft`）各自的设置清单。安装包会把它们放到数据目录的 `skins\default\<id>\skin.toml`，升级时只补缺失的文件、不覆盖已有的，所以可以直接在那里改。
+[`default/`](default/) 不是外部皮肤，而是六个内置皮肤（`fluent`、`wechat`、`graphite`、`willow_green`、`autumn_osmanthus`、`microsoft`）各自的设置清单；`canvas` 基底没有自己的清单，开关沿用 `fluent` 的。安装包会把它们放到数据目录的 `skins\default\<id>\skin.toml`，升级时只补缺失的文件、不覆盖已有的，所以可以直接在那里改。
 
 内置皮肤的外观仍由输入法内置样式决定，这份清单只承载皮肤级的开关，目前支持：
 
@@ -59,9 +59,9 @@ my-skin/
 
 | 表 / 键 | 说明 |
 | --- | --- |
-| `schema_version` | 皮肤格式版本，目前为 `1` |
+| `schema_version` | 皮肤格式版本，`1` 或 `2`；`2` 是全贴图皮肤，必须以 `canvas` 为 base |
 | `id` / `name` / `version` / `author` / `description` | 基本信息，`id` 建议与目录名一致 |
-| `base` | 继承的内置皮肤，如 `fluent`；未写的键沿用 base |
+| `base` | 继承的内置皮肤，如 `fluent`；未写的键沿用 base。`canvas` 是只给 v2 皮肤用的全贴图基底（透明面板，外观来自九宫格面板图与挂件），不能单独选用，见 [schema 说明](../examples/skin-examples/schema/README.md) |
 | `[supports]` | `layouts`（`horizontal` / `vertical`）、`themes`（`dark` / `light`） |
 | `[candidate_window]` | `min_width_dip`、`corner_radius_dip`（0–32）、`border_width_dip`（0–4）、`item_corner_radius_dip`（高亮圆角，0–16）、`shadow`（`none` / `soft` / `strong`）、`font_family`（排在用户字体前面）、`page_arrows`（翻页箭头：横排在候选右侧，竖排在最后一行下方、与序号左对齐；不写时沿用 base 的[默认皮肤设置](#默认皮肤设置default)，出厂关闭）、`fit_content`（卡片严格按文字宽度收紧，`min_width_dip` 与装饰图宽度仍然生效；不写时沿用 base 的默认皮肤设置，出厂关闭） |
 | `[candidate_window.decoration]` | 卡片上方的装饰图：`image`、`top_inset_dip`、`width_dip`、`align`（`left` / `center` / `right`） |

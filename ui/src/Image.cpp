@@ -31,6 +31,31 @@ SizeF ReadImageSize(const std::wstring &filePath)
         return {};
     }
 
+    // A GIF frame can be smaller than the animation; its logical screen is the image size.
+    GUID container = {};
+    ComPtr<IWICMetadataQueryReader> reader;
+    if (SUCCEEDED(decoder->GetContainerFormat(&container)) && IsEqualGUID(container, GUID_ContainerFormatGif) &&
+        SUCCEEDED(decoder->GetMetadataQueryReader(reader.GetAddressOf())))
+    {
+        PROPVARIANT width;
+        PROPVARIANT height;
+        PropVariantInit(&width);
+        PropVariantInit(&height);
+        SizeF size;
+        if (SUCCEEDED(reader->GetMetadataByName(L"/logscrdesc/Width", &width)) && width.vt == VT_UI2 &&
+            SUCCEEDED(reader->GetMetadataByName(L"/logscrdesc/Height", &height)) && height.vt == VT_UI2 &&
+            width.uiVal > 0 && height.uiVal > 0)
+        {
+            size = {static_cast<float>(width.uiVal), static_cast<float>(height.uiVal)};
+        }
+        PropVariantClear(&width);
+        PropVariantClear(&height);
+        if (size.width > 0.0f)
+        {
+            return size;
+        }
+    }
+
     UINT width = 0;
     UINT height = 0;
     return SUCCEEDED(frame->GetSize(&width, &height)) ? SizeF{static_cast<float>(width), static_cast<float>(height)}
@@ -154,7 +179,7 @@ void Image::Arrange(const RectF &finalRect)
 void Image::Render(DeviceResources &deviceResources)
 {
     D2D1_SIZE_F sourceSize = {};
-    ID2D1Bitmap *bitmap = deviceResources.GetBitmapFromFile(filePath_, &sourceSize);
+    ID2D1Bitmap *bitmap = deviceResources.GetImageFrame(filePath_, &sourceSize);
     ID2D1RenderTarget *target = deviceResources.GetRenderTarget();
     if (!bitmap || !target || sourceSize.width <= 0.0f || sourceSize.height <= 0.0f || bounds_.width <= 0.0f ||
         bounds_.height <= 0.0f)

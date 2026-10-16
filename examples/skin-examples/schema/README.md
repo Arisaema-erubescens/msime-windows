@@ -1,12 +1,15 @@
 # 外部皮肤 manifest（TOML）
 
-每个皮肤目录需要 `skin.toml`，`id` 必须与文件夹名一致。`schema_version` 支持 `1` 与 `2`（v2 为面向全贴图与复杂立绘皮肤的高级规范）。候选框由 Direct2D 原生渲染器绘制；v2 的部分字段在原生端仍在补全，下文标「v2」的字段以实际效果为准。
+每个皮肤目录需要 `skin.toml`，`id` 必须与文件夹名一致。`schema_version` 支持 `1` 与 `2`：v2 是面向全贴图与复杂立绘皮肤的规范，必须以 [`canvas`](#canvas-基底v2) 为 `base`，由 Direct2D 候选窗完整绘制（九宫格面板、上下两层挂件、动图）。
 
 候选框和悬浮工具栏都由 `skin.toml` 声明，不要再提供 `cand.css` 或工具栏 CSS。所有图片路径都相对于皮肤目录，且不能指向目录之外。
 
 ## 顶层字段
 
-- 必填：`schema_version`（`1` 或 `2`）、`id`、`name`、`version`、`base`（继承的内置皮肤：`fluent`、`wechat`、`graphite`、`willow_green`、`autumn_osmanthus`、`microsoft`；或与 msime 共享的基底：`system`、`shuishan`、`light`、`paper`、`night`、`ink`，按 `fluent` 的结构绘制并补上基底配色，固定明暗的基底只在对应的 `themes` 下生效）
+- 必填：`schema_version`（`1` 或 `2`）、`id`、`name`、`version`、`base`（继承的内置皮肤：`fluent`、`wechat`、`graphite`、`willow_green`、`autumn_osmanthus`、`microsoft`；或与 msime 共享的基底：`system`、`shuishan`、`light`、`paper`、`night`、`ink`，按 `fluent` 的结构绘制并补上基底配色，固定明暗的基底只在对应的 `themes` 下生效；或全贴图基底 `canvas`，只用于 v2）
+- `schema_version` 与 `base` 的搭配：
+  - `schema_version = 2` 必须写 `base = "canvas"`。写了 2 而 `base` 是别的基底时，皮肤仍可使用，但按 `schema_version = 1` 加载，下面标「v2」的表和键全部忽略（连同其中的错误），设置页的诊断信息里会多一条说明。
+  - `schema_version = 1` 不能用 `canvas`：没有面板贴图它只是一张透明卡片，这种皮肤不会出现在可选列表里。
 - 可选：`author`、`description`
 - `[supports]`：`layouts`（`horizontal` / `vertical`）、`themes`（`dark` / `light`）
 - `[license]`：`code`、`assets`
@@ -38,25 +41,35 @@
 - `fit`：`cover`（铺满裁切）| `contain`（完整显示）| `stretch`（拉伸）
 - `opacity`：`0`–`1`
 
+### `canvas` 基底（v2）
+
+全贴图皮肤的地基：面板透明、没有描边、直角、默认没有阴影，候选框长什么样完全由下面的九宫格面板图和挂件决定。它只能作为 `base`，不能在设置页单独选用。
+
+- 文字与高亮用不依赖底色的中性色：深色主题近白文字（`#f2f2f2`）、白色半透明的选中 / 悬停底，浅色主题近黑文字（`#1a1a1a`）、黑色半透明的选中 / 悬停底；高亮圆角 4，可用 `item_corner_radius_dip` 改。贴图偏深或偏浅时用 `[candidate.dark]` / `[candidate.light]` 改配色。
+- v1 的键照样可用：配色、`font_family`、`page_arrows`、`fit_content`、`min_width_dip`、`corner_radius_dip`、`border_width_dip`、`shadow`（写 `soft` / `strong` 才有阴影）、`[candidate_window.decoration]`、`[candidate_window.background]`、`[toolbar]`。写了 `border_image` 时，卡片的底色、描边、圆角、阴影和 `background` 背景图都让给面板图。
+- 右键菜单与悬浮工具栏没有贴图，沿用 `fluent` 的样式，可用 `[candidate.*.menu]` 与 `[toolbar]` 改。翻页箭头、`fit_content` 的出厂值也取 `fluent` 的默认皮肤设置。
+
 ### `[candidate_window.border_image]`（v2 可选）
 
-九宫格背景拉伸，面板整体贴图，用于全贴图与复杂纹理面板。
+九宫格面板图，语义同 CSS `border-image`（`border-image-repeat: stretch`）：四角按边宽缩放，四边沿长度方向拉伸，中心双向拉伸。
 
-- `source`：图片路径（如 `assets/skin1.png`，支持 APNG/WebP/PNG）
-- `slice_dip`：`[top, right, bottom, left]` 切片线位置，正数数组，支持 1~4 个值
-- `stretch_dip`：可选，可拉伸区，语义同 `slice_dip` 但更直白，给出时覆盖它。**面板图里画死的装饰必须落在可拉伸区之外**，否则会被横向拉长；例如帆船画在右侧，就把右侧切片放到船身左侧
-- `width_dip`：可选，边框绘制宽度，支持 1~4 个值
-- `fill`：可选，布尔值，是否保留九宫格中心内容区域，默认为 `true`
+- `source`：图片路径，`.png`、`.apng`、`.gif` 或 `.webp`
+- `slice_dip`：切片线位置，**按源图像素计**（同 CSS `border-image-slice` 的数值，键名里的 `_dip` 是历史写法），1、2 或 4 个 `0`–`500` 的数，按 CSS 简写展开成上右下左（1 个值四边相同，2 个值是「上下 左右」）
+- `stretch_dip`：可选，同为源图像素，给出时代替 `slice_dip`。**面板图里画死的装饰必须落在切片之内（可拉伸区之外）**，否则会被拉长；例如帆船画在右侧，就把右侧切片放到船身左侧
+- `width_dip`：可选，四边在屏幕上画多宽，**按 DIP 计**（同 CSS `border-image-width`），写法同上。不写时取切片的数值当 DIP。给 2 倍图时写成切片的一半，200% 缩放下逐像素清晰、100% 下是缩小一半的同一张图。两条对边加起来比面板还宽时四边按同一比例缩小
+- `fill`：可选，布尔值，是否画中心块，默认 `true`；`false` 时中心留空、透出桌面
+
+面板图画在卡片的底色之上、文字之下，不按圆角裁剪（同 CSS）。动图面板也会播放，但面板一般建议用静态图，把动画留给挂件。
 
 ### `[candidate_window.content_insets_dip]`（v2 可选）
 
-候选框内容与文字的安全内边距，**从面板外缘量起**，用来避开贴图四周自带的花纹或立绘。渲染时会把该方向的边框宽度扣掉，落到内容盒上。
+候选框内容与文字的安全内边距，**从面板外缘量起**，用来避开贴图四周自带的花纹或立绘。某一边小于九宫格该边的边宽（`width_dip`）时按边宽算，文字不会压在边框上（同 CSS 的 `border + padding`）。不写时是边宽再加 5 DIP。
 
-- `top` / `right` / `bottom` / `left`：四边内边距浮点数
+- `top` / `right` / `bottom` / `left`：四边内边距，`top` / `bottom` `0`–`200`，`left` / `right` `0`–`500`
 
 ### `[candidate_window]` 的 `line_gap_dip`（v2 可选）
 
-预编辑行与候选行之间的行距，`0`–`100`。不写则沿用 `base` 的行距。
+预编辑行与候选之间的距离，`0`–`100`。只影响这一处，竖排时候选与翻页箭头之间的间距不变。不写则沿用 `base` 的行距。
 
 ### `[candidate_window.outer_insets_dip]`（v2 可选）
 
@@ -68,13 +81,25 @@
 
 ### `[[candidate_window.decorations]]`（v2 可选，数组表）
 
-自由锚定立绘挂件层，支持叠加角色立绘与 APNG 动图，层数不限。
+自由锚定的立绘挂件，可以叠加角色立绘与动图，最多 32 层。
 
-- `image`：图片路径
-- `anchor`：`top-left` | `top-right` | `bottom-left` | `bottom-right` | `left` | `right` | `top` | `bottom` | `center`
-- `width_dip` / `height_dip`：挂件的尺寸
-- `offset_x_dip` / `offset_y_dip`：相对锚点的平移量，正数向右、向下，两个后端同一套语义
-- `z_index`：层级，默认为 `2`
+- `image`：图片路径，`.png`、`.apng`、`.gif` 或 `.webp`
+- `anchor`：挂件框贴着面板的哪个位置：`top-left` | `top-right` | `bottom-left` | `bottom-right` | `left` | `right` | `top` | `bottom` | `center`，默认 `right`
+- `width_dip` / `height_dip`：挂件框的尺寸，`0`–`2000`（不含 0）；图片在框里等比缩放、居中（同 CSS `background-size: contain`）
+- `offset_x_dip` / `offset_y_dip`：相对锚点的平移量，`-2000`–`2000`，正数向右、向下
+- `z_index`：层级，`-1000`–`1000` 的整数，默认 `2`。面板自身相当于 `1`：**`z_index < 1` 的挂件画在面板之下**（只有伸出面板的部分看得见），其余画在面板与文字之上。同层按 `z_index` 从小到大、相同时按书写顺序叠放
+
+挂件不参与布局，也不接收点击；伸到面板外面时要用 `outer_insets_dip` 给窗口留出空白。
+
+### 动图（v2）
+
+v2 皮肤里的图片可以是动图：APNG（按 [APNG 规范](https://wiki.mozilla.org/APNG_Specification) 解码）、GIF，以及系统 WebP 解码器能逐帧读出的动画 WebP（每帧 100 ms）。
+
+- 帧时长与浏览器一致：`delay_den` 为 0 按 100 算，10 ms 及以下按 100 ms；APNG 的 `num_plays`、GIF 的 NETSCAPE 循环次数生效，播完停在最后一帧。
+- 动画从候选窗出现时开始，同一次显示里打字不会让它重头开始；候选窗隐藏或换皮肤后，下一次显示从第一帧开始。
+- 系统关闭了动画效果（设置 → 辅助功能 → 视觉效果 → 动画效果）时显示静态图：APNG 显示它的默认图（通常就是第一帧），GIF 显示第一帧。
+- 一张动图超过 1024 帧或解码后超过 64 MB、文件损坏或不合规范时只显示第一帧（静态图）。所有动图的帧合计受 64 MB 显存预算约束。
+- v1 皮肤里的图片始终是静态首帧，与以往一致。
 
 ## `[candidate.dark]` / `[candidate.light]`
 

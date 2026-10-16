@@ -22,6 +22,7 @@
 #include <mutex>
 #include <stdexcept>
 #include "skin/candidate_skin_catalog.h"
+#include "window/candidate_skin_layers.h"
 #include "utils/common_utils.h"
 #include "utils/single_instance.h"
 #include "voice-input/voice_providers.h"
@@ -181,6 +182,28 @@ nlohmann::json CandidateColorsToJson(const CandidateSkinCatalog::CandidateColors
         menu["hover"] = colors.menuHover;
     if (!menu.empty())
         json["menu"] = std::move(menu);
+    return json;
+}
+
+// canvas（v2）皮肤给设置页预览的面板几何，与候选窗同一套换算；四边按「上右下左」。不是 v2 时为 null。
+nlohmann::json CanvasSkinPreviewJson(const CandidateSkinCatalog::Package &skin)
+{
+    if (skin.schemaVersion < 2)
+        return nullptr;
+    const auto edges = [](const CandidateSkinLayers::Edges &e) {
+        return nlohmann::json::array({e.top, e.right, e.bottom, e.left});
+    };
+    // 5 DIP 是候选窗 canvas 基底自己的内边距（CandidatePresenter 的 containerPad）。
+    nlohmann::json json = {{"padding", edges(CandidateSkinLayers::ResolveContentPadding(skin, 5.0))},
+                           {"panel", nullptr}};
+    if (skin.borderImage && !skin.borderImage->source.empty())
+    {
+        const CandidateSkinLayers::NineSlice nine = CandidateSkinLayers::ResolveNineSlice(*skin.borderImage);
+        json["panel"] = {{"image", skin.borderImage->source},
+                         {"slice", edges(nine.slice)},
+                         {"width", edges(nine.width)},
+                         {"fill", nine.fill}};
+    }
     return json;
 }
 
@@ -380,6 +403,8 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
                   skin.toolbarCornerRadiusDip ? nlohmann::json(*skin.toolbarCornerRadiusDip) : nlohmann::json()},
                  // 已按 base 的默认皮肤清单解析好，页面预览直接用。
                  {"pageArrows", CandidateSkinCatalog::ResolvePageArrows(skins_root, skin.id, &skin)},
+                 {"schemaVersion", skin.schemaVersion},
+                 {"canvas", CanvasSkinPreviewJson(skin)},
                  {"compatible", CandidateSkinCatalog::Supports(skin, skin_layout, skin_theme)}});
         }
     }

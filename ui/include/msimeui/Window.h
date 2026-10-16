@@ -80,6 +80,9 @@ class Window
     void SetScene(std::unique_ptr<Scene> scene);
 
   private:
+    // Repaints when the next frame of an animated image is due.
+    static constexpr UINT_PTR kImageAnimationTimerId = 0x4D49;
+
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
     LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
     void OnPaint();

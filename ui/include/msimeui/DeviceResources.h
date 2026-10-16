@@ -7,12 +7,15 @@
 #include <dxgi1_2.h>
 #include <dwrite.h>
 #include <wincodec.h>
+#include <chrono>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 #include <wrl/client.h>
 
+#include "AnimatedImage.h"
 #include "Types.h"
 
 namespace msimeui
@@ -20,8 +23,12 @@ namespace msimeui
 class DeviceResources
 {
   public:
+    using AnimationClock = std::chrono::steady_clock;
+
     // Marks the start of a frame. Brushes not used since the previous frame become
-    // evictable, and the clip stack used for culling starts over.
+    // evictable, and the clip stack used for culling starts over. The animation clock is
+    // sampled here, so every animated image in the frame shows the same moment, and the
+    // next-frame deadline starts over.
     void BeginFrame();
 
     // Axis-aligned clip that also feeds IsVisible(), so containers can skip children
@@ -63,6 +70,30 @@ class DeviceResources
                                      DWRITE_TEXT_ALIGNMENT textAlignment, DWRITE_PARAGRAPH_ALIGNMENT paragraphAlignment,
                                      DWRITE_WORD_WRAPPING wordWrapping);
     ID2D1Bitmap *GetBitmapFromFile(const std::wstring &filePath, D2D1_SIZE_F *size = nullptr);
+    // Like GetBitmapFromFile, but an animated image (APNG, animated GIF, multi-frame WebP)
+    // returns the frame for the current animation time and moves GetNextAnimationDeadline()
+    // to the moment that frame changes. Still images take the GetBitmapFromFile path. Sizes
+    // are in DIPs at 96 DPI, one DIP per image pixel, the same as GetBitmapFromFile.
+    ID2D1Bitmap *GetImageFrame(const std::wstring &filePath, D2D1_SIZE_F *size = nullptr);
+    // Drops every decoded image, still and animated, so files changed on disk are read again.
+    void ClearImageCaches();
+    // Off: images are drawn still, as GetBitmapFromFile decodes them (the APNG default image,
+    // the first GIF frame), and ask for no further frames. Hosts turn this off when the system
+    // asks for reduced motion.
+    void SetAnimationsEnabled(bool enabled);
+    bool AreAnimationsEnabled() const;
+    // Animations measure their elapsed time from this point; moving it restarts them all.
+    void SetAnimationEpoch(AnimationClock::time_point epoch);
+    // Overrides the time BeginFrame sampled, for hosts that keep their own frame clock.
+    void SetFrameTime(AnimationClock::time_point now);
+    // Earliest moment an animated image drawn since BeginFrame changes; empty when nothing
+    // drawn is animating. Hosts schedule their next frame for it.
+    std::optional<AnimationClock::time_point> GetNextAnimationDeadline() const;
+    // GPU memory all animated images may take together (every frame is a bitmap). An
+    // animation that does not fit on its own is shown still; others evict the least
+    // recently drawn animation.
+    void SetAnimatedBitmapBudget(size_t bytes);
+    size_t GetAnimatedBitmapBytes() const;
     // Rasterizes an SVG document (UTF-8 markup) at `sizeDips` for the current DPI and
     // caches the bitmap. Needs ID2D1DeviceContext5 (Windows 10 1703+); null otherwise.
     ID2D1Bitmap *GetSvgBitmap(const std::string &markup, const SizeF &sizeDips);
@@ -102,7 +133,23 @@ class DeviceResources
         Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
     };
 
+    struct AnimatedBitmapEntry
+    {
+        std::wstring filePath;
+        D2D1_SIZE_F size = {};
+        std::vector<Microsoft::WRL::ComPtr<ID2D1Bitmap>> frames;
+        AnimationTimeline timeline;
+        size_t bytes = 0;
+        uint64_t lastFrame = 0;
+    };
+
+    AnimatedBitmapEntry *FindOrLoadAnimation(const std::wstring &filePath);
+    void RememberStillImage(const std::wstring &filePath);
+    void TrimAnimatedBitmaps(size_t incoming);
+
     static constexpr size_t kMaxCachedBitmaps = 4;
+    static constexpr size_t kDefaultAnimatedBitmapBudget = 64ULL * 1024 * 1024;
+    static constexpr size_t kMaxRememberedStillImages = 64;
     static constexpr size_t kMaxCachedSvgBitmaps = 96;
     // Animated colors produce a new brush every frame; past this many, brushes left
     // over from earlier frames are dropped.
@@ -141,5 +188,16 @@ class DeviceResources
     std::vector<BitmapCacheEntry> bitmapCache_;
     std::vector<SvgCacheEntry> svgCache_;
     std::vector<RectF> clipStack_;
+    // Animated images, decoded once per device. Paths found to be still images are
+    // remembered so they are not probed again; that is a property of the file, not of
+    // the device, so it survives DiscardTarget.
+    std::vector<AnimatedBitmapEntry> animatedCache_;
+    std::vector<std::wstring> stillImagePaths_;
+    size_t animatedBytes_ = 0;
+    size_t animatedBudget_ = kDefaultAnimatedBitmapBudget;
+    bool animationsEnabled_ = true;
+    AnimationClock::time_point animationEpoch_ = AnimationClock::now();
+    std::optional<AnimationClock::time_point> frameTime_;
+    std::optional<AnimationClock::time_point> nextAnimationDeadline_;
 };
 } // namespace msimeui

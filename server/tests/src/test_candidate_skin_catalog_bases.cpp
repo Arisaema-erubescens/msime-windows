@@ -87,7 +87,9 @@ TEST_CASE(candidate_skin_shared_fixed_bases_inherit_candidate_menu_and_toolbar_c
             const auto package = CandidateSkinCatalog::Load(fixture.root, "sample");
             REQUIRE(package.has_value());
             REQUIRE_EQ(package->base, std::string("fluent"));
-            REQUIRE_EQ(package->schemaVersion, schema);
+            // schema_version 2 needs the canvas base; on a shared base it loads as 1 with a notice.
+            REQUIRE_EQ(package->schemaVersion, 1);
+            REQUIRE_EQ(package->notices.size(), size_t(schema == 2 ? 1 : 0));
             REQUIRE_EQ(package->themes, std::vector<std::string>({entry.theme}));
             const bool light = std::string(entry.theme) == "light";
             const auto &colors = light ? package->light : package->dark;

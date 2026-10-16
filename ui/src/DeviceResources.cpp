@@ -90,6 +90,176 @@ void DeviceResources::BeginFrame()
     ++frame_;
     clipStack_.clear();
     TrimBrushCache();
+    frameTime_ = AnimationClock::now();
+    nextAnimationDeadline_.reset();
+}
+
+void DeviceResources::SetAnimationsEnabled(bool enabled)
+{
+    animationsEnabled_ = enabled;
+    if (!enabled)
+    {
+        nextAnimationDeadline_.reset();
+    }
+}
+
+bool DeviceResources::AreAnimationsEnabled() const
+{
+    return animationsEnabled_;
+}
+
+void DeviceResources::SetAnimationEpoch(AnimationClock::time_point epoch)
+{
+    animationEpoch_ = epoch;
+}
+
+void DeviceResources::SetFrameTime(AnimationClock::time_point now)
+{
+    frameTime_ = now;
+}
+
+std::optional<DeviceResources::AnimationClock::time_point> DeviceResources::GetNextAnimationDeadline() const
+{
+    return nextAnimationDeadline_;
+}
+
+void DeviceResources::ClearImageCaches()
+{
+    bitmapCache_.clear();
+    animatedCache_.clear();
+    animatedBytes_ = 0;
+    stillImagePaths_.clear();
+}
+
+void DeviceResources::SetAnimatedBitmapBudget(size_t bytes)
+{
+    animatedBudget_ = bytes;
+    TrimAnimatedBitmaps(0);
+}
+
+size_t DeviceResources::GetAnimatedBitmapBytes() const
+{
+    return animatedBytes_;
+}
+
+void DeviceResources::RememberStillImage(const std::wstring &filePath)
+{
+    if (std::find(stillImagePaths_.begin(), stillImagePaths_.end(), filePath) != stillImagePaths_.end())
+    {
+        return;
+    }
+    if (stillImagePaths_.size() >= kMaxRememberedStillImages)
+    {
+        stillImagePaths_.erase(stillImagePaths_.begin());
+    }
+    stillImagePaths_.push_back(filePath);
+}
+
+void DeviceResources::TrimAnimatedBitmaps(size_t incoming)
+{
+    // Least recently drawn first. Bitmaps already handed to the render target this frame stay
+    // alive inside Direct2D until the batch is flushed, so dropping our reference is safe.
+    while (!animatedCache_.empty() && animatedBytes_ + incoming > animatedBudget_)
+    {
+        auto oldest = std::min_element(
+            animatedCache_.begin(), animatedCache_.end(),
+            [](const AnimatedBitmapEntry &a, const AnimatedBitmapEntry &b) { return a.lastFrame < b.lastFrame; });
+        animatedBytes_ -= oldest->bytes;
+        animatedCache_.erase(oldest);
+    }
+}
+
+DeviceResources::AnimatedBitmapEntry *DeviceResources::FindOrLoadAnimation(const std::wstring &filePath)
+{
+    for (auto &entry : animatedCache_)
+    {
+        if (entry.filePath == filePath)
+        {
+            return &entry;
+        }
+    }
+    if (std::find(stillImagePaths_.begin(), stillImagePaths_.end(), filePath) != stillImagePaths_.end())
+    {
+        return nullptr;
+    }
+    ID2D1RenderTarget *target = GetRenderTarget();
+    if (!target || !wicFactory_)
+    {
+        return nullptr;
+    }
+    // A cheap look at the container first: still images never pay for a full decode here.
+    if (!AnimatedImage::MayBeAnimated(wicFactory_.Get(), filePath))
+    {
+        RememberStillImage(filePath);
+        return nullptr;
+    }
+    std::optional<AnimatedImage> image = AnimatedImage::DecodeFile(wicFactory_.Get(), filePath);
+    // Malformed animations decode to their still frame; an animation larger than the whole
+    // budget is shown still rather than evicting everything else.
+    if (!image || !image->IsAnimated() || image->DecodedBytes() > animatedBudget_)
+    {
+        RememberStillImage(filePath);
+        return nullptr;
+    }
+    AnimatedBitmapEntry entry;
+    entry.filePath = filePath;
+    entry.timeline = image->Timeline();
+    entry.bytes = static_cast<size_t>(image->DecodedBytes());
+    const D2D1_BITMAP_PROPERTIES properties = D2D1::BitmapProperties(
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96.0f, 96.0f);
+    for (size_t index = 0; index < image->FrameCount(); ++index)
+    {
+        Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
+        if (FAILED(target->CreateBitmap(D2D1::SizeU(image->Width(), image->Height()), image->FramePixels(index).data(),
+                                        image->Width() * 4, &properties, bitmap.GetAddressOf())))
+        {
+            return nullptr;
+        }
+        entry.frames.push_back(std::move(bitmap));
+    }
+    entry.size = D2D1::SizeF(static_cast<float>(image->Width()), static_cast<float>(image->Height()));
+    TrimAnimatedBitmaps(entry.bytes);
+    animatedBytes_ += entry.bytes;
+    animatedCache_.push_back(std::move(entry));
+    return &animatedCache_.back();
+}
+
+ID2D1Bitmap *DeviceResources::GetImageFrame(const std::wstring &filePath, D2D1_SIZE_F *size)
+{
+    if (filePath.empty() || !GetRenderTarget())
+    {
+        return nullptr;
+    }
+    // Without animations an image is exactly what a still decoder shows: the APNG default image,
+    // the first GIF frame. Nothing animated is decoded or kept on the GPU for it.
+    if (!animationsEnabled_)
+    {
+        return GetBitmapFromFile(filePath, size);
+    }
+    AnimatedBitmapEntry *entry = FindOrLoadAnimation(filePath);
+    if (!entry)
+    {
+        return GetBitmapFromFile(filePath, size);
+    }
+    entry->lastFrame = frame_;
+    if (size)
+    {
+        *size = entry->size;
+    }
+    const AnimationClock::time_point now = frameTime_.value_or(AnimationClock::now());
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - animationEpoch_).count();
+    const AnimationTimeline::Sample sample =
+        entry->timeline.SampleAt(static_cast<uint64_t>((std::max)(elapsed, static_cast<decltype(elapsed)>(0))));
+    if (sample.nextChangeMs)
+    {
+        const AnimationClock::time_point deadline =
+            animationEpoch_ + std::chrono::milliseconds(static_cast<int64_t>(*sample.nextChangeMs));
+        if (!nextAnimationDeadline_ || deadline < *nextAnimationDeadline_)
+        {
+            nextAnimationDeadline_ = deadline;
+        }
+    }
+    return entry->frames[(std::min)(sample.frameIndex, entry->frames.size() - 1)].Get();
 }
 
 void DeviceResources::TrimBrushCache()
@@ -445,6 +615,8 @@ void DeviceResources::DiscardTarget()
     brushCache_.clear();
     bitmapCache_.clear();
     svgCache_.clear();
+    animatedCache_.clear();
+    animatedBytes_ = 0;
     clipStack_.clear();
     composition_ = false;
 }

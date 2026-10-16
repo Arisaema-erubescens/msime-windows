@@ -38,13 +38,26 @@ input state.
 
 ## v2 skins
 
-`schema_version = 2` skins (nine-slice panel images, freely anchored decorations, space
-outside the panel) are rendered by `CandidatePresenter`'s native scene: the panel is drawn
-by `msimeui::Card::SetBackgroundImageNineSlice`, decorations by the `CandidateSkinOverlay`
-layer above the card, and `outer_insets_dip` becomes extra window space around the card.
-Parts of v2 are still being completed on the native side; see the `TODO(v2 皮肤)` notes in
-`candidate_presenter.cpp` and `candidate_skin_overlay.cpp`.
+`schema_version = 2` skins must use `base = "canvas"` (see `skin/candidate_skin_catalog.h`);
+the fields are documented in `examples/skin-examples/schema/README.md`. `canvas` is the
+full-texture base: transparent panel, no stroke, square corners, no shadow by default. It is
+only usable as a base and is not part of `BuiltInIds()`.
 
-`anchor` and `offset_*_dip` follow one convention: positive values move right and down.
-`content_insets_dip` is measured from the outer edge of the panel and is carried by the
-card padding.
+- Geometry lives in `window/candidate_skin_layers.*` (pure arithmetic, no rendering) and is
+  shared by the candidate window and the settings preview: `ResolveNineSlice` follows CSS
+  `border-image` (slices in source-image pixels, widths in DIP); `ResolveContentPadding`
+  measures `content_insets_dip` from the panel's outer edge and never below the border width;
+  `SplitDecorations` stably sorts decorations and splits them at `kDecorationFrontZIndex` (1)
+  into a layer below and a layer above the card.
+- In `CandidatePresenter`'s scene the card and two `CandidateSkinOverlay` layers share one
+  cell: back decorations, card, front decorations. Overlay layers measure 0 and do not hit
+  test. The panel is drawn by `msimeui::Card::SetBackgroundNineSlice`; with a panel image the
+  card's fill, stroke, radius and shadow are cleared. `line_gap_dip` becomes the preedit row's
+  bottom margin, so list/pager spacing is unaffected. `outer_insets_dip` becomes extra window
+  space around the card. `anchor` and `offset_*_dip`: positive values move right and down.
+- Animation: images are fetched through `DeviceResources::GetImageFrame`. `Present` samples
+  the animation clock with `BeginFrame`, renders, then reads `Scene::GetNextFrameDeadline()`
+  and, only while the candidate window is shown, arms one one-shot coalescable timer
+  (`kCandidateAnimationTimerId`) that presents again. Hiding, a deferred show and a skin change
+  stop it; the clock restarts when the window goes from hidden to shown. With
+  `SPI_GETCLIENTAREAANIMATION` off, images are drawn still (first frame), as for v1 skins.
