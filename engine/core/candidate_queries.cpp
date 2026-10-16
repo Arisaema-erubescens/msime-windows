@@ -143,7 +143,7 @@ std::vector<WordItem> CandidateQueries::mixed(std::vector<WordItem> candidates, 
         prefix.begin(), prefix.end(), [](unsigned char character) { return character >= 'a' && character <= 'z'; });
     if (english_options.mixed_candidates && prefix.size() >= english_options.minimum_prefix && lower_ascii_prefix)
     {
-        english_candidates = collect_unique(english_dictionary().query_prefix(prefix, 5));
+        english_candidates = collect_unique(english_dictionary().query_mixed_prefix(prefix));
     }
 
     std::vector<WordItem> emoji_candidates;

@@ -242,6 +242,56 @@ TEST_CASE(candidate_translation_show_pos_defaults_and_round_trips)
     fs::remove_all(unique_root, ec);
 }
 
+TEST_CASE(english_first_page_count_defaults_validates_and_round_trips)
+{
+    namespace fs = std::filesystem;
+    const fs::path unique_root = MakeProfileRoot() / L"english-first-page";
+    const fs::path data_dir = unique_root / L"metasequoiaime";
+    const fs::path config_path = data_dir / L"config.toml";
+    std::error_code ec;
+    fs::remove_all(unique_root, ec);
+    fs::create_directories(data_dir, ec);
+    REQUIRE(!ec);
+
+    {
+        ScopedConfigLocation location(unique_root);
+        // No template: check the parser's fallback independently of template merging.
+        WriteText(config_path, "[general]\ncn_en_mixed_input = true\n");
+        InitImeConfig();
+        REQUIRE_EQ(GetConfiguredEnglishMixedInputFirstPageCount(), 1);
+        for (const int count : {1, 2, 3, 2})
+        {
+            REQUIRE(SetConfiguredEnglishMixedInputFirstPageCount(count));
+            REQUIRE_EQ(GetConfiguredEnglishMixedInputFirstPageCount(), count);
+            REQUIRE_EQ(toml::parse(ReadText(config_path))["general"]["cn_en_mixed_input_first_page_count"].value_or(0),
+                       count);
+            InitImeConfig();
+            REQUIRE_EQ(GetConfiguredEnglishMixedInputFirstPageCount(), count);
+        }
+        const auto before = ReadText(config_path);
+        for (const int invalid : {-1, 0, 4, 100})
+        {
+            REQUIRE(!SetConfiguredEnglishMixedInputFirstPageCount(invalid));
+            REQUIRE_EQ(GetConfiguredEnglishMixedInputFirstPageCount(), 2);
+            REQUIRE_EQ(ReadText(config_path), before);
+        }
+        for (const std::string value : {"0", "4", "-1", "1.5", "\"2\"", "true", "[]"})
+        {
+            WriteText(config_path, "[general]\ncn_en_mixed_input_first_page_count = " + value + "\n");
+            InitImeConfig();
+            REQUIRE_EQ(GetConfiguredEnglishMixedInputFirstPageCount(), 1);
+        }
+        REQUIRE(SetConfiguredEnglishMixedInputFirstPageCount(3));
+        for (const bool enabled : {false, true})
+        {
+            REQUIRE(SetConfiguredEnglishCandidatesEnabled(enabled));
+            InitImeConfig();
+            REQUIRE_EQ(GetConfiguredEnglishMixedInputFirstPageCount(), 3);
+        }
+    }
+    fs::remove_all(unique_root, ec);
+}
+
 TEST_CASE(trilingual_runtime_language_preserves_preferences_without_writing_config)
 {
     namespace fs = std::filesystem;

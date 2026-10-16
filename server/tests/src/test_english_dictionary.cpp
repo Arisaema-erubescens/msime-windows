@@ -2,6 +2,7 @@
 #include "tests/includes/test_utf8_path.h"
 #include "engine/english/english_dictionary.h"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -63,6 +64,21 @@ class TemporaryEnglishDatabase
         return path_;
     }
 
+    void execute(const char *sql) const
+    {
+        sqlite3 *db = nullptr;
+        if (sqlite3_open(test::Utf8(path_).c_str(), &db) != SQLITE_OK)
+        {
+            if (db != nullptr)
+                sqlite3_close(db);
+            throw std::runtime_error("Unable to open English test database.");
+        }
+        const int result = sqlite3_exec(db, sql, nullptr, nullptr, nullptr);
+        sqlite3_close(db);
+        if (result != SQLITE_OK)
+            throw std::runtime_error("Unable to populate English test database.");
+    }
+
   private:
     std::filesystem::path directory_;
     std::filesystem::path path_;
@@ -113,6 +129,105 @@ TEST_CASE(EnglishDictionaryMigratesLegacySchemaAndSupportsMultipleDisplaysPerKey
     REQUIRE_EQ(candidates[0].pinyin, std::string("hello"));
     REQUIRE_EQ(candidates[0].word, std::string("Hello"));
     REQUIRE_EQ(candidates[1].word, std::string("hello"));
+}
+
+TEST_CASE(EnglishDictionaryMixedPrefixBudgetsDistinctWordsAndKeepsAttestedForms)
+{
+    TemporaryEnglishDatabase database;
+    EnglishDictionary dictionary(test::Utf8(database.path()));
+    database.execute("INSERT INTO english_words(word,display,weight) VALUES"
+                     "('walk','WALK',100),('walk','Walk',100),('walk','wALK',99),"
+                     "('walk','wAlk',98),('walk','waLk',97),('walk','walk',96),"
+                     "('walker','walker',1000),('walks','walks',900),"
+                     "('walked','walked',800),('walking','walking',800),('walkable','walkable',0);");
+
+    const auto candidates = dictionary.query_mixed_prefix("walk", 5);
+    REQUIRE_EQ(candidates.size(), size_t{9});
+    // The exact word stays first even when every completion has greater weight.
+    REQUIRE_EQ(candidates[0].pinyin, std::string("walk"));
+    REQUIRE_EQ(candidates[0].word, std::string("WALK"));
+    REQUIRE_EQ(candidates[1].word, std::string("Walk"));
+    REQUIRE_EQ(candidates[2].word, std::string("wALK"));
+    REQUIRE_EQ(candidates[3].word, std::string("wAlk"));
+    REQUIRE_EQ(candidates[4].word, std::string("waLk"));
+    REQUIRE_EQ(candidates[5].word, std::string("walker"));
+    REQUIRE_EQ(candidates[6].word, std::string("walks"));
+    REQUIRE_EQ(candidates[7].word, std::string("walked"));
+    REQUIRE_EQ(candidates[8].word, std::string("walking"));
+    REQUIRE(candidates[8].source == CandidateSource::EnglishDictionary);
+
+    // Dedicated English still offers all stored casing variants; no form is generated.
+    const auto dedicated = dictionary.query_prefix("walk", 5);
+    REQUIRE_EQ(dedicated.size(), size_t{5});
+    for (const auto &candidate : dedicated)
+        REQUIRE_EQ(candidate.pinyin, std::string("walk"));
+    REQUIRE_EQ(dictionary.query_prefix("walk", 32).size(), size_t{11});
+    REQUIRE_EQ(dictionary.query_mixed_prefix("walk", 32).size(), size_t{10});
+}
+
+TEST_CASE(EnglishDictionaryMixedPrefixRetainsPreviouslyVisibleCasingDisplays)
+{
+    TemporaryEnglishDatabase database;
+    EnglishDictionary dictionary(test::Utf8(database.path()));
+    database.execute("INSERT INTO english_words(word,display,weight) VALUES"
+                     "('python','Python',100),('python','python',90),('pythons','pythons',80);");
+
+    const auto candidates = dictionary.query_mixed_prefix("py");
+    REQUIRE_EQ(candidates.size(), size_t{3});
+    REQUIRE_EQ(candidates[0].word, std::string("Python"));
+    // This lower-ranked display was previously eligible for a fixed position.
+    REQUIRE_EQ(candidates[1].word, std::string("python"));
+    REQUIRE_EQ(candidates[2].word, std::string("pythons"));
+}
+
+TEST_CASE(EnglishDictionaryMixedPrefixValidatesInputAndResetsBindings)
+{
+    TemporaryEnglishDatabase database;
+    EnglishDictionary dictionary(test::Utf8(database.path()));
+    REQUIRE(dictionary.query_mixed_prefix("", 5).empty());
+    REQUIRE(dictionary.query_mixed_prefix("HEL", 5).empty());
+    REQUIRE(dictionary.query_mixed_prefix("he-l", 5).empty());
+    REQUIRE(dictionary.query_mixed_prefix("hel", 0).empty());
+
+    const auto first = dictionary.query_mixed_prefix("hel", 1);
+    REQUIRE_EQ(first.size(), size_t{1});
+    REQUIRE_EQ(first.front().word, std::string("hel"));
+    const auto next = dictionary.query_mixed_prefix("help", 2);
+    REQUIRE_EQ(next.size(), size_t{2});
+    REQUIRE_EQ(next[0].word, std::string("help"));
+    REQUIRE_EQ(next[1].word, std::string("helpful"));
+    REQUIRE(dictionary.query_mixed_prefix("missing").empty());
+}
+
+TEST_CASE(EnglishDictionaryMixedPrefixCapsTheCompletionBudget)
+{
+    TemporaryEnglishDatabase database;
+    EnglishDictionary dictionary(test::Utf8(database.path()));
+    for (char suffix = 'a'; suffix <= 'z'; ++suffix)
+    {
+        const std::string sql = "INSERT INTO english_words(word,display,weight) VALUES('walla" +
+                                std::string(1, suffix) + "','walla" + std::string(1, suffix) + "',1),('wallb" +
+                                std::string(1, suffix) + "','wallb" + std::string(1, suffix) + "',1);";
+        database.execute(sql.c_str());
+    }
+    database.execute("INSERT INTO english_words(word,display,weight) VALUES"
+                     "('wallaa','WALLAA',100),('wallaa','Wallaa',99),('wallaa','wALLAA',98),"
+                     "('wallaa','wAllaa',97),('wallaa','waLlaa',96);");
+
+    const auto candidates = dictionary.query_mixed_prefix("wall");
+    REQUIRE(candidates.size() <= EnglishDictionary::kMixedCandidateLimit + 5);
+    std::vector<std::string> words;
+    for (const auto &candidate : candidates)
+        words.push_back(candidate.pinyin);
+    std::sort(words.begin(), words.end());
+    words.erase(std::unique(words.begin(), words.end()), words.end());
+    REQUIRE_EQ(words.size(), EnglishDictionary::kMixedCandidateLimit);
+    for (const auto &legacy : dictionary.query_prefix("wall", 5))
+        REQUIRE(std::any_of(candidates.begin(), candidates.end(), [&](const WordItem &candidate) {
+            return candidate.pinyin == legacy.pinyin && candidate.word == legacy.word;
+        }));
+    REQUIRE_EQ(dictionary.query_mixed_prefix("wall", 1000).size(), candidates.size());
+    REQUIRE_EQ(dictionary.query_prefix("wall", 1000).size(), size_t{57});
 }
 
 TEST_CASE(EnglishDictionaryQueriesBothGlossDirections)

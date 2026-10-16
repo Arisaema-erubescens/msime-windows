@@ -467,7 +467,9 @@ function applyConfigData(data: Record<string, any>, target?: string): void {
       if (data !== lastSnapshot) return;
       module.applyZhEnMixedInputConfig(
         data?.general?.cn_en_mixed_input,
-        data?.general?.cn_en_mixed_input_min_chars
+        data?.general?.cn_en_mixed_input_min_chars,
+        data?.general?.cn_en_mixed_input_first_page_count,
+        data?.utility?.mixed_candidates
       );
     });
   }

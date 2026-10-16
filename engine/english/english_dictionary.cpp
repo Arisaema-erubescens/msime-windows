@@ -17,6 +17,44 @@ bool IsLowerAsciiWord(const std::string &value)
     return !value.empty() &&
            std::all_of(value.begin(), value.end(), [](unsigned char ch) { return ch >= 'a' && ch <= 'z'; });
 }
+
+std::vector<WordItem> QueryPrefix(sqlite3_stmt *statement, const std::string &prefix, size_t limit)
+{
+    const std::string upper_bound = prefix + "{";
+    const int sqlite_limit =
+        static_cast<int>((std::min)(limit, static_cast<size_t>((std::numeric_limits<int>::max)())));
+
+    sqlite3_reset(statement);
+    sqlite3_clear_bindings(statement);
+    if (sqlite3_bind_text(statement, 1, prefix.c_str(), -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(statement, 2, upper_bound.c_str(), -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_int(statement, 3, sqlite_limit) != SQLITE_OK)
+    {
+        sqlite3_reset(statement);
+        return {};
+    }
+
+    std::vector<WordItem> candidates;
+    int result = SQLITE_ROW;
+    while ((result = sqlite3_step(statement)) == SQLITE_ROW)
+    {
+        const auto *word = reinterpret_cast<const char *>(sqlite3_column_text(statement, 0));
+        const auto *display = reinterpret_cast<const char *>(sqlite3_column_text(statement, 1));
+        if (word == nullptr || display == nullptr)
+        {
+            continue;
+        }
+        candidates.emplace_back(word, display, sqlite3_column_int64(statement, 2), CandidateSource::EnglishDictionary);
+    }
+
+    sqlite3_reset(statement);
+    if (result != SQLITE_DONE)
+    {
+        (void)0;
+        return {};
+    }
+    return candidates;
+}
 } // namespace
 
 EnglishDictionary::EnglishDictionary(std::string db_path, bool initialize_schema, std::string translations_path)
@@ -37,45 +75,15 @@ EnglishDictionary::~EnglishDictionary()
 std::vector<WordItem> EnglishDictionary::query_prefix(const std::string &prefix, size_t limit)
 {
     if (!IsLowerAsciiWord(prefix) || limit == 0 || !ensure_query_statement())
-    {
         return {};
-    }
+    return QueryPrefix(query_statement_, prefix, limit);
+}
 
-    const std::string upper_bound = prefix + "{";
-    const int sqlite_limit =
-        static_cast<int>((std::min)(limit, static_cast<size_t>((std::numeric_limits<int>::max)())));
-
-    sqlite3_reset(query_statement_);
-    sqlite3_clear_bindings(query_statement_);
-    if (sqlite3_bind_text(query_statement_, 1, prefix.c_str(), -1, SQLITE_TRANSIENT) != SQLITE_OK ||
-        sqlite3_bind_text(query_statement_, 2, upper_bound.c_str(), -1, SQLITE_TRANSIENT) != SQLITE_OK ||
-        sqlite3_bind_int(query_statement_, 3, sqlite_limit) != SQLITE_OK)
-    {
-        sqlite3_reset(query_statement_);
+std::vector<WordItem> EnglishDictionary::query_mixed_prefix(const std::string &prefix, size_t limit)
+{
+    if (!IsLowerAsciiWord(prefix) || limit == 0 || !ensure_mixed_query_statement())
         return {};
-    }
-
-    std::vector<WordItem> candidates;
-    int result = SQLITE_ROW;
-    while ((result = sqlite3_step(query_statement_)) == SQLITE_ROW)
-    {
-        const auto *word = reinterpret_cast<const char *>(sqlite3_column_text(query_statement_, 0));
-        const auto *display = reinterpret_cast<const char *>(sqlite3_column_text(query_statement_, 1));
-        if (word == nullptr || display == nullptr)
-        {
-            continue;
-        }
-        candidates.emplace_back(word, display, sqlite3_column_int64(query_statement_, 2),
-                                CandidateSource::EnglishDictionary);
-    }
-
-    sqlite3_reset(query_statement_);
-    if (result != SQLITE_DONE)
-    {
-        (void)0;
-        return {};
-    }
-    return candidates;
+    return QueryPrefix(mixed_query_statement_, prefix, (std::min)(limit, kMixedCandidateLimit));
 }
 
 bool EnglishDictionary::ready()
@@ -313,6 +321,41 @@ bool EnglishDictionary::ensure_query_statement()
     return true;
 }
 
+bool EnglishDictionary::ensure_mixed_query_statement()
+{
+    if (mixed_query_statement_ != nullptr)
+        return true;
+    if (!ensure_query_statement())
+        return false;
+
+    // Budget different words first, then union the legacy first five displays:
+    // casing variants must neither hide inflected forms nor disappear when a
+    // user has already chosen or fixed one of those previously visible rows.
+    constexpr const char *query_sql =
+        "WITH distinct_words AS ("
+        "SELECT candidate.word,candidate.display,candidate.weight FROM english_words AS candidate "
+        "WHERE candidate.word >= ?1 AND candidate.word < ?2 AND NOT EXISTS ("
+        "SELECT 1 FROM english_words AS better WHERE better.word = candidate.word AND "
+        "(better.weight > candidate.weight OR "
+        "(better.weight = candidate.weight AND better.display < candidate.display))) "
+        "ORDER BY CASE WHEN candidate.word = ?1 THEN 0 ELSE 1 END, candidate.weight DESC, "
+        "length(candidate.word), candidate.word, candidate.display "
+        "LIMIT ?3), legacy_displays AS ("
+        "SELECT word,display,weight FROM english_words WHERE word >= ?1 AND word < ?2 "
+        "ORDER BY CASE WHEN word = ?1 THEN 0 ELSE 1 END, weight DESC, length(word), word, display "
+        "LIMIT min(?3,5)) "
+        "SELECT word,display,weight FROM ("
+        "SELECT word,display,weight FROM distinct_words UNION "
+        "SELECT word,display,weight FROM legacy_displays) "
+        "ORDER BY CASE WHEN word = ?1 THEN 0 ELSE 1 END, weight DESC, length(word), word, display";
+    if (sqlite3_prepare_v2(db_, query_sql, -1, &mixed_query_statement_, nullptr) != SQLITE_OK)
+    {
+        close_database();
+        return false;
+    }
+    return true;
+}
+
 bool EnglishDictionary::ensure_gloss_statements()
 {
     if (en_zh_statement_ != nullptr && zh_en_statement_ != nullptr)
@@ -332,6 +375,11 @@ bool EnglishDictionary::ensure_gloss_statements()
 
 void EnglishDictionary::close_database()
 {
+    if (mixed_query_statement_ != nullptr)
+    {
+        sqlite3_finalize(mixed_query_statement_);
+        mixed_query_statement_ = nullptr;
+    }
     if (en_zh_statement_ != nullptr)
     {
         sqlite3_finalize(en_zh_statement_);

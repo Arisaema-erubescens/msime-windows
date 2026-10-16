@@ -140,6 +140,7 @@ bool g_english_candidates_enabled = false;
 bool g_candidate_translations_enabled = false;
 std::atomic_bool g_candidate_translation_show_pos{true};
 int g_english_mixed_input_min_chars = kEnglishMixedInputMinCharsDefault;
+int g_english_mixed_input_first_page_count = kEnglishMixedInputFirstPageCountDefault;
 bool g_cloud_candidates_enabled = true;
 // 整句候选来源与去重补位开关：词格、Google 和神经速度档默认开，神经效果档与去重补位默认关。
 bool g_assoc_sentence_wordlattice = true;
@@ -604,6 +605,14 @@ bool LoadImeConfig()
                 min_chars >= kEnglishMixedInputMinCharsMin && min_chars <= kEnglishMixedInputMinCharsMax
                     ? min_chars
                     : kEnglishMixedInputMinCharsDefault;
+        }
+        {
+            const int count =
+                tbl["general"]["cn_en_mixed_input_first_page_count"].value_or(kEnglishMixedInputFirstPageCountDefault);
+            g_english_mixed_input_first_page_count =
+                count >= kEnglishMixedInputFirstPageCountMin && count <= kEnglishMixedInputFirstPageCountMax
+                    ? count
+                    : kEnglishMixedInputFirstPageCountDefault;
         }
         g_cloud_candidates_enabled = tbl["general"]["cloud_candidates"].value_or(true);
         g_assoc_sentence_wordlattice = tbl["association"]["sentence_wordlattice"].value_or(true);

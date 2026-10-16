@@ -33,6 +33,9 @@ constexpr int kFloatingToolbarAutoHideDelayDefault = 5;
 constexpr int kEnglishMixedInputMinCharsMin = 1;
 constexpr int kEnglishMixedInputMinCharsMax = 8;
 constexpr int kEnglishMixedInputMinCharsDefault = 2;
+constexpr int kEnglishMixedInputFirstPageCountMin = 1;
+constexpr int kEnglishMixedInputFirstPageCountMax = 3;
+constexpr int kEnglishMixedInputFirstPageCountDefault = 1;
 
 // Config key ↔ engine rule bit. The key mirrors the enumerator name lowercased, so the
 // only mapping to review is this table; the bit position lives in the enum itself.
@@ -182,6 +185,7 @@ extern bool g_english_candidates_enabled;
 extern bool g_candidate_translations_enabled;
 extern std::atomic_bool g_candidate_translation_show_pos;
 extern int g_english_mixed_input_min_chars;
+extern int g_english_mixed_input_first_page_count;
 extern bool g_cloud_candidates_enabled;
 extern bool g_assoc_sentence_wordlattice;
 extern bool g_assoc_sentence_google;

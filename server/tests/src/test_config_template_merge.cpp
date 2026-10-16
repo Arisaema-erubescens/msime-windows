@@ -150,6 +150,34 @@ TEST_CASE(shipped_translation_pos_defaults_and_upgrade_preserve_user_choice)
     }
 }
 
+TEST_CASE(shipped_english_first_page_count_defaults_and_upgrade_preserve_user_choice)
+{
+    std::ifstream input(MSIME_DEFAULT_CONFIG_PATH, std::ios::binary);
+    REQUIRE(static_cast<bool>(input));
+    const std::string installed((std::istreambuf_iterator<char>(input)), {});
+    const auto working_path =
+        std::filesystem::path(MSIME_DEFAULT_CONFIG_PATH).parent_path().parent_path().parent_path() /
+        "server/assets/config/config.toml";
+    std::ifstream development(working_path, std::ios::binary);
+    REQUIRE(static_cast<bool>(development));
+    const std::string working((std::istreambuf_iterator<char>(development)), {});
+    REQUIRE_EQ(toml::parse(installed)["general"]["cn_en_mixed_input_first_page_count"].value_or(0), 1);
+    REQUIRE_EQ(toml::parse(working)["general"]["cn_en_mixed_input_first_page_count"].value_or(0), 1);
+
+    const std::string old_template = "[general]\ncn_en_mixed_input = true\n";
+    const auto upgraded = toml::parse(MergeConfigIntoTemplate(installed, old_template, old_template));
+    REQUIRE_EQ(upgraded["general"]["cn_en_mixed_input_first_page_count"].value_or(0), 1);
+    for (const int count : {1, 2, 3})
+    {
+        const auto configured = old_template + "cn_en_mixed_input_first_page_count = " + std::to_string(count) + "\n";
+        for (const auto &baseline : {std::string(), old_template, installed})
+        {
+            const auto preserved = toml::parse(MergeConfigIntoTemplate(installed, configured, baseline));
+            REQUIRE_EQ(preserved["general"]["cn_en_mixed_input_first_page_count"].value_or(0), count);
+        }
+    }
+}
+
 TEST_CASE(shipped_tsf_diagnostic_log_survives_template_upgrade)
 {
     std::ifstream input(MSIME_DEFAULT_CONFIG_PATH, std::ios::binary);

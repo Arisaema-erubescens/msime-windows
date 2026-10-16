@@ -18,13 +18,16 @@ vi.mock('../utils/confirm-dialog', () => ({ confirmDialog: vi.fn() }));
 vi.mock('../utils/overlay-host', () => ({ hoistOverlay: vi.fn() }));
 
 import { updateConfig } from './config-sync';
-import { setLanguageBarOptionsDisabled, setMixedCandidateOptionsDisabled, setupDropdownMenu } from './shared';
-import { setupToolsSettings } from './tools-settings';
+import { applyDropdownValue, setLanguageBarOptionsDisabled, setMixedCandidateOptionsDisabled, setupDropdownMenu } from './shared';
+import { applyZhEnMixedInputConfig, setupToolsSettings } from './tools-settings';
 
 class StubElement extends EventTarget {
+  disabled = false;
+  tabIndex = 0;
   classes = new Set<string>();
   attributes = new Map<string, string>();
   classList = {
+    remove: (name: string) => { this.classes.delete(name); },
     toggle: (name: string, force?: boolean) => {
       const next = force ?? !this.classes.has(name);
       if (next) this.classes.add(name);
@@ -38,6 +41,9 @@ class StubElement extends EventTarget {
 let expand: StubElement;
 let details: StubElement;
 let zhEnOptions: StubElement;
+let englishCountButton: StubElement;
+let englishCountMenu: StubElement;
+let englishTriggerButton: StubElement;
 let langBarExpand: StubElement;
 let langBarDetails: StubElement;
 
@@ -47,6 +53,9 @@ beforeEach(() => {
   expand = new StubElement();
   details = new StubElement();
   zhEnOptions = new StubElement();
+  englishCountButton = new StubElement();
+  englishCountMenu = new StubElement();
+  englishTriggerButton = new StubElement();
   langBarExpand = new StubElement();
   langBarDetails = new StubElement();
   vi.stubGlobal('document', {
@@ -56,6 +65,9 @@ beforeEach(() => {
       if (id === 'mixedCandidatesExpand') return expand;
       if (id === 'mixedCandidatesDetails') return details;
       if (id === 'zhEnMixedInputOptions') return zhEnOptions;
+      if (id === 'zhEnFirstPageCountBtn') return englishCountButton;
+      if (id === 'zhEnFirstPageCountMenu') return englishCountMenu;
+      if (id === 'zhEnTriggerLengthBtn') return englishTriggerButton;
       if (id === 'languageBarExpand') return langBarExpand;
       if (id === 'languageBarDetails') return langBarDetails;
       return null;
@@ -64,6 +76,7 @@ beforeEach(() => {
   });
   vi.stubGlobal('window', { chrome: { webview: { postMessage: vi.fn() } }, addEventListener: vi.fn() });
   setupToolsSettings();
+  applyZhEnMixedInputConfig(true, 2, 1, true);
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -91,6 +104,14 @@ it('reports every mixed candidate switch to its config path', () => {
     'general.cn_en_mixed_input_min_chars',
     Number
   );
+  expect(setupDropdownMenu).toHaveBeenCalledWith(
+    'zhEnFirstPageCountBtn',
+    'zhEnFirstPageCountMenu',
+    '',
+    true,
+    'general.cn_en_mixed_input_first_page_count',
+    Number
+  );
 });
 
 it('disables the sub-switches together with the master switch', () => {
@@ -105,6 +126,39 @@ it('greys out the English trigger length with the English switch', () => {
   expect(zhEnOptions.classes.has('is-disabled')).toBe(true);
   toggles.get('zhEnToggleBtn')?.(true);
   expect(zhEnOptions.classes.has('is-disabled')).toBe(false);
+});
+
+it('disables both English dropdowns until the master and English switches are on', () => {
+  englishCountMenu.classes.add('open');
+  toggles.get('mixedCandidatesToggleBtn')?.(false);
+  expect(englishCountButton.disabled).toBe(true);
+  expect(englishCountButton.tabIndex).toBe(-1);
+  expect(englishCountButton.getAttribute('aria-disabled')).toBe('true');
+  expect(englishTriggerButton.disabled).toBe(true);
+  expect(englishCountMenu.classes.has('open')).toBe(false);
+  toggles.get('zhEnToggleBtn')?.(true);
+  expect(englishCountButton.disabled).toBe(true);
+  toggles.get('mixedCandidatesToggleBtn')?.(true);
+  expect(englishCountButton.disabled).toBe(false);
+  toggles.get('zhEnToggleBtn')?.(false);
+  toggles.get('mixedCandidatesToggleBtn')?.(false);
+  toggles.get('mixedCandidatesToggleBtn')?.(true);
+  expect(englishCountButton.disabled).toBe(true);
+  toggles.get('zhEnToggleBtn')?.(true);
+  expect(englishCountButton.disabled).toBe(false);
+  expect(englishCountButton.tabIndex).toBe(0);
+});
+
+it('backfills only supported first-page counts and keeps the saved value when disabled', () => {
+  vi.mocked(applyDropdownValue).mockClear();
+  for (const count of [1, 2, 3]) {
+    applyZhEnMixedInputConfig(false, undefined, count, true);
+    expect(applyDropdownValue).toHaveBeenLastCalledWith('zhEnFirstPageCountBtn', 'zhEnFirstPageCountMenu', String(count));
+    expect(englishCountButton.disabled).toBe(true);
+  }
+  vi.mocked(applyDropdownValue).mockClear();
+  for (const count of [0, 4, 1.5, NaN, Infinity]) applyZhEnMixedInputConfig(undefined, undefined, count);
+  expect(applyDropdownValue).not.toHaveBeenCalled();
 });
 
 it('toggles the details container from the section header', () => {

@@ -20,6 +20,8 @@ struct Request
     SchemeType scheme = SchemeType::Quanpin;
     bool english = false;
     std::size_t english_min_prefix = 2;
+    // 首页英文数。只显示一个时沿用原来的五行查询，多于一个才按不同词取更多补全。
+    std::size_t english_first_page_count = 1;
     bool emoji = false;
     bool kaomoji = false;
     // 日期时间唤醒词（rq / riqi / sj ...），空串表示这次不查。双拼要先换算成全拼才认得出

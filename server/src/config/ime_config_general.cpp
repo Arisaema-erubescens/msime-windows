@@ -120,6 +120,21 @@ bool SetConfiguredEnglishMixedInputMinChars(int min_chars)
     return true;
 }
 
+int GetConfiguredEnglishMixedInputFirstPageCount()
+{
+    return g_english_mixed_input_first_page_count;
+}
+
+bool SetConfiguredEnglishMixedInputFirstPageCount(int count)
+{
+    if (count < kEnglishMixedInputFirstPageCountMin || count > kEnglishMixedInputFirstPageCountMax)
+        return false;
+    if (!WriteConfiguredValue("general", "cn_en_mixed_input_first_page_count", std::to_string(count)))
+        return false;
+    g_english_mixed_input_first_page_count = count;
+    return true;
+}
+
 bool GetConfiguredEmojiMixedInputEnabled()
 {
     return g_emoji_mixed_input_enabled;

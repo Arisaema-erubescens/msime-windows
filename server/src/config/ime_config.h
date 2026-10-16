@@ -470,6 +470,8 @@ bool GetConfiguredCandidateTranslationShowPos();
 bool SetConfiguredCandidateTranslationShowPos(bool show);
 int GetConfiguredEnglishMixedInputMinChars();
 bool SetConfiguredEnglishMixedInputMinChars(int min_chars);
+int GetConfiguredEnglishMixedInputFirstPageCount();
+bool SetConfiguredEnglishMixedInputFirstPageCount(int count);
 bool GetConfiguredEmojiMixedInputEnabled();
 bool SetConfiguredEmojiMixedInputEnabled(bool enabled);
 bool GetConfiguredKaomojiMixedInputEnabled();

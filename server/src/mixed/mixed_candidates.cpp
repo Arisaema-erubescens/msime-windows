@@ -96,7 +96,9 @@ void WorkerLoop()
         {
             const std::string prefix = EnglishPrefix(request.input);
             if (prefix.size() >= (std::max)(std::size_t{1}, request.english_min_prefix))
-                result.english = english_dictionary.query_prefix(prefix, kEnglishCandidateLimit);
+                result.english = request.english_first_page_count > 1
+                                     ? english_dictionary.query_mixed_prefix(prefix)
+                                     : english_dictionary.query_prefix(prefix, kEnglishCandidateLimit);
             if (IsStale(observed_generation))
                 continue;
         }

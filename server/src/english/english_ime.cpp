@@ -15,7 +15,6 @@ namespace
 // reaches the configured length. Dedicated English mode still starts from one
 // character.
 constexpr size_t kDefaultMixedMinPrefix = 2;
-constexpr size_t kMixedCandidateLimit = 5;
 constexpr size_t kDedicatedCandidateLimit = 1000;
 
 std::mutex g_mutex;
@@ -125,8 +124,8 @@ void WorkerLoop()
             continue;
         }
 
-        auto candidates =
-            dictionary.query_prefix(prefix, dedicated_mode ? kDedicatedCandidateLimit : kMixedCandidateLimit);
+        auto candidates = dedicated_mode ? dictionary.query_prefix(prefix, kDedicatedCandidateLimit)
+                                         : dictionary.query_mixed_prefix(prefix);
         if (!g_running || g_generation.load() != observed_generation)
         {
             continue;

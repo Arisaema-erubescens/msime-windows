@@ -17,6 +17,8 @@ let latestQueryId = '';
 let lastQuery = '';
 let pager: ReturnType<typeof createDictionaryPager> | undefined;
 let toastTimer: number | null = null;
+let mixedCandidatesEnabled = true;
+let englishMixedInputEnabled = true;
 
 function post(action: DictionaryRequest['action'], data: Partial<Omit<DictionaryRequest, 'action' | 'requestId'>> = {}): void {
   const requestId = `quick-${++requestCounter}`;
@@ -101,17 +103,34 @@ function downloadExport(content: string, filename: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function syncZhEnMixedInputOptionsEnabled(enabled: boolean): void {
+function syncZhEnMixedInputOptionsEnabled(): void {
+  const enabled = mixedCandidatesEnabled && englishMixedInputEnabled;
   document.getElementById('zhEnMixedInputOptions')?.classList.toggle('is-disabled', !enabled);
+  for (const id of ['zhEnTriggerLengthBtn', 'zhEnFirstPageCountBtn']) {
+    const button = document.getElementById(id) as HTMLButtonElement | null;
+    if (!button) continue;
+    button.disabled = !enabled;
+    button.setAttribute('aria-disabled', String(!enabled));
+    button.tabIndex = enabled ? 0 : -1;
+  }
+  if (!enabled) {
+    document.getElementById('zhEnTriggerLengthMenu')?.classList.remove('open');
+    document.getElementById('zhEnFirstPageCountMenu')?.classList.remove('open');
+  }
 }
 
-export function applyZhEnMixedInputConfig(enabled?: boolean, minChars?: number): void {
+export function applyZhEnMixedInputConfig(enabled?: boolean, minChars?: number, firstPageCount?: number, mixedEnabled?: boolean): void {
+  if (typeof mixedEnabled === 'boolean') mixedCandidatesEnabled = mixedEnabled;
   if (typeof enabled === 'boolean') {
+    englishMixedInputEnabled = enabled;
     applyToggleState('zhEnToggleBtn', enabled);
-    syncZhEnMixedInputOptionsEnabled(enabled);
   }
+  syncZhEnMixedInputOptionsEnabled();
   if (typeof minChars === 'number' && Number.isFinite(minChars)) {
     applyDropdownValue('zhEnTriggerLengthBtn', 'zhEnTriggerLengthMenu', String(minChars));
+  }
+  if (typeof firstPageCount === 'number' && Number.isInteger(firstPageCount) && firstPageCount >= 1 && firstPageCount <= 3) {
+    applyDropdownValue('zhEnFirstPageCountBtn', 'zhEnFirstPageCountMenu', String(firstPageCount));
   }
 }
 
@@ -119,11 +138,14 @@ export function applyZhEnMixedInputConfig(enabled?: boolean, minChars?: number):
 // 中英混输、emoji、颜文字的配置键仍在 [general]，快捷短语与日期时间在 [utility]。
 function setupMixedCandidatesSection(): void {
   setupToggleButton('mixedCandidatesToggleBtn', (active) => {
+    mixedCandidatesEnabled = active;
     updateConfig('utility.mixed_candidates', active);
     setMixedCandidateOptionsDisabled(!active);
+    syncZhEnMixedInputOptionsEnabled();
   });
   setupToggleButton('zhEnToggleBtn', (active) => {
-    syncZhEnMixedInputOptionsEnabled(active);
+    englishMixedInputEnabled = active;
+    syncZhEnMixedInputOptionsEnabled();
     updateConfig('general.cn_en_mixed_input', active);
   });
   setupDropdownMenu(
@@ -132,6 +154,14 @@ function setupMixedCandidatesSection(): void {
     '',
     true,
     'general.cn_en_mixed_input_min_chars',
+    Number
+  );
+  setupDropdownMenu(
+    'zhEnFirstPageCountBtn',
+    'zhEnFirstPageCountMenu',
+    '',
+    true,
+    'general.cn_en_mixed_input_first_page_count',
     Number
   );
   setupToggleButton('emojiMixedInputToggleBtn', (active) => {

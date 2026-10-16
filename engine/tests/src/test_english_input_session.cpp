@@ -148,6 +148,41 @@ int run_test()
             mixed.candidates()[3].word == "Ninja" && mixed.candidates()[4].word == "Nimbus",
         "Mixed English candidates did not occupy the Windows-compatible slot after the leading Chinese candidate.");
 
+    {
+        const auto directory = root / "mixed-completion-budget";
+        prepare_main_database(directory, true);
+        Database database(directory / "english.db");
+        database.execute("CREATE TABLE english_words(word TEXT COLLATE BINARY NOT NULL,display TEXT NOT NULL,"
+                         "weight INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(word,display)) WITHOUT ROWID");
+        database.execute("INSERT INTO english_words VALUES"
+                         "('nice','NICE',1000),('nice','Nice',999),('nice','nICE',998),"
+                         "('nice','nIce',997),('nice','niCe',996),('nice','nice',995),"
+                         "('night','night',100),('nine','nine',90),('nick','nick',80),"
+                         "('nicked','nicked',70),('nicking','nicking',60),('nipped','nipped',50),"
+                         "('nipping','nipping',40);");
+        set_data_directory(directory);
+        metasequoia::InputSession completions(SchemeType::Quanpin);
+        require(completions.set_english_input_options(mixed_options), "Mixed completion options were rejected.");
+        type(completions, "ni");
+        const auto &candidates = completions.candidates();
+        std::vector<std::string> english_words;
+        for (const auto &candidate : candidates)
+            if (candidate.source == CandidateSource::EnglishDictionary)
+                english_words.push_back(candidate.pinyin);
+        require(english_words.size() == 12, "Mixed input dropped a previously visible casing display.");
+        std::sort(english_words.begin(), english_words.end());
+        english_words.erase(std::unique(english_words.begin(), english_words.end()), english_words.end());
+        require(english_words.size() == 8,
+                "Mixed input still limited completion rows before deduplicating casing variants.");
+        for (const std::string form : {"nicked", "nicking", "nipped", "nipping"})
+            require(std::any_of(candidates.begin(), candidates.end(),
+                                [&](const WordItem &item) {
+                                    return item.source == CandidateSource::EnglishDictionary && item.word == form;
+                                }),
+                    "An attested inflected form was missing from mixed-input completions.");
+    }
+    set_data_directory(english_mode_directory);
+
     metasequoia::InputSession threshold(SchemeType::Quanpin);
     mixed_options.minimum_prefix = 3;
     require(threshold.set_english_input_options(mixed_options), "A valid English minimum prefix was rejected.");
