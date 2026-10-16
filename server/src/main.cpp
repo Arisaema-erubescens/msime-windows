@@ -21,12 +21,12 @@
 #include "engine/contracts/assets/assets.h"
 #include "engine/core/runtime_paths.h"
 #include "engine/local_modes/radical_query.h"
+#include "global/globals.h"
 #include "utils/common_utils.h"
 #include "utils/hanzi_pinyin.h"
 #include "utils/single_instance.h"
 #include "session/session_factory.h"
 #include "statistics/stats_pipe.h"
-#include "webview2/windows_webview2.h"
 #include "voice-input/voice_input_service.h"
 
 namespace
@@ -120,7 +120,6 @@ int CALLBACK WinMain(_In_ HINSTANCE hInstance, _In_ HINSTANCE /*hPrevInstance*/,
 
     // Initialize config
     InitImeConfig();
-    FallBackToD2dIfWebView2RuntimeMissing();
     VoiceInput::Initialize();
     Global::candidate_ui.page_size = GetConfiguredCandidatePageSize();
 
@@ -170,8 +169,8 @@ int CALLBACK WinMain(_In_ HINSTANCE hInstance, _In_ HINSTANCE /*hPrevInstance*/,
     {
         // The release runner is a Windows service without an interactive
         // window station. The pipe probe still exercises the real Server and
-        // all IPC worker threads, but must not create candidate/WebView2
-        // windows or start UI-bound background services.
+        // all IPC worker threads, but must not create candidate windows or
+        // start UI-bound background services.
         Sleep(INFINITE);
     }
 
@@ -218,7 +217,6 @@ int CALLBACK WinMain(_In_ HINSTANCE hInstance, _In_ HINSTANCE /*hPrevInstance*/,
         radical_warmup.join();
 
     FanyNamedPipe::RegisterStatusSnapshotWindow(nullptr);
-    ShutdownWebviews();
 
     EnglishIme::Stop();
     CloudTranslation::Stop();

@@ -1,59 +1,50 @@
-# UI ownership and compatibility
+# UI ownership
 
-| Surface | Long-term backend | Compatibility scope |
+| Surface | Renderer | Owner |
 |---|---|---|
-| Candidate, floating toolbar, tray menu | msimeui native Direct2D/DirectWrite | `appearance.ui_backend=webview2` explicitly selects existing WebView skins |
-| Settings | UiHtml hosted by the separate native settings application | `appearance.settings_ui_backend=d2d` selects the experimental Direct2D frontend; small-window backend settings never change this host |
+| Candidate, floating toolbar, tray menu | msimeui native Direct2D/DirectWrite | `src/window/` presenters in the Server process |
+| Settings | msimeui native Direct2D/DirectWrite | `src/settings/native/` in the separate `MetasequoiaImeSettings.exe` |
 | Keyboard, handwriting, emoji and voice panels | Their existing native application/presenter | Shared actions/configuration stay in Server; panels do not own input sessions |
 
-`window/ui_backend_policy.h` owns backend selection. D2D is the default; existing
-WebView aliases remain readable. Unknown/retired stored values migrate to D2D,
-while new invalid configuration writes fail. A backend setting applies at process
-startup, preserving the existing controller lifetime and restart behavior.
+Direct2D is the only renderer. The WebView2 small windows, the WebView2 settings host and
+the `ui-html/` pages have been removed, together with the `appearance.ui_backend` and
+`appearance.settings_ui_backend` configuration keys; existing values are dropped by the
+template merge on upgrade.
 
 The candidate worker resolves output text, auxiliary codes, source badges and
-translations once into `CandidateViewItem`. Both native and Web renderers consume
-these values. HTML escaping and the legacy comma framing are confined to the Web
-adapter; native rendering receives plain text. Both click paths enter the existing
-`EnqueueCandidateUiAction` queue with the same focus owner checks and action policy.
-The ten-entry mouse range is distinct from the 1–9 keyboard shortcuts.
+translations once into `CandidateViewItem`, and the native renderer consumes these
+values as plain text. Clicks enter the existing `EnqueueCandidateUiAction` queue with the
+focus owner checks and action policy. The ten-entry mouse range is distinct from the
+1–9 keyboard shortcuts. New business behavior belongs in shared actions/session/view
+models, not in a presenter.
 
-WebView small windows remain a compatibility backend for existing skins. Their
-removal requires: a supported conversion path for CSS-dependent external skins;
-parity for candidate/context-menu actions, translations and accessibility; and
-recorded mixed-DPI, cold-start and signed/uiAccess host validation of the native
-replacement. Until those conditions are met, keep compatibility tests and do not
-silently reinterpret a configured WebView skin as a native skin. New business
-behavior belongs in shared actions/session/view models, not either renderer.
+## Settings window
 
-## Direct2D settings window (experimental)
+`MetasequoiaImeSettings.exe` draws its window with msimeui in `src/settings/native/`.
+The window speaks the message contract in `engine/contracts/webview/` (the name is
+historical): it receives `configSnapshot` and the response messages as JSON and posts
+`configUpdate` and the request messages through `HandleClientMessage` in
+`settings_app.cpp`, so config paths are mapped in one place. Its image assets live in
+`server/assets/settings/` and are installed to `<data dir>\assets\settings\`.
 
-`MetasequoiaImeSettings.exe` has two frontends for the same window. WebView2 hosting
-`ui-html/webview2/settings/ime-settings` stays the default; `appearance.settings_ui_backend
-= "d2d"` (or `--d2d` on the command line for one run) draws the window with msimeui
-instead, in `server/src/settings/native/`. Both frontends speak the same webview contract:
-the native window receives `configSnapshot` and the response messages as JSON and posts
-`configUpdate` and the request messages through the dispatcher the WebView2 page uses
-(`HandleClientMessage` in `settings_app.cpp`), so config paths are still mapped in one
-place. Switching the setting reopens the settings process in the other renderer.
+The pages were ported one to one from the former HTML/CSS settings page: each page
+builder in `native_page_*.cpp` names the partial and module it came from, and the
+controls in `native_settings_controls.*` name the CSS rule they mirror. Those sources
+remain in git history under `ui-html/webview2/settings/ime-settings/src/`.
 
-The native pages reproduce the HTML/CSS page one to one: each page builder in
-`native_page_*.cpp` follows its partial and module, and the controls in
-`native_settings_controls.*` name the CSS rule they mirror. A change to a settings page
-therefore has to be made on both sides until the WebView2 frontend is retired.
+Sciter is not an active product backend. The msimeui library owns generic controls and
+rendering, never Server configuration, pipe sessions, dictionary access, or global
+input state.
 
-Sciter is not an active product backend. The old unreferenced handwritten D2D
-prototype is removed; native small windows use msimeui presenters. The msimeui
-library owns generic controls and rendering, never Server configuration, pipe
-sessions, dictionary access, or global input state.
+## v2 skins
 
-## v2 皮肤在两个后端下的渲染
+`schema_version = 2` skins (nine-slice panel images, freely anchored decorations, space
+outside the panel) are rendered by `CandidatePresenter`'s native scene: the panel is drawn
+by `msimeui::Card::SetBackgroundImageNineSlice`, decorations by the `CandidateSkinOverlay`
+layer above the card, and `outer_insets_dip` becomes extra window space around the card.
+Parts of v2 are still being completed on the native side; see the `TODO(v2 皮肤)` notes in
+`candidate_presenter.cpp` and `candidate_skin_overlay.cpp`.
 
-`schema_version = 2` 的皮肤（九宫格贴图面板、自由锚定挂件、面板外空白）两个后端都支持，但走的是不同的实现：
-
-- WebView2 把面板翻成 CSS：`border-image` 铺九宫格，`content_insets_dip` 落成容器内边距，挂件用 `.containerParent` 的伪元素绝对定位。
-- D2D 用 `CandidatePresenter` 的本地场景：面板由 `msimeui::Card::SetBackgroundImageNineSlice` 画成九宫格，挂件由 `CandidateSkinOverlay` 这一层浮在卡片上，`outer_insets_dip` 换成窗口在卡片四边多留的空白。
-
-两侧读同一份 `skin.toml`，字段语义必须一致，尤其是 `anchor` 与 `offset_*_dip`：正数向右、向下。改一侧的定位规则要同时改另一侧。
-
-`content_insets_dip` 在两个后端都从面板外缘量起，D2D 侧由卡片内边距承担，不需要再扣边框。
+`anchor` and `offset_*_dip` follow one convention: positive values move right and down.
+`content_insets_dip` is measured from the outer edge of the panel and is carried by the
+card padding.

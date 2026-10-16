@@ -7,7 +7,7 @@
 #include "settings/settings_launcher.h"
 #include "utils/window_utils.h"
 #include "voice-input/voice_input_service.h"
-#include "webview2/windows_webview2.h"
+#include "window/small_windows.h"
 #include "window/ime_windows.h"
 #include "window/tray_menu_placement.h"
 

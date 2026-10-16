@@ -65,17 +65,7 @@ polish_text = false
 stt_provider = "cloud_siliconflow"
 ```
 
-You can also change these config in settings window:
-
-![](https://i.imgur.com/Q3Jct2Z.png)
-
-![](https://i.imgur.com/9j2IV9X.png)
-
-![](https://i.imgur.com/1F47neV.png)
-
-## Notice
-
-- Only implemented dark-mode UI now
+The tray icon's right-click menu has **设置** (opens `config.toml` in the editor associated with `.toml`, falling back to Notepad, and writes the defaults first if the file does not exist), **关于** and **退出**. Double-clicking the tray icon toggles recording. Changes to `config.toml` take effect the next time the host starts.
 
 ## License
 

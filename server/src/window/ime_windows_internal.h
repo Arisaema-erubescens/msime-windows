@@ -4,22 +4,17 @@
 // 只给 server/src/window/ime_windows*.cpp 包含，其他地方不要引用。
 
 #include <windows.h>
-#include <atomic>
-#include <cstdint>
 #include <string>
-#include <utility>
 #include "config/ime_config.h"
 #include "utils/window_utils.h"
-#include "webview2/windows_webview2.h"
+#include "window/small_windows.h"
 #include "log/candidate_diag_log.h"
 
-#define WEBVIEW_DIAG_LOGF(...) DIAG_LOGF(__VA_ARGS__)
-
-constexpr UINT_PTR TIMER_ID_INIT_WEBVIEW_MENU = 2;
-constexpr UINT_PTR TIMER_ID_MOVE_WEBVIEW_FTB = 4;
+// Places the floating toolbar on the primary monitor's bottom-right slot once
+// the host exists.
+constexpr UINT_PTR TIMER_ID_PLACE_FTB = 4;
 constexpr UINT_PTR TIMER_ID_CONFIG_SYNC = 7;
-constexpr UINT_PTR TIMER_ID_FTB_VISIBILITY_RECONCILE = 9;
-// Remeasure FTB after live DPI / display-mode changes (mirrors menu's INIT timer).
+// Remeasure FTB after live DPI / display-mode changes.
 constexpr UINT_PTR TIMER_ID_FTB_DPI_REMEASURE = 10;
 constexpr UINT_PTR TIMER_ID_CANDIDATE_MOVE_SETTLE = 11;
 constexpr UINT kCandidateMoveSettleMs = 50;
@@ -34,7 +29,7 @@ constexpr UINT_PTR TIMER_ID_CANDIDATE_HIDE_GRACE = 12;
 constexpr UINT kCandidateHideGraceMs = 50;
 // Floating toolbar auto-hide. ID 1 on the toolbar HWND belongs to msimeui's
 // caret-blink timer. The countdown polls so hover can be sampled without any
-// page-side mouse messages; the fade steps the layered alpha down.
+// mouse messages; the fade steps the layered alpha down.
 constexpr UINT_PTR TIMER_ID_FTB_AUTO_HIDE = 13;
 constexpr UINT_PTR TIMER_ID_FTB_AUTO_HIDE_FADE = 14;
 constexpr UINT kFloatingToolbarAutoHidePollMs = 200;
@@ -47,34 +42,17 @@ constexpr UINT kFloatingToolbarAutoHideFadeMs = 400;
 // signature does not capture (skin reload, DPI change) self-heals on the next
 // keystroke instead of sticking.
 constexpr UINT kCandidateShowDedupWindowMs = 250;
-// Long enough fallback when the page never posts ready (old HTML / failed JS).
-// Page-ready normally ends the grace earlier; until then the toolbar stays shown.
-constexpr UINT kFloatingToolbarPaintGraceMs = 6000;
 
 int FineTuneWindow(HWND hwnd);
-int FineTuneWindow(HWND hwnd, UINT firstFlag, UINT secondFlag);
 std::wstring DescribeCandidateHostState();
 
 namespace ime_windows_detail
 {
 extern bool g_is_ime_active;
-extern std::atomic<uint64_t> g_candidate_finetune_generation;
-extern std::atomic<bool> g_candidate_layout_inflight;
-extern std::atomic<uint64_t> g_candidate_content_generation;
 extern int g_last_placed_caret_x;
 extern int g_last_placed_caret_y;
 extern bool g_candidate_session_anchor_valid;
 extern POINT g_candidate_session_anchor;
-extern bool g_has_last_candidate_clip;
-extern std::pair<double, double> g_last_candidate_clip_size;
-extern FLOAT g_last_candidate_clip_scale;
-extern bool g_candidate_placed_above_caret;
-extern std::pair<double, double> g_last_candidate_card_size;
-extern bool g_has_candidate_clip_envelope;
-extern double g_clip_envelope_top_dip;
-extern double g_clip_envelope_bottom_dip;
-extern double g_clip_envelope_left_dip;
-extern double g_clip_envelope_right_dip;
 extern int g_candidate_dpi_change_suppress_count;
 
 struct SuppressCandidateDpiChange
@@ -93,46 +71,14 @@ struct SuppressCandidateDpiChange
 
 // ime_windows.cpp
 bool IsSystemLightDarkToggle(UINT message, LPARAM lParam);
-void SyncHostWebViewBounds(ICoreWebView2Controller *controller, HWND hwnd);
 void SetHostWindowCloaked(HWND hwnd, bool cloaked);
 bool IsHostWindowCloaked(HWND hwnd);
 std::wstring DescribeFloatingToolbarHostState();
 
-// ime_windows_candidate_layout.cpp
+// ime_windows_candidate.cpp
 POINT GetCandidateLayoutCaret();
-std::pair<int, int> ComputeQuarterScreenHostPixels(const MonitorCoordinates &monitor);
-void LogCandidatePositionAudit(const wchar_t *stage, POINT rawCaret, POINT layoutCaret, POINT properPos, int hostX,
-                               int hostY, int hostWidthPx, int hostHeightPx, FLOAT scale, double contentWidthDip,
-                               double contentHeightDip, const MonitorCoordinates &monitor, int marginLeftBefore = -1,
-                               int marginTopBefore = -1);
-double GetCandidateDecorationTopDip();
-int GetCandidatePackingMarginTopDip();
-std::pair<double, double> AddCandidateDecorationToSize(const std::pair<double, double> &cardSize);
-int GetCandidateOuterTopPx(int cardAnchorY, int packingTopDip, FLOAT scale);
-// 外留白信封的左边（屏幕 px）：卡片左边再往左让出 v2 的 outer_insets_dip.left。
-// MarginLeft 与 MarginTop 一样指向信封左上角，卡片由皮肤 CSS 相对定位回原位。
-int GetCandidateOuterLeftPx(int cardAnchorX, FLOAT scale);
-void ClipCandidateWindowToContent(HWND hwnd, const std::pair<double, double> &containerSize, FLOAT scale,
-                                  double extraTopDip = 0.0);
-void ClearCandidateWindowRegion(HWND hwnd);
-int GetCandidateOuterMarginDip(int desiredOuterTopPx, int hostY, FLOAT scale);
-void KeepCandidateCardInsideHostAndMonitor(int &hostX, int &hostY, int hostWidthPx, int hostHeightPx,
-                                           double contentWidthDip, double contentHeightDip, FLOAT layoutScale,
-                                           const MonitorCoordinates &coordinates, double minContentWidthDip = 0.0);
-void RememberCandidateClip(const std::pair<double, double> &decoratedSize, FLOAT scale, int caretX, int caretY);
-void RememberCandidateClipSize(const std::pair<double, double> &decoratedSize, FLOAT scale);
-void RememberCandidateFlip(int cardTopPx, int caretY);
-bool CandidateCardFitsClipEnvelope(const std::pair<double, double> &decoratedSize);
-double EstimateVerticalPageHeightDip(double currentHeightDip);
-void ReanchorCandidateHostToPaintedCard(const POINT &layoutCaret, const std::pair<double, double> &cardSize,
-                                        const MonitorCoordinates &coordinates, int hostHeightPx, FLOAT scale,
-                                        int &hostX, int &hostY);
 bool IsCandidateHostPaintedVisible(HWND hwnd);
 bool CandidateCaretNeedsStableFollow(HWND hwnd, POINT caret);
-
-// ime_windows_candidate_show.cpp
-void RefreshCandidateClipAfterPaint(HWND hwnd, uint64_t contentGeneration, ULONGLONG updateStartedTick);
-void PlaceCandidateHostNearCaret(HWND hwnd, std::pair<double, double> requestedCardSize = {});
 
 // ime_windows_toolbar.cpp
 int ConfiguredFloatingToolbarWidth();

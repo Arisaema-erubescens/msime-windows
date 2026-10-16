@@ -29,11 +29,8 @@ void SetCandidateHostCloaked(bool cloaked);
 // whole class of bugs here is "nothing ever called this", so the caller has to
 // be recoverable from the log.
 void ApplyConfiguredFloatingToolbarVisibility(const wchar_t *reason = L"unspecified");
-// End the post-navigation paint grace (page-ready or fallback timeout) and apply
-// the real show/hide decision. Until this runs, the toolbar stays shown.
-void ReconcileFloatingToolbarVisibilityAfterReady(const wchar_t *reason = L"ftb-ready");
-// Use instead of ShowWindow(SW_HIDE) on the toolbar host: hiding it before its
-// WebView2 has painted once permanently breaks the toolbar's rendering.
+// Use instead of ShowWindow(SW_HIDE) on the toolbar host: a toolbar whose
+// presenter never came up is only cloaked, never hidden.
 void HideFloatingToolbarHost();
 // Auto-hide settings (or the toolbar switch) changed: drop any auto-hidden or
 // mid-fade state, re-apply visibility and start the countdown from scratch.
@@ -41,10 +38,10 @@ void RestartFloatingToolbarAutoHide(const wchar_t *reason);
 // An input state shown on the toolbar (CN/EN, width, punctuation, Caps Lock...)
 // changed: bring an auto-hidden toolbar back and restart its countdown.
 void RevealAutoHiddenFloatingToolbar(const wchar_t *reason);
-// One-line snapshot of the tray menu host and its controller for the diagnostic
-// trace. A menu that is invisible yet still routes clicks to the right item
-// looks identical from the outside whether it was never uncloaked or its
-// WebView2 stopped compositing, and only these fields tell the two apart.
+// One-line snapshot of the tray menu host for the diagnostic trace. A menu that
+// is invisible yet still routes clicks to the right item looks identical from
+// the outside whether it was never uncloaked or lost its layered alpha, and only
+// these fields tell the two apart.
 std::wstring DescribeTrayMenuHostState();
 void ApplyConfiguredFloatingToolbarSize();
 void ApplyConfiguredInputScheme();

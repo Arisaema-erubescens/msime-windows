@@ -6,7 +6,6 @@ param(
     # Historical or custom layouts remain available through explicit overrides.
     [string]$TsfDirectory = 'windows',
     [string]$ServerDirectory = 'server',
-    [string]$UiHtmlDirectory = 'ui-html',
     [string]$HelpCodeDirectory = 'engine/helpcode',
     # U 模式的部件拆字反查表（decomposition.txt）随包发布到数据目录的 radical\ 下。
     [string]$RadicalDirectory = 'engine/radical',
@@ -65,7 +64,8 @@ $tsf32Release = Join-Path $RepoRoot (Join-Path $TsfDirectory 'build32-release\Re
 $tsf64Release = Join-Path $RepoRoot (Join-Path $TsfDirectory 'build64-release\Release\MetasequoiaImeTsf.dll')
 $tsf32Pdb = Join-Path $RepoRoot (Join-Path $TsfDirectory 'build32-release\Release\MetasequoiaImeTsf.pdb')
 $tsf64Pdb = Join-Path $RepoRoot (Join-Path $TsfDirectory 'build64-release\Release\MetasequoiaImeTsf.pdb')
-$webviewRoot = Join-Path $RepoRoot (Join-Path $UiHtmlDirectory 'webview2')
+# 原生（Direct2D）设置窗口用到的图标与图片，按原相对路径装到数据目录的 assets\settings\。
+$settingsAssets = Join-Path $RepoRoot (Join-Path $ServerDirectory 'assets\settings')
 $defaultSkinsSource = Join-Path $RepoRoot 'skins\default'
 $bundledSkinsSource = Join-Path $RepoRoot 'skins'
 $serverConfig = Join-Path $RepoRoot (Join-Path $ServerDirectory 'assets\config\config.toml')
@@ -117,11 +117,7 @@ Assert-PathExists -LiteralPath $appIcon -Description '应用图标'
 Assert-PathExists -LiteralPath $tipIcon -Description '输入法语言配置图标 msime.ico'
 Assert-PathExists -LiteralPath $thirdPartyNotices -Description '第三方声明 THIRD_PARTY_NOTICES.txt'
 Assert-PathExists -LiteralPath $license -Description '许可证 LICENSE'
-Assert-PathExists -LiteralPath (Join-Path $webviewRoot 'shared') -Description '共享 WebView 消息契约'
-Assert-PathExists -LiteralPath (Join-Path $webviewRoot 'candwnd') -Description '候选窗 HTML 目录'
-Assert-PathExists -LiteralPath (Join-Path $webviewRoot 'ftb') -Description '悬浮工具栏 HTML 目录'
-Assert-PathExists -LiteralPath (Join-Path $webviewRoot 'menu') -Description '菜单 HTML 目录'
-Assert-PathExists -LiteralPath (Join-Path $webviewRoot 'settings\ime-settings\dist') -Description '设置页面 dist 目录'
+Assert-PathExists -LiteralPath $settingsAssets -Description '设置窗口图片资源目录'
 Assert-PathExists -LiteralPath $defaultSkinsSource -Description '内置皮肤设置清单 skins\default'
 
 if (-not $Light) {
@@ -160,7 +156,7 @@ $targetServer = Join-Path $PSScriptRoot 'server_exe'
 $targetTsf = Join-Path $PSScriptRoot 'tsf_dll'
 
 if ($Light) {
-    Write-Host '轻量模式：跳过词库、辅助码、拼音表和出厂配置，只刷新 TSF、Server、HTML。'
+    Write-Host '轻量模式：跳过词库、辅助码、拼音表和出厂配置，只刷新 TSF、Server 和设置窗口图片资源。'
     New-Item -ItemType Directory -Path $targetAppData -Force | Out-Null
 }
 else {
@@ -235,17 +231,17 @@ else {
     Copy-Item -LiteralPath $radicalTable -Destination (Join-Path $targetRadical 'decomposition.txt') -Force
 }
 
-$targetHtml = Join-Path $targetAppData 'html'
-if (Test-Path -LiteralPath $targetHtml) {
-    Remove-Item -LiteralPath $targetHtml -Recurse -Force
+# 轻量模式不清空 app_data，旧版本留下的 html\（WebView2 页面）要在这里删掉，免得被打进包里。
+$legacyHtml = Join-Path $targetAppData 'html'
+if (Test-Path -LiteralPath $legacyHtml) {
+    Remove-Item -LiteralPath $legacyHtml -Recurse -Force
 }
-$targetWebview = Join-Path $targetHtml 'webview2'
-Copy-DirectoryContents -Source (Join-Path $webviewRoot 'shared') -Destination (Join-Path $targetWebview 'shared')
-Copy-DirectoryContents -Source (Join-Path $webviewRoot 'candwnd') -Destination (Join-Path $targetWebview 'candwnd')
-Copy-DirectoryContents -Source (Join-Path $webviewRoot 'ftb') -Destination (Join-Path $targetWebview 'ftb')
-Copy-DirectoryContents -Source (Join-Path $webviewRoot 'menu') -Destination (Join-Path $targetWebview 'menu')
-Copy-DirectoryContents -Source (Join-Path $webviewRoot 'settings\ime-settings\dist') `
-    -Destination (Join-Path $targetWebview 'settings\ime-settings\dist')
+$targetAssets = Join-Path $targetAppData 'assets'
+$targetSettingsAssets = Join-Path $targetAssets 'settings'
+if (Test-Path -LiteralPath $targetAssets) {
+    Remove-Item -LiteralPath $targetAssets -Recurse -Force
+}
+Copy-DirectoryContents -Source $settingsAssets -Destination $targetSettingsAssets
 
 # 内置皮肤的设置清单（翻页箭头等开关）。用户会就地改这些 skin.toml，安装脚本用
 # onlyifdoesntexist 落到数据目录的 skins\default，升级只补缺失的文件、不覆盖已有的。
@@ -355,20 +351,6 @@ $updatedIss = [regex]::Replace(
 # CRLF-only diff that git flags as modified while `git diff` shows no textual change.
 $updatedIss = $updatedIss.TrimEnd("`r", "`n") + "`n"
 Set-Content -LiteralPath $targetIss -Value $updatedIss -Encoding utf8NoBOM -NoNewline
-
-# 设置页是已构建的静态资源，同步其“当前版本”展示。
-$settingsDist = Join-Path $targetWebview 'settings\ime-settings\dist'
-Get-ChildItem -LiteralPath $settingsDist -Recurse -File -Include '*.js', '*.html' | ForEach-Object {
-    $content = Get-Content -LiteralPath $_.FullName -Raw
-    $updated = [regex]::Replace(
-        $content,
-        '(<div class="about-version">)v\d+(?:\.\d+)+(</div>)',
-        "`$1v$TargetVersion`$2"
-    )
-    if ($updated -ne $content) {
-        Set-Content -LiteralPath $_.FullName -Value $updated -Encoding utf8NoBOM
-    }
-}
 
 $serverBinaryCount = @(Get-ChildItem -LiteralPath $targetServer -Recurse -File -Include '*.exe', '*.dll').Count
 $tsfBinaryCount = @(Get-ChildItem -LiteralPath $targetTsf -Recurse -File -Include '*.exe', '*.dll').Count

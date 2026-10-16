@@ -68,7 +68,7 @@ TSF DLL 被加载进宿主程序进程，采用静态 CRT 构建，不依赖运�
 
 ### 候选窗始终不出现
 
-先确认已安装 **Microsoft Edge WebView2 Runtime**（在「设置 → 应用 → 已安装的应用」里搜索 WebView2）。当前版本的候选窗由 WebView2 渲染，运行时缺失会导致窗口无法显示。
+候选窗由 Server 用 Direct2D 绘制，不依赖 WebView2 Runtime。先按上一节确认 x64 运行库已安装，再在任务管理器里确认 `MetasequoiaImeServer.exe` 正在运行。在独占全屏的游戏里，候选窗会被有意隐藏，以免把游戏切出全屏。
 
 ### 手写识别没有候选结果
 

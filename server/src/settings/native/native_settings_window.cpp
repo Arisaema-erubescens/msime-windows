@@ -1075,7 +1075,7 @@ class SettingsWindowImpl : public HostServices
         window_->SetQuitOnDestroy(false);
         // The frame is extended into the client area for the custom caption; DWM does not
         // compose an HWND render target's output there, a composition swap chain it does.
-        // Opaque, so text can use ClearType like the WebView2 page does.
+        // Opaque, so text can use ClearType.
         window_->SetCompositionRendering(true, true);
         window_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
         SetLayoutScale(static_cast<float>(GetDpiForWindow(hwnd_)) / 96.0f);

@@ -98,7 +98,7 @@ icon = "#f6e4eb"
 - `font_family` 排在用户设置的字体前面，缺字时回落到用户字体；字号始终由用户设置决定。
 - `page_arrows = true` 可以打开候选框里的翻页箭头；不写时沿用 `base` 内置皮肤的设置（出厂为关闭）。
 - `fit_content = true` 让卡片严格按候选文字的宽度收紧，不再垫出厂最小宽度；`min_width_dip` 和装饰图宽度仍然生效。不写时沿用 `base` 内置皮肤的设置（出厂为关闭）。
-- `[toolbar]` 下的所有键都可以省略，没写的沿用 `base` 皮肤；配置对 D2D 和 WebView2 两种工具栏渲染器都生效。
+- `[toolbar]` 下的所有键都可以省略，没写的沿用 `base` 皮肤。
 - `[supports].themes` 里声明的每套主题都要有对应的 `[candidate.<theme>]`；写了 `[toolbar]` 的话，也要有对应的 `[toolbar.<theme>]`。
 
 完整字段见 [schema/README.md](schema/README.md)。

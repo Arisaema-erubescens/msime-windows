@@ -42,11 +42,8 @@ try {
         'neural-model/sentence-model-desktop.safetensors',
         'neural-model/sentence-model.safetensors',
         'neural-model/NOTICE.md',
-        'ui-html/webview2/shared/runtime.js',
-        'ui-html/webview2/candwnd/index.html',
-        'ui-html/webview2/menu/index.html',
-        'ui-html/webview2/ftb/index.html',
-        'ui-html/webview2/settings/ime-settings/dist/index.html',
+        'server/assets/settings/arrow.svg',
+        'server/assets/settings/sidebar/about.svg',
         'skins/default/fluent/skin.toml'
     )) { Write-Fixture $file }
     Write-Fixture 'skins/demo-skin/skin.toml' "schema_version = 1`nid = `"demo-skin`"`n"
@@ -58,7 +55,8 @@ try {
     python -c "import sqlite3,sys; sqlite3.connect(sys.argv[1]).execute('CREATE TABLE english_words(word TEXT,display TEXT,weight INTEGER,PRIMARY KEY(word,display))')" $english
     if ($LASTEXITCODE -ne 0) { throw 'Failed to create packaging fixture' }
     & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture -TargetVersion '2026.9.1' -IncludeSymbols
-    foreach ($file in @('app_data/html/webview2/shared/runtime.js', 'app_data/dictionary-manifest.json',
+    foreach ($file in @('app_data/assets/settings/arrow.svg', 'app_data/assets/settings/sidebar/about.svg',
+                         'app_data/dictionary-manifest.json',
                          'app_data/sc.lm', 'app_data/libime-lm-NOTICE.md', 'app_data/dict_pinyin.dat',
                          'app_data/sentence-model.safetensors', 'app_data/chinese-ime-lm-NOTICE.md',
                          'tsf_dll/32/MetasequoiaImeTsf.dll', 'tsf_dll/32/MetasequoiaImeTsf.pdb',
@@ -147,7 +145,7 @@ try {
     }
     # 默认不带符号：PDB 是安装包体积和打包耗时的大头，只有显式 -IncludeSymbols 才进包。
     & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture -TargetVersion '2026.9.1'
-    foreach ($file in @('app_data/html/webview2/shared/runtime.js',
+    foreach ($file in @('app_data/assets/settings/sidebar/about.svg',
                          'tsf_dll/32/MetasequoiaImeTsf.dll', 'tsf_dll/64/MetasequoiaImeTsf.dll',
                          'server_exe/MetasequoiaImeServer.exe')) {
         if (-not (Test-Path (Join-Path $installer $file))) { throw "Missing packaged file: $file" }
@@ -167,14 +165,19 @@ try {
     [IO.File]::WriteAllText($serverPdbFixture, 'fixture')
     $database = Join-Path $installer 'app_data/msime.db'
     [IO.File]::WriteAllText($database, 'preserved user data')
-    & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture -TsfDirectory windows -ServerDirectory server -UiHtmlDirectory ui-html -NoticesDirectory . -Light
+    # 轻量包不清空 app_data：旧版本留下的 html\（WebView2 页面）必须被清掉，否则会被打进包里。
+    $legacyHtml = Join-Path $installer 'app_data/html/webview2/shared/runtime.js'
+    New-Item -ItemType Directory -Force -Path (Split-Path $legacyHtml) | Out-Null
+    [IO.File]::WriteAllText($legacyHtml, 'stale')
+    & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture -TsfDirectory windows -ServerDirectory server -NoticesDirectory . -Light
     if ([IO.File]::ReadAllText($database) -ne 'preserved user data') { throw 'Light package replaced dictionary data' }
-    if (-not (Test-Path (Join-Path $installer 'app_data/html/webview2/shared/runtime.js'))) { throw 'Light package lost shared contracts' }
+    if (-not (Test-Path (Join-Path $installer 'app_data/assets/settings/sidebar/about.svg'))) { throw 'Light package lost settings assets' }
+    if (Test-Path (Join-Path $installer 'app_data/html')) { throw 'Light package kept the retired html directory' }
     # 完整包必须带 sc.lm。缺了它引擎是静默降级的：整句候选只是变差，不会报错，所以打包
     # 这一步是唯一能挡住它的地方。轻量包本来就不带数据文件，不受影响。
     $languageModelFixture = Join-Path $fixture 'language-model/sc.lm'
     Remove-Item $languageModelFixture -Force
-    & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture -TsfDirectory windows -ServerDirectory server -UiHtmlDirectory ui-html -NoticesDirectory . -Light
+    & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture -TsfDirectory windows -ServerDirectory server -NoticesDirectory . -Light
     $rejected = $false
     try { & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture } catch { $rejected = $_.Exception.Message -match 'sc\.lm' }
     if (-not $rejected) { throw 'Missing language model was accepted' }
@@ -195,10 +198,10 @@ try {
     try { & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture } catch { $rejected = $_.Exception.Message -match 'safetensors' }
     if (-not $rejected) { throw 'Missing neural sentence model was accepted' }
     [IO.File]::WriteAllText($neuralModelFixture, 'fixture')
-    Remove-Item (Join-Path $fixture 'ui-html/webview2/shared') -Recurse -Force
+    Remove-Item (Join-Path $fixture 'server/assets/settings') -Recurse -Force
     $rejected = $false
-    try { & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture -TsfDirectory windows -ServerDirectory server -UiHtmlDirectory ui-html -NoticesDirectory . } catch { $rejected = $true }
-    if (-not $rejected) { throw 'Missing shared contracts were accepted' }
+    try { & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture -TsfDirectory windows -ServerDirectory server -NoticesDirectory . } catch { $rejected = $_.Exception.Message -match '设置窗口图片资源' }
+    if (-not $rejected) { throw 'Missing settings assets were accepted' }
     if ([IO.File]::ReadAllText($database) -ne 'preserved user data') { throw 'Rejected package damaged previous staging' }
     Write-Host 'Full/light package contracts, provenance, exclusions and failure staging passed'
 } finally {

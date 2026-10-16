@@ -614,20 +614,6 @@ bool SetConfiguredCandidateAiBadgeStyle(const std::string &style);
 // "off" | "1m" | "5m" | "10m" | "30m" | "60m" | "forever"，默认 "10m"。
 const std::string &GetConfiguredSettingsWindowLinger();
 bool SetConfiguredSettingsWindowLinger(const std::string &linger);
-// "webview2" | "d2d" — renderer of the settings window, applied when it next opens.
-// Direct2D is experimental; WebView2 stays the default.
-const std::string &GetConfiguredSettingsUiBackend();
-bool SetConfiguredSettingsUiBackend(const std::string &backend);
-// "d2d" | "webview2" — candidate, floating toolbar, and tray menu renderer.
-// Changing this writes config immediately; the process snapshot does not switch
-// until the IME server is restarted.
-const std::string &GetConfiguredUiBackend();
-bool SetConfiguredUiBackend(const std::string &backend);
-// Process-lifetime renderer chosen at InitImeConfig. Independent of later reloads.
-bool UseD2dSmallWindowUi();
-// Switch this process to the D2D renderer without touching the configured value, so the user's
-// choice comes back on the next start. Only valid before the candidate window is created.
-void FallBackToD2dSmallWindowUi();
 // "fluent" | "wechat" | "graphite" | "willow_green" | "autumn_osmanthus" | "microsoft"
 // — candidate-window and floating-toolbar skin.
 const std::string &GetConfiguredCandidateSkin();

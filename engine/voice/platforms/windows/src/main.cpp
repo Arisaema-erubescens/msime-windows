@@ -21,7 +21,7 @@
 #include "wave_overlay.h"
 #include "cue_player.h"
 #include "text_polisher.h"
-#include "window_webview2.h"
+#include "tray_ui.h"
 #include <fmt/format.h>
 #include <fmt/xchar.h>
 #include <windows.h>
@@ -392,14 +392,12 @@ int main()
         MSG init_msg{};
         PeekMessage(&init_msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
 
-        window_webview2::TrayMenuConfig tray_config{};
+        tray_ui::TrayMenuConfig tray_config{};
         tray_config.main_thread_id = g_main_thread_id;
         tray_config.msg_toggle_record = WM_APP_TOGGLE_RECORD;
         tray_config.msg_exit = WM_APP_EXIT;
         tray_config.app_name = L"MetasequoiaVoiceInput";
-        tray_config.default_width = 300;
-        tray_config.default_height = 360;
-        if (!window_webview2::InitializeTrayUi(app_instance, tray_config))
+        if (!tray_ui::InitializeTrayUi(app_instance, tray_config))
         {
             throw std::runtime_error("Tray UI init failed");
         }
@@ -612,7 +610,7 @@ int main()
         force_release_ralt_key();
 
         UnhookWindowsHookEx(keyboard_hook);
-        window_webview2::ShutdownTrayUi(app_instance);
+        tray_ui::ShutdownTrayUi(app_instance);
         wave_overlay.shutdown();
 
         // 通知 stt 线程停止
@@ -627,7 +625,7 @@ int main()
     }
     catch (const std::exception &e)
     {
-        window_webview2::ShutdownTrayUi(app_instance);
+        tray_ui::ShutdownTrayUi(app_instance);
         printf("FATAL ERROR: %s\n", e.what());
         fflush(stdout);
         MessageBoxA(nullptr, e.what(), "MetasequoiaVoiceInput - Fatal Error", MB_ICONERROR);

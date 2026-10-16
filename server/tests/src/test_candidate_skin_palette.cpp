@@ -78,7 +78,7 @@ TEST_CASE(candidate_skin_palette_applies_custom_colors_with_builtin_fallbacks)
     REQUIRE_EQ(FlattenCandidateColor(palette.text, palette.surface), RGB(136, 144, 152));
 }
 
-// The WebView2 renderer takes every CSS hex notation, so D2D must read the same ones instead of silently falling back.
+// Skin authors write CSS hex notation in every form, so D2D must read them all instead of silently falling back.
 TEST_CASE(candidate_skin_palette_parses_every_css_hex_notation)
 {
     const D2D1_COLOR_F fallback = D2D1::ColorF(0.0f, 0.0f, 1.0f, 1.0f);

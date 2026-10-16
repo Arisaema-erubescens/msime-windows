@@ -53,7 +53,7 @@ TEST_CASE(floating_toolbar_skin_follows_builtin_skin_pages)
     }
 }
 
-// An external skin's [toolbar] tables reach the D2D toolbar too, not only the WebView2 page.
+// An external skin's [toolbar] tables reach the D2D toolbar.
 TEST_CASE(floating_toolbar_skin_applies_external_overrides_for_the_theme)
 {
     CandidateSkinCatalog::Package package;

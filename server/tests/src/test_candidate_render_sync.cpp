@@ -27,8 +27,8 @@ TEST_CASE(candidate_render_echo_never_moves_backwards)
     using FanyImeIpc::AdvanceRenderedCandidateGeneration;
     using FanyImeIpc::ShouldWaitForCandidateRender;
 
-    // WebView2: a dedup echoes 332 synchronously, then the content-only DOM callback for the same
-    // content lands and echoes 331. The stale echo must not pull rendered back behind published.
+    // A dedup echoes 332 synchronously, then a late echo for the same content lands with 331. The stale echo must not
+    // pull rendered back behind published.
     std::uint64_t rendered = 330;
     rendered = AdvanceRenderedCandidateGeneration(rendered, 332);
     rendered = AdvanceRenderedCandidateGeneration(rendered, 331);

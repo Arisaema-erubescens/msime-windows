@@ -71,7 +71,7 @@ bool SetConfiguredCharacterSet(const std::string &character_set)
         return false;
     }
     g_character_set = character_set;
-    // Marshal WebView/native toolbar refreshes to their owner thread. Settings
+    // Marshal toolbar refreshes to their owner thread. Settings
     // in a separate process reaches the same refresh through ConfigChanged.
     NotifyImeServer(WM_REFRESH_CHARACTER_SET, L"ConfigChanged");
     return true;

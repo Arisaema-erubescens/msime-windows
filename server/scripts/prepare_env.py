@@ -31,18 +31,6 @@ vcpkg_include_path = normpath(
 monorepo_root_path = normpath(os.path.dirname(project_root_path))
 engine_path = normpath(os.path.join(monorepo_root_path, "engine"))
 utfcpp_path = normpath(os.path.join(engine_path, "utfcpp", "source"))
-webview2_path = normpath(
-    os.path.join(
-        user_home,
-        ".nuget",
-        "packages",
-        "microsoft.web.webview2",
-        "1.0.3240.44",
-        "build",
-        "native",
-        "include",
-    )
-)
 wil_path = normpath(
     os.path.join(
         user_home,
@@ -63,9 +51,9 @@ boost_path = normpath(
 # project_root/.clangd
 #
 # The template carries @NAME@ placeholders rather than fixed line numbers. The
-# previous version addressed lines by index, and the indices had drifted: the
-# Boost path was written over the WebView2 include and the Sciter path over a
-# comment, which left clangd unable to resolve the WebView2 headers.
+# previous version addressed lines by index, and the indices had drifted, so
+# paths were written over the wrong include lines and comments and clangd could
+# not resolve the headers they were meant for.
 #
 clangd_substitutions = {
     "@SERVER_ROOT@": MetasequoiaImeServer_root_path,
@@ -76,7 +64,6 @@ clangd_substitutions = {
     "@VOICE_INCLUDE@": engine_path + "/voice/include",
     "@MINIAUDIO@": engine_path + "/voice/third_party/miniaudio",
     "@GUI_INCLUDE@": monorepo_root_path + "/ui/include",
-    "@WEBVIEW2@": webview2_path,
     "@WIL@": wil_path,
     "@BOOST@": boost_path,
 }

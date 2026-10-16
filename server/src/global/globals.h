@@ -248,9 +248,6 @@ inline std::string NumHanSeparator = " "; // Number and Hanzi separator
 namespace Global
 {
 inline LONG INVALID_Y = -100000;
-inline int MarginTop = 0;
-// Horizontal offset of the opaque card inside the stable (often 720 DIP-wide) host.
-inline int MarginLeft = 0;
 
 // Candidate pages are published by the IPC worker thread but painted by the UI thread. The worker
 // stamps every published page (candidate_page_generation), the UI echoes back the generation it
@@ -418,7 +415,7 @@ inline CandidateUiState candidate_ui;
 // candidate_ui belongs to the IPC worker thread, which rebuilds and destroys its vectors while the UI thread paints;
 // the handoff is an asynchronous PostMessage, so nothing serialises the two. The worker therefore copies each finished
 // page into one of these immutable snapshots and publishes it atomically, and every UI-thread reader (candidate
-// presenter, its mouse callbacks, the WebView2 payload) loads a snapshot once and reads only from that copy.
+// presenter and its mouse callbacks) loads a snapshot once and reads only from that copy.
 struct CandidatePageSnapshot
 {
     std::vector<CandidateViewItem> page_views;

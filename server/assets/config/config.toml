@@ -174,15 +174,9 @@ linear_step = 1
 [appearance]
 # 主题模式，可选："dark", "light", "system"
 theme_mode = "system"
-# 候选窗 / 悬浮工具栏 / 托盘菜单渲染，可选："d2d", "webview2"
-# 更改后需重启输入法进程生效
-ui_backend = "d2d"
 # 设置窗口关闭后在后台驻留多久再退出，驻留期间重新打开无需冷启动
 # 可选："off"（立即退出）, "1m", "5m", "10m", "30m", "60m", "forever"（一直驻留）
 settings_window_linger = "off"
-# 设置窗口渲染方式，可选："webview2", "d2d"（Direct2D，实验性）
-# 更改后设置窗口会自动重新打开
-settings_ui_backend = "webview2"
 # 分表面主题，可选："follow", "dark", "light"（follow = 跟随 theme_mode）
 theme_settings = "follow"
 theme_cand = "follow"

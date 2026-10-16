@@ -243,15 +243,12 @@ extern std::string g_punctuation_lock;
 extern std::string g_candidate_window_layout;
 extern bool g_candidate_window_follow_cursor;
 extern bool g_candidate_window_fit_content;
-extern std::string g_ui_backend;
-extern std::string g_ui_backend_active;
 extern std::string g_candidate_skin;
 extern std::string g_candidate_window_preedit_style;
 extern bool g_candidate_fixed_badge;
 extern std::string g_candidate_fixed_badge_style;
 extern std::string g_candidate_ai_badge_style;
 extern std::string g_settings_window_linger;
-extern std::string g_settings_ui_backend;
 extern std::string g_theme_mode;
 extern std::string g_theme_settings;
 extern std::string g_theme_cand;
@@ -281,12 +278,10 @@ void RefreshEffectiveTsfPreeditStyle();
 // 文件缺失或写错时返回 false，调用方据此回落到小鹤。
 bool LoadShuangpinSchema(const std::string &schema);
 VoiceInputConfig SnapshotVoiceInput();
-std::string NormalizeSmallWindowUiBackend(const std::string &value);
 bool IsValidCandidateSkinId(const std::string &skin);
 bool IsValidCandidateFixedBadgeStyle(const std::string &style);
 bool IsValidCandidateAiBadgeStyle(const std::string &style);
 bool IsValidSettingsWindowLinger(const std::string &linger);
-bool IsValidSettingsUiBackend(const std::string &backend);
 bool IsValidTranslationTargetLanguage(const std::string &language);
 std::string AiAssistantTokenSlotKey(std::string_view provider);
 // ime_config_services.cpp：按当前各段全局配置重建候选词翻译快照。改动 provider、腾讯云、

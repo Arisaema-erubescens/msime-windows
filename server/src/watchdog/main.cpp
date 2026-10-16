@@ -183,8 +183,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         }
         else if (GetTickCount64() - started_at >= kHealthyRunMilliseconds)
         {
-            // Unclean exit (Task Manager kill, crash): give orphaned WebView2
-            // processes time to release the shared user-data folder lock.
+            // Unclean exit (Task Manager kill, crash): back off briefly before
+            // relaunching.
             restart_delay = 2'000;
         }
         else

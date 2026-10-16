@@ -12,12 +12,4 @@ constexpr bool ShouldShowFloatingToolbar(bool configured_enabled, bool fullscree
 {
     return configured_enabled && !fullscreen && ime_active && !auto_hidden;
 }
-
-// After the first NavigationCompleted, keep the host shown until the page
-// reports ready (or a fallback timeout). Hide decisions are deferred until
-// then, then re-evaluated for real.
-constexpr bool ShouldDeferFloatingToolbarHide(bool paint_grace_active)
-{
-    return paint_grace_active;
-}
 } // namespace FanyImeUi

@@ -2,13 +2,13 @@
 
 组织级约定见 [组织 AGENTS.md](https://github.com/metasequoiaime/.github/blob/main/AGENTS.md)，仓库地图和组件之间的边界见[仓库根 AGENTS.md](../AGENTS.md)。本文件补充本组件的实现、数据和验证规则，路径都相对于 `server/`。
 
-本组件是常驻后端进程：输入引擎与候选状态、配置、词典、Named Pipe 服务，以及候选窗、悬浮工具栏、托盘菜单的原生宿主与 WebView2 控制器。设置页（`MetasequoiaImeSettings.exe`）由本组件的 `server/src/settings/` 单独构成一个进程，不在服务端进程内。
+本组件是常驻后端进程：输入引擎与候选状态、配置、词典、Named Pipe 服务，以及候选窗、悬浮工具栏、托盘菜单（`msimeui` Direct2D presenter）。设置窗口（`MetasequoiaImeSettings.exe`）由本组件的 `server/src/settings/` 单独构成一个进程，不在服务端进程内。
 
 ## vcpkg_installed 的解析
 
-`CMakeLists.txt` 四处引用 `vcpkg_installed`，全部走 `${CMAKE_BINARY_DIR}`。其中 `WEBVIEW2_VCPKG_ROOT` 供 WebView2 loader 的导入库和运行时 DLL 拷贝使用。
+`CMakeLists.txt` 引用 `vcpkg_installed` 的地方（头文件目录、`sqlite3.dll` 拷贝）全部走 `${CMAKE_BINARY_DIR}`。
 
-**不要改回 `${CMAKE_SOURCE_DIR}/build/...`。** 那样 binary dir 就只能叫字面的 `build`，本仓自带的 `vcpkg-release` preset（`binaryDir` 是 `build-release`）和 `scripts/lcompile-release.ps1` 都会在链接 `MetasequoiaImeSettings` 时报 LNK1181 找不到 `WebView2Loader.dll.lib`。
+**不要改回 `${CMAKE_SOURCE_DIR}/build/...`。** 那样 binary dir 就只能叫字面的 `build`，本仓自带的 `vcpkg-release` preset（`binaryDir` 是 `build-release`）和 `scripts/lcompile-release.ps1` 都会找不到 vcpkg 装好的头文件与运行时 DLL。
 
 CI 刻意构建到 `build-release` 而不是 `build`，为的就是让这条不会悄悄退回去——两者在目录名恰好是 `build` 时解析结果相同，所以只有构建到别处才测得出来。
 
@@ -43,9 +43,9 @@ ctest --test-dir build-release -C Release --output-on-failure
 
 进程在 `src/main.cpp:90` 设 `DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2`。
 
-**创建 HWND 时不能直接带 `WS_EX_TOPMOST`。** 在 `uiAccess=true` 进程里，Topmost 父窗口会让 WebView2 的跨进程 `SetParent` 返回 `E_INVALIDARG`，或者形成「窗口存在、尺寸正确但永远空白」。现有顺序是：非 Topmost 建窗 → DWM cloak 下预热 → 三个共享 environment 的 controller 依次创建并完成首屏导航 → lazy-topmost gate 打开 → 分阶段提升到 `HWND_TOPMOST`。提升后要用 `RenotifyControllerAfterPin` 重新同步 bounds 和 parent position。不要在布局函数里随手传 `HWND_TOPMOST`，也不要绕过 `EnsureSmallWindowsTopmost` / lazy pin。
+三个小窗口的置顶由 `src/window/small_windows.cpp` 统一管理：建窗时不带 `WS_EX_TOPMOST`，以 DWM cloak 状态显示在真实显示器上；第一次真正显示时 `EnsureSmallWindowsTopmost` 打开置顶门，候选窗、悬浮工具栏、托盘菜单按固定间隔依次提升到 `HWND_TOPMOST`，托盘菜单最后（同一置顶带里后置顶的在上面）。这个分阶段顺序沿用自已移除的 WebView2 时期，D2D 窗口一直按它发布；要改成一次性置顶，先在签名并安装到受信位置的构建上验证 `uiAccess` 下的表现。不要在布局函数里随手传 `HWND_TOPMOST` 绕过这道门；托盘菜单需要回到最上面时用 `RaiseTrayMenuAboveSmallWindows`。
 
-隐藏尚未完成首帧的 WebView2 host 会阻断 raster 初始化，预热阶段用 cloak，之后才按配置显示或隐藏。
+隐藏候选窗用 cloak 而不是 `SW_HIDE`，presenter 在下一次显示时解除 cloak；悬浮工具栏在 presenter 绑定失败时只 cloak 不 hide。
 
 ## Boost
 
@@ -59,39 +59,34 @@ Boost 是静态链接但没有写进 `vcpkg.json`，所以只能用 classic 模�
 
 `CMakeLists.txt` 和 `tests/CMakeLists.txt` 不再由脚本生成，直接改就行。这两个文件曾经也是从 `scripts/config_files/` 覆盖过来的，但模板早已落后到 147 行对 400 行、以及一个无关的通用 `WinCppTemplate`，跑一次脚本就会毁掉构建，因此模板已删除。
 
-`.clangd` 模板用 `@NAME@` 占位符，不再按固定行号替换——旧的行号索引已经漂移过一次，把 Boost 路径写到了 WebView2 的 include 上。新增 include 时在模板里加占位符、并在脚本的 `clangd_substitutions` 里补上对应项即可；有占位符没被替换脚本会直接报错。
+`.clangd` 模板用 `@NAME@` 占位符，不再按固定行号替换——旧的行号索引已经漂移过一次，把 Boost 路径写到了别的 include 上。新增 include 时在模板里加占位符、并在脚本的 `clangd_substitutions` 里补上对应项即可；有占位符没被替换脚本会直接报错。
 
 ## 提交
 
 提交信息用 `type(scope): 摘要`。不要添加 `Co-Authored-By`、`Generated with` 或其他 AI 生成标记。
 
-## 窗口与页面的维护边界
+## 窗口与设置窗口的维护边界
 
-- **Server 拥有窗口，UiHtml 拥有页面**：候选窗、悬浮工具栏和托盘菜单的 HWND、尺寸、位置、显示、
-  DPI、Z-order、WebView2 environment/controller 生命周期在 `server/src/window/` 与
-  `server/src/webview2/`；页面结构、样式和浏览器端交互在 `ui-html/webview2/`。
-- 消息定义以 Engine `contracts/webview/` 为准，双方必须校验。C++ → 页面更新主要经 WebView2 导航/脚本执行，页面 → C++ 动作经
-  `window.chrome.webview.postMessage(...)`。修改消息 `type`、JSON 字段、页面导出的 JS 函数或 DOM
-  标识时，必须同步检查 Server 的消息解析/脚本拼接与 UiHtml 的发送/接收代码。
-- 候选内容和输入状态的权威仍在 Server/引擎，网页只负责展示与发出用户动作；不要在网页侧复制
+- **界面只有 Direct2D 一套**：候选窗、悬浮工具栏和托盘菜单的 HWND、尺寸、位置、显示、DPI、Z-order 在
+  `src/window/`（`ime_windows*.cpp` 是宿主窗口过程，`*_presenter.cpp` 用 `msimeui` 绘制）。WebView2
+  已整体移除，`appearance.ui_backend` / `appearance.settings_ui_backend` 两个键也随之删除，不要恢复。
+- 候选内容和输入状态的权威仍在 Server/引擎，presenter 只负责展示与发出用户动作；不要在界面侧复制
   候选选择、翻页、输入模式或配置持久化的核心状态机。
-- 设置页前端位于 `ui-html/webview2/settings/ime-settings/`，其中包含 Vite/TypeScript
-  工程；设置窗口的原生创建、激活、WebView2 承载及与配置系统的桥接都在本组件的独立进程
-  `MetasequoiaImeSettings.exe`（`server/src/settings/`）里，服务端进程内没有内嵌的设置宿主。
-- 设置窗口另有实验性的 Direct2D 前端（`appearance.settings_ui_backend = "d2d"`，或命令行
-  `--d2d`），在 `server/src/settings/native/`，用 msimeui 1:1 复刻上面的网页。它和网页走同一套
-  webview 契约消息与 `HandleClientMessage`，配置读写映射仍只在 `settings_app.cpp`。**改设置页
-  的结构、文案或行为时两个前端要一起改**：每个 `native_page_*.cpp` 对应一个 partial + module。
+- 设置窗口是独立进程 `MetasequoiaImeSettings.exe`（`src/settings/`）：原生创建、激活、驻留和配置
+  读写映射在 `settings_app.cpp`，界面在 `src/settings/native/`，图片资源在 `assets/settings/`（安装到
+  数据目录的 `assets\settings\`）。界面与宿主之间走 `../engine/contracts/webview/` 的消息契约：宿主推送
+  `configSnapshot` 与各类响应，界面发 `configUpdate` 与请求，统一进 `HandleClientMessage` 校验和分发，
+  配置读写映射只在 `settings_app.cpp`。每个 `native_page_*.cpp` 顶部注明了它当初移植自旧网页设置页的
+  哪个 partial / module，那些文件只在 git 历史里（`ui-html/webview2/settings/ime-settings/src/`）。
   本地调试时可设 `METASEQUOIA_IME_SETTINGS_INSTANCE=<任意名>` 让开发版与已安装的设置窗口并存，
-  并用 `METASEQUOIA_IME_CONFIG_DIR` 隔离配置。
+  并用 `METASEQUOIA_IME_CONFIG_DIR` 隔离配置。旧快捷方式传来的 `--d2d` / `--webview2` 参数会被忽略。
 
 ### 尺寸、坐标与 DPI
 
 - **所有涉及尺寸或坐标的代码都必须明确考虑 DPI**。新增或修改窗口大小、位置、边距、间距、字体、
-  图标、命中区域、WebView2 bounds、候选布局及屏幕边界计算时，不得默认固定像素在所有显示器上等价。
+  图标、命中区域、候选布局及屏幕边界计算时，不得默认固定像素在所有显示器上等价。
 - 明确每个数值使用逻辑单位还是物理像素，并在正确的窗口/显示器 DPI 下统一换算；不要混用来自不同
   DPI 空间的坐标和尺寸，也不要长期缓存可能在窗口跨屏或 DPI 变化后失效的换算结果。
-- 原生窗口需处理运行时 DPI 变化（包括跨显示器移动），同步更新窗口、子窗口、WebView2 controller
-  和相关布局；优先沿用项目已有的 DPI 获取与缩放辅助函数，避免各处自行实现不一致的换算规则。
+- 原生窗口需处理运行时 DPI 变化（包括跨显示器移动），同步更新窗口、子窗口和相关布局；优先沿用项目已有的 DPI 获取与缩放辅助函数，避免各处自行实现不一致的换算规则。
 - 涉及尺寸或布局的改动，至少检查 100%、125%、150%、200% 缩放，以及不同 DPI 显示器之间移动时
   是否出现裁切、错位、模糊、点击区域偏移或窗口越出工作区。

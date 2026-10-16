@@ -1,6 +1,6 @@
 # 外部皮肤 manifest（TOML）
 
-每个皮肤目录需要 `skin.toml`，`id` 必须与文件夹名一致。`schema_version` 支持 `1` 与 `2`（v2 为面向全贴图与复杂立绘皮肤的高级规范，仅在 WebView2 端全面启用，Direct2D 原生端保底降级）。
+每个皮肤目录需要 `skin.toml`，`id` 必须与文件夹名一致。`schema_version` 支持 `1` 与 `2`（v2 为面向全贴图与复杂立绘皮肤的高级规范）。候选框由 Direct2D 原生渲染器绘制；v2 的部分字段在原生端仍在补全，下文标「v2」的字段以实际效果为准。
 
 候选框和悬浮工具栏都由 `skin.toml` 声明，不要再提供 `cand.css` 或工具栏 CSS。所有图片路径都相对于皮肤目录，且不能指向目录之外。
 
@@ -20,7 +20,7 @@
 - `shadow`：卡片阴影，`none` | `soft` | `strong`；不写则沿用 `base`。只影响候选卡片，不影响右键菜单
 - `font_family`：候选字体名，UTF-8 编码后最长 64 字节（约 21 个汉字），不能含引号、反斜杠、逗号、分号、尖括号、花括号和反引号。排在用户设置的字体前面，缺字时仍回落到用户字体；字号不由皮肤决定
 - `page_arrows`：候选框里的翻页箭头，`true` | `false`。横排时是候选右侧贴着最后一行的一小列，竖排时是最后一行下方的一矮行、“‹”与序号左对齐；颜色取 `number`，悬停底色取 `hover`。不写则沿用 `base` 的默认皮肤设置（数据目录 `skins\default\<base>\skin.toml`，出厂为 `false`）
-- `fit_content`：卡片是否严格按候选文字所需的宽度收紧，`true` | `false`。打开后不再垫出厂的最小宽度（D2D 160 DIP、WebView2 `7em`），同一次输入里后到的翻译等内容消失时宽度也立刻缩回；`min_width_dip` 和装饰图 `width_dip` 仍然生效。不写则沿用 `base` 的默认皮肤设置（出厂为 `false`）
+- `fit_content`：卡片是否严格按候选文字所需的宽度收紧，`true` | `false`。打开后不再垫出厂的最小宽度（160 DIP），同一次输入里后到的翻译等内容消失时宽度也立刻缩回；`min_width_dip` 和装饰图 `width_dip` 仍然生效。不写则沿用 `base` 的默认皮肤设置（出厂为 `false`）
 
 ### `[candidate_window.decoration]`（可选）
 
@@ -38,7 +38,7 @@
 - `fit`：`cover`（铺满裁切）| `contain`（完整显示）| `stretch`（拉伸）
 - `opacity`：`0`–`1`
 
-### `[candidate_window.border_image]`（v2 可选，仅 WebView2）
+### `[candidate_window.border_image]`（v2 可选）
 
 九宫格背景拉伸，面板整体贴图，用于全贴图与复杂纹理面板。
 
@@ -48,7 +48,7 @@
 - `width_dip`：可选，边框绘制宽度，支持 1~4 个值
 - `fill`：可选，布尔值，是否保留九宫格中心内容区域，默认为 `true`
 
-### `[candidate_window.content_insets_dip]`（v2 可选，仅 WebView2）
+### `[candidate_window.content_insets_dip]`（v2 可选）
 
 候选框内容与文字的安全内边距，**从面板外缘量起**，用来避开贴图四周自带的花纹或立绘。渲染时会把该方向的边框宽度扣掉，落到内容盒上。
 
@@ -66,7 +66,7 @@
 
 **不声明时窗口只按卡片大小开，挂到卡片外面的立绘会被窗口边界裁掉。**
 
-### `[[candidate_window.decorations]]`（v2 可选，数组表，仅 WebView2）
+### `[[candidate_window.decorations]]`（v2 可选，数组表）
 
 自由锚定立绘挂件层，支持叠加角色立绘与 APNG 动图，层数不限。
 
@@ -114,7 +114,7 @@ translation_separator = "#529cca73"
 
 ## `[toolbar]`
 
-悬浮工具栏样式，D2D 与 WebView2 两个渲染器都生效。所有键都可省略，不写的沿用 `base`。
+悬浮工具栏样式。所有键都可省略，不写的沿用 `base`。
 
 - `corner_radius_dip`：`0`–`32`
 - `[toolbar.dark]` / `[toolbar.light]`：`background`、`border`、`handle`（左侧拖动条）、`divider`、`icon`、`hover`
@@ -131,5 +131,5 @@ translation_separator = "#529cca73"
 | `rgba(r, g, b, a)` | `rgba(224, 138, 168, 0.28)` | `a` 为 0–1 |
 | `transparent` | `transparent` | 全透明，等同 `#0000` |
 
-- 十六进制大小写均可，但**必须带 `#`**：原生（D2D）渲染器不带 `#` 也能识别，WebView2 渲染器按 CSS 解析，会把它当作无效值，两种渲染结果就不一致了。
+- 十六进制大小写均可，但**必须带 `#`**：这是清单格式的约定，与 CSS 写法一致；渲染器对不带 `#` 的写法有容错，但不要依赖它。
 - 不透明度在**末尾**（`#RRGGBBAA`），不是 Windows 常见的 `#AARRGGBB`。例如 `#e9e8e89d` 约为 62% 不透明，`rgba(224, 138, 168, 0.28)` 与 `#e08aa847` 等价。

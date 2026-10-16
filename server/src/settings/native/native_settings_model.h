@@ -9,8 +9,8 @@
 #include <string_view>
 #include <vector>
 
-// Client side of the settings bridge for the Direct2D window. It speaks exactly the
-// protocol the WebView2 page speaks (engine/contracts/webview): the host pushes
+// Client side of the settings bridge for the Direct2D window. It speaks the settings
+// protocol of engine/contracts/webview: the host pushes
 // `configSnapshot` and response messages, the window posts `configUpdate` and request
 // messages. settings_app.cpp stays the only place that maps config paths to setters.
 namespace native_settings

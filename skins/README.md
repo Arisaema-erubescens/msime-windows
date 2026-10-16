@@ -27,7 +27,7 @@
 | --- | --- |
 | `schema_version` / `id` / `name` | `id` 必须与目录名一致 |
 | `[candidate_window]` `page_arrows` | 候选框里是否显示翻页箭头（`true` / `false`，出厂与缺省都是 `false`） |
-| `[candidate_window]` `fit_content` | 候选框是否严格按文字所需的宽度收紧（`true` / `false`，出厂与缺省都是 `false`）。打开后不再垫出厂的最小宽度（D2D 160 DIP、WebView2 `7em`），同一次输入里后到的翻译等内容消失时宽度也立刻跟着缩回 |
+| `[candidate_window]` `fit_content` | 候选框是否严格按文字所需的宽度收紧（`true` / `false`，出厂与缺省都是 `false`）。打开后不再垫出厂的最小宽度（160 DIP），同一次输入里后到的翻译等内容消失时宽度也立刻跟着缩回 |
 
 外部皮肤没写的开关沿用它 `base` 对应的这份清单。改完后在设置页刷新皮肤列表，或重新选择一次皮肤即可生效；设置页「外观」和「皮肤」里的候选框预览会一并显示或隐藏箭头。
 
@@ -71,7 +71,7 @@ my-skin/
 | `[toolbar]` / `[toolbar.dark]` / `[toolbar.light]` | 悬浮工具栏：`corner_radius_dip`，以及 `background`、`border`、`handle`、`divider`、`icon`、`hover` |
 | `[license]` | `code`、`assets`、`source`：代码与素材的授权信息 |
 
-所有颜色键（`[candidate.*]` 里除 `show_selected_bar` 外的键、`[candidate.*.menu]` 与 `[toolbar.*]` 的全部键）都支持十六进制 `#RGB`、`#RGBA`、`#RRGGBB`、`#RRGGBBAA`，以及 `rgb(r, g, b)`、`rgba(r, g, b, a)` 和 `transparent`。十六进制必须带 `#`（WebView2 渲染器按 CSS 解析，不带 `#` 会失效），不透明度在末尾（`#RRGGBBAA`，不是 `#AARRGGBB`），例如 `rgba(224, 138, 168, 0.28)` 与 `#e08aa847` 等价。图片路径相对于皮肤目录，且不能指向目录之外。完整的带注释示例见 [`niya-demo/skin.toml`](niya-demo/skin.toml)。
+所有颜色键（`[candidate.*]` 里除 `show_selected_bar` 外的键、`[candidate.*.menu]` 与 `[toolbar.*]` 的全部键）都支持十六进制 `#RGB`、`#RGBA`、`#RRGGBB`、`#RRGGBBAA`，以及 `rgb(r, g, b)`、`rgba(r, g, b, a)` 和 `transparent`。十六进制必须带 `#`（清单格式的约定，与 CSS 写法一致；渲染器对不带 `#` 的写法有容错，但不要依赖它），不透明度在末尾（`#RRGGBBAA`，不是 `#AARRGGBB`），例如 `rgba(224, 138, 168, 0.28)` 与 `#e08aa847` 等价。图片路径相对于皮肤目录，且不能指向目录之外。完整的带注释示例见 [`niya-demo/skin.toml`](niya-demo/skin.toml)。
 
 ## 授权说明
 

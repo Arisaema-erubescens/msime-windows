@@ -9,11 +9,12 @@
 #include "window/floating_toolbar_presenter.h"
 #include "defines/defines.h"
 #include "defines/globals.h"
+#include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdlib>
 #include <string>
 #include <fmt/xchar.h>
-#include "webview2/windows_webview2.h"
 #include "utils/window_utils.h"
 #include "ipc/event_listener.h"
 #include "utils/ime_utils.h"
@@ -34,6 +35,80 @@ bool g_candidate_hide_pending = false;
 std::wstring g_last_rendered_candidate_signature;
 ULONGLONG g_last_rendered_candidate_tick = 0;
 } // namespace
+
+namespace ime_windows_detail
+{
+POINT GetCandidateLayoutCaret()
+{
+    POINT caret{Global::Point[0], Global::Point[1]};
+    if (GetConfiguredCandidateWindowFollowCursor() || caret.y == Global::INVALID_Y)
+    {
+        return caret;
+    }
+    if (!g_candidate_session_anchor_valid)
+    {
+        g_candidate_session_anchor = caret;
+        g_candidate_session_anchor_valid = true;
+        CAND_DIAG_LOGF(L"candidate-position anchor-captured caret=({},{})", caret.x, caret.y);
+    }
+    return g_candidate_session_anchor;
+}
+
+bool IsCandidateHostPaintedVisible(HWND hwnd)
+{
+    if (!hwnd || !::is_global_wnd_cand_shown || Global::Point[1] == Global::INVALID_Y)
+    {
+        return false;
+    }
+    RECT windowRect{};
+    if (!GetWindowRect(hwnd, &windowRect) || windowRect.top == Global::INVALID_Y)
+    {
+        return false;
+    }
+    return !IsHostWindowCloaked(hwnd) && MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL) != nullptr;
+}
+
+bool CandidateCaretNeedsStableFollow(HWND hwnd, POINT caret)
+{
+    if (g_last_placed_caret_x == Global::INVALID_Y || g_last_placed_caret_y == Global::INVALID_Y)
+    {
+        return true;
+    }
+
+    POINT previous{g_last_placed_caret_x, g_last_placed_caret_y};
+    if (MonitorFromPoint(previous, MONITOR_DEFAULTTONEAREST) != MonitorFromPoint(caret, MONITOR_DEFAULTTONEAREST))
+    {
+        return true;
+    }
+
+    // Following every horizontal glyph advance makes the card move and
+    // re-layout continuously. Keep it anchored on the current text line; a real
+    // line change or vertical scroll still follows after the settle timer.
+    FLOAT scale = QueryHalfScreenDipLimitsForPoint(caret).scale;
+    if (scale <= 0.0f)
+    {
+        scale = 1.0f;
+    }
+    const int lineChangeThresholdPx = (std::max)(1, static_cast<int>(std::lround(12.0 * static_cast<double>(scale))));
+    const int visibleLineThresholdPx =
+        (std::max)(lineChangeThresholdPx, static_cast<int>(std::lround(48.0 * static_cast<double>(scale))));
+    const int thresholdPx = IsCandidateHostPaintedVisible(hwnd) ? visibleLineThresholdPx : lineChangeThresholdPx;
+    return std::abs(caret.y - previous.y) >= thresholdPx;
+}
+} // namespace ime_windows_detail
+
+// Re-lays out the candidate window at the current caret anchor.
+int FineTuneWindow(HWND /*hwnd*/)
+{
+    const POINT layoutCaret = GetCandidateLayoutCaret();
+    if (CandidatePresenter::Instance().IsBound())
+    {
+        CandidatePresenter::Instance().ShowFromGlobalState(layoutCaret);
+        g_last_placed_caret_x = layoutCaret.x;
+        g_last_placed_caret_y = layoutCaret.y;
+    }
+    return 0;
+}
 
 LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -107,24 +182,19 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
             Global::SetCandidateWindowRenderedVisible(false);
             return 0;
         }
-        const uint64_t contentGeneration = ++g_candidate_content_generation;
         const ULONGLONG updateStartedTick = GetTickCount64();
         ::ReadDataFromSharedMemory(0b1000000);
         // The worker does not wait for this posted message before rebuilding its candidate state, so render the page it
         // published rather than the live one.
         const Global::CandidatePageSnapshotPtr candidatePage = Global::LoadCandidatePageSnapshot();
-        LogSmallWindowReadyGate(L"show-candidate");
-        CAND_DIAG_LOGF(L"candidate-frame show content_gen={} tick={} preedit_units={} payload_units={} "
+        CAND_DIAG_LOGF(L"candidate-frame show tick={} preedit_units={} payload_units={} "
                        L"caret=({},{}) follow_cursor={} anchor_valid={} {}",
-                       contentGeneration, updateStartedTick,
+                       updateStartedTick,
                        GetConfiguredCandidateWindowPreeditStyle() == "empty" ? 0 : GetPreeditWithCaretMarker().size(),
                        candidatePage->candidate_string.size(), Global::Point[0], Global::Point[1],
                        GetConfiguredCandidateWindowFollowCursor(), g_candidate_session_anchor_valid,
                        DescribeCandidateHostState());
-        if (!EnsureSmallWindowsTopmost(L"show-candidate"))
-        {
-            (void)0;
-        }
+        EnsureSmallWindowsTopmost(L"show-candidate");
         const POINT layoutCaret = GetCandidateLayoutCaret();
         const bool showPreedit = GetConfiguredCandidateWindowPreeditStyle() != "empty";
         const std::wstring preedit = GetPreeditWithCaretMarker();
@@ -140,25 +210,11 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
             frameSignature == g_last_rendered_candidate_signature &&
             updateStartedTick - g_last_rendered_candidate_tick < kCandidateShowDedupWindowMs)
         {
-            // A deduped show paints nothing: the DOM still holds exactly the frame
-            // the in-flight measurement was started for. The unconditional bump at
-            // the top of this handler would nevertheless make that measurement look
-            // stale, and both guards below drop it — so every content-only update
-            // lost its SetWindowRgn refresh and the region stayed frozen at the last
-            // full FineTune's width while the DOM kept changing. That is the
-            // right-edge truncation: a wider later page painted past a stale region.
-            // Hand the generation back (only if nobody bumped it since) so the
-            // pending clip still lands. path=superseded above returns before the
-            // bump for the same reason.
-            uint64_t expectedGeneration = contentGeneration;
-            const bool generationRestored =
-                g_candidate_content_generation.compare_exchange_strong(expectedGeneration, contentGeneration - 1);
             // The frame already on screen is identical to the page just loaded, so the render echo is
             // honest even though nothing was repainted. Without it a digit/space selection would wait
             // out the full timeout on content that is already visible.
             Global::PublishRenderedCandidatePageGeneration(candidatePage->generation);
-            CAND_DIAG_LOGF(L"candidate-frame path=dedup content_gen={} generation_restored={} page_gen={}",
-                           contentGeneration, generationRestored, candidatePage->generation);
+            CAND_DIAG_LOGF(L"candidate-frame path=dedup page_gen={}", candidatePage->generation);
             return 0;
         }
         g_last_rendered_candidate_signature = frameSignature;
@@ -168,103 +224,8 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
             CandidatePresenter::Instance().ShowFromGlobalState(layoutCaret);
             g_last_placed_caret_x = layoutCaret.x;
             g_last_placed_caret_y = layoutCaret.y;
-            CAND_DIAG_LOGF(L"candidate-frame path=d2d content_gen={} elapsed_ms={}", contentGeneration,
-                           GetTickCount64() - updateStartedTick);
-            return 0;
+            CAND_DIAG_LOGF(L"candidate-frame path=d2d elapsed_ms={}", GetTickCount64() - updateStartedTick);
         }
-
-        // Do not SetWindowPos / ExecuteScript the candidate host while its
-        // WebView2 controller is still being created. That is what makes
-        // CreateCoreWebView2Controller fail for this HWND while menu/FTB succeed.
-        ::is_global_wnd_cand_shown = true;
-        Global::SetCandidateWindowRenderedVisible(true);
-        if (!IsCandidateWebviewReady())
-        {
-            DeferCandidateShowUntilWebviewReady();
-            // Nothing was painted, so this frame must not count as rendered:
-            // the replay posted once the webview is ready would otherwise be
-            // deduped against itself and the window would never appear.
-            g_last_rendered_candidate_signature.clear();
-            CAND_DIAG_LOGF(L"candidate-frame path=deferred-webview content_gen={} {}", contentGeneration,
-                           DescribeCandidateHostState());
-            return 0;
-        }
-        RaiseCandidateHostForShow(L"show-candidate");
-
-        CandidateWindowContent str{preedit, candidatePage, showPreedit};
-        const bool sameCaret = g_last_placed_caret_x == layoutCaret.x && g_last_placed_caret_y == layoutCaret.y;
-        const bool alreadyVisible = IsCandidateHostPaintedVisible(hwnd);
-        const bool layoutInflight = g_candidate_layout_inflight.load();
-        CAND_DIAG_LOGF(L"candidate-layout-decision content_gen={} last_caret=({},{}) caret=({},{}) "
-                       L"delta=({},{}) same={} visible={} inflight={}",
-                       contentGeneration, g_last_placed_caret_x, g_last_placed_caret_y, layoutCaret.x, layoutCaret.y,
-                       static_cast<long long>(layoutCaret.x) - g_last_placed_caret_x,
-                       static_cast<long long>(layoutCaret.y) - g_last_placed_caret_y, sameCaret, alreadyVisible,
-                       layoutInflight);
-        if (!alreadyVisible)
-        {
-            PlaceCandidateHostNearCaret(hwnd);
-        }
-        if (alreadyVisible)
-        {
-            CAND_DIAG_LOGF(L"candidate-frame path=content-only content_gen={} inflight={}", contentGeneration,
-                           layoutInflight);
-            InflateCandWnd(str, [hwnd, contentGeneration, updateStartedTick,
-                                 pageGeneration = candidatePage->generation]() {
-                const ULONGLONG callbackTick = GetTickCount64();
-                CAND_DIAG_LOGF(L"candidate-frame dom-callback content_gen={} current_gen={} elapsed_ms={} page_gen={}",
-                               contentGeneration, g_candidate_content_generation.load(),
-                               callbackTick - updateStartedTick, pageGeneration);
-                if (!::is_global_wnd_cand_shown || contentGeneration != g_candidate_content_generation.load())
-                {
-                    return;
-                }
-                // The DOM holds this page now; echo the captured generation (not a live read: the
-                // page may already have been superseded) so selections can settle against it.
-                Global::PublishRenderedCandidatePageGeneration(pageGeneration);
-                RefreshCandidateClipAfterPaint(hwnd, contentGeneration, updateStartedTick);
-            });
-            if (!sameCaret)
-            {
-                if (CandidateCaretNeedsStableFollow(hwnd, layoutCaret))
-                {
-                    KillTimer(hwnd, TIMER_ID_CANDIDATE_MOVE_SETTLE);
-                    SetTimer(hwnd, TIMER_ID_CANDIDATE_MOVE_SETTLE, kCandidateMoveSettleMs, nullptr);
-                }
-                else
-                {
-                    CAND_DIAG_LOGF(L"candidate-position same-line-follow-suppressed anchor=({},{}) reported=({},{})",
-                                   g_last_placed_caret_x, g_last_placed_caret_y, layoutCaret.x, layoutCaret.y);
-                }
-            }
-            return 0;
-        }
-        if (layoutInflight)
-        {
-            CAND_DIAG_LOGF(L"show folded into in-flight fine-tune caret=({},{})", Global::Point[0], Global::Point[1]);
-            CAND_DIAG_LOGF(L"candidate-frame path=folded-inflight content_gen={}", contentGeneration);
-            // The in-flight FineTune echoes only the page it captured, which may predate this one. Without
-            // an echo here a digit/space selection right after a fast burst waits out the full render-sync
-            // timeout, felt as a stall on commit.
-            InflateCandWnd(str, [contentGeneration, pageGeneration = candidatePage->generation]() {
-                if (!::is_global_wnd_cand_shown || contentGeneration != g_candidate_content_generation.load())
-                {
-                    return;
-                }
-                Global::PublishRenderedCandidatePageGeneration(pageGeneration);
-            });
-            KillTimer(hwnd, TIMER_ID_CANDIDATE_MOVE_SETTLE);
-            SetTimer(hwnd, TIMER_ID_CANDIDATE_MOVE_SETTLE, kCandidateMoveSettleMs, nullptr);
-            return 0;
-        }
-        CAND_DIAG_LOGF(L"candidate-frame path=full-layout content_gen={}", contentGeneration);
-        InflateMeasureDivCandWnd(str, [hwnd]() {
-            if (!::is_global_wnd_cand_shown)
-            {
-                return;
-            }
-            FineTuneWindow(hwnd);
-        });
         return 0;
     }
 
@@ -295,12 +256,6 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
         g_last_rendered_candidate_signature.clear();
         KillTimer(hwnd, TIMER_ID_CANDIDATE_MOVE_SETTLE);
         g_candidate_session_anchor_valid = false;
-        ++g_candidate_content_generation;
-        g_candidate_layout_inflight.store(false);
-        ++g_candidate_finetune_generation;
-        Global::MarginTop = 0;
-        Global::MarginLeft = 0;
-        g_has_last_candidate_clip = false;
         ResetCandidatePlacementMemory();
         {
             SuppressCandidateDpiChange suppressDpi;
@@ -308,23 +263,9 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
             {
                 CandidatePresenter::Instance().Hide();
             }
-            else if (!webviewControllerCandWnd)
-            {
-                // Moving this HWND while CreateCoreWebView2Controller is in
-                // flight makes the candidate controller fail (menu/FTB still work).
-                SetHostWindowCloaked(hwnd, true);
-            }
             else
             {
-                ClearCandidateWindowRegion(hwnd);
-                // Park off-screen but keep the stable quarter-screen host size.
-                // Shrinking back to the default card size made the next show race
-                // put_Bounds / margins against a tiny HWND and park the card at
-                // the monitor's left edge.
-                const auto parkHost = ComputeQuarterScreenHostPixels(GetMainMonitorCoordinates());
-                SetWindowPos(hwnd, HWND_TOP, 0, Global::INVALID_Y, parkHost.first, parkHost.second, SWP_SHOWWINDOW);
                 SetHostWindowCloaked(hwnd, true);
-                UpdateHtmlContentWithJavaScript(webviewCandWnd, L"");
             }
         }
         CAND_DIAG_LOGF(L"hide message end {}", DescribeCandidateHostState());
@@ -358,10 +299,9 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
                            g_last_placed_caret_x, g_last_placed_caret_y, layoutCaret.x, layoutCaret.y);
             return 0;
         }
-        if (!forceLayout && sameCaret && (g_candidate_layout_inflight.load() || IsCandidateHostPaintedVisible(hwnd)))
+        if (!forceLayout && sameCaret && IsCandidateHostPaintedVisible(hwnd))
         {
-            CAND_DIAG_LOGF(L"move skipped same caret inflight={} visible={}", g_candidate_layout_inflight.load(),
-                           IsCandidateHostPaintedVisible(hwnd));
+            CAND_DIAG_LOGF(L"move skipped same caret visible=true");
             return 0;
         }
         if (forceLayout)
@@ -379,7 +319,7 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
 
     if (message == WM_DPICHANGED)
     {
-        // Never apply the suggested rect or FineTune while we are inside our own
+        // Never apply the suggested rect or re-layout while we are inside our own
         // SetWindowPos: that path is what delivers this message synchronously on
         // focus-switch hide, and re-entering stalls the server UI thread.
         if (g_candidate_dpi_change_suppress_count > 0)
@@ -387,16 +327,15 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
             return 0;
         }
 
-        // Visible candidate: FineTune already re-syncs HWND DPI after its own
-        // SetWindowPos. For external DPI changes, defer via the move message so
-        // we never nest ExecuteScript/measure on this stack.
+        // Visible candidate: defer the re-layout via the move message so it never
+        // nests inside this handler.
         if (::is_global_wnd_cand_shown && Global::Point[1] != Global::INVALID_Y)
         {
             g_candidate_force_layout.store(true);
             PostMessage(hwnd, WM_MOVE_CANDIDATE_WINDOW, 0, 0);
         }
-        // Hidden: keep the off-screen park / warmup size. DefWindowProc must not
-        // run — returning 0 without SetWindowPos is intentional.
+        // Hidden: keep the current host size. DefWindowProc must not run —
+        // returning 0 without SetWindowPos is intentional.
         return 0;
     }
 
@@ -405,7 +344,7 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
         const int cn = wParam != 0 ? 1 : 0;
         const std::string &punctuation_lock = GetConfiguredPunctuationLock();
         const int punc = punctuation_lock == "chinese" ? 1 : punctuation_lock == "english" ? 0 : cn;
-        UpdateFtbCnEnAndPuncState(::webviewFtbWnd, cn, punc);
+        UpdateFtbCnEnAndPuncState(cn, punc);
         return 0;
     }
 
@@ -414,12 +353,12 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
         if (wParam == 0) // 此时是中文标点状态
         {
             /* 更新 floating toolbar 的标点全角和半角状态为全角 */
-            UpdateFtbPuncState(::webviewFtbWnd, 0);
+            UpdateFtbPuncState(0);
         }
         else // 此时是英文标点状态
         {
             /* 更新 floating toolbar 的标点全角和半角状态为半角 */
-            UpdateFtbPuncState(::webviewFtbWnd, 1);
+            UpdateFtbPuncState(1);
         }
         return 0;
     }
@@ -429,19 +368,19 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
         if (wParam == 0) // 此时是半角状态
         {
             /* 更新 floating toolbar 的全角和半角状态为半角 */
-            UpdateFtbDoubleSingleByteState(::webviewFtbWnd, 0);
+            UpdateFtbDoubleSingleByteState(0);
         }
         else // 此时是全角状态
         {
             /* 更新 floating toolbar 的全角和半角状态为全角 */
-            UpdateFtbDoubleSingleByteState(::webviewFtbWnd, 1);
+            UpdateFtbDoubleSingleByteState(1);
         }
         return 0;
     }
 
     if (message == WM_REFRESH_CHARACTER_SET)
     {
-        UpdateFtbCharacterSetState(::webviewFtbWnd);
+        UpdateFtbCharacterSetState();
         FloatingToolbarPresenter::Instance().ApplyTheme();
         FanyNamedPipe::EnqueueRefreshCandidatePageTask();
         return 0;
@@ -452,16 +391,9 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
         if (wParam != 0)
         {
             ForceReloadConfiguredCandidateSkin();
-            if (::is_global_wnd_cand_shown)
+            if (::is_global_wnd_cand_shown && CandidatePresenter::Instance().IsBound())
             {
-                if (CandidatePresenter::Instance().IsBound())
-                {
-                    CandidatePresenter::Instance().ShowFromGlobalState(GetCandidateLayoutCaret());
-                }
-                else
-                {
-                    FineTuneWindow(hwnd);
-                }
+                CandidatePresenter::Instance().ShowFromGlobalState(GetCandidateLayoutCaret());
             }
             return 0;
         }
@@ -491,11 +423,6 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
             KillTimer(hwnd, TIMER_ID_CANDIDATE_MOVE_SETTLE);
             if (!::is_global_wnd_cand_shown)
             {
-                break;
-            }
-            if (g_candidate_layout_inflight.load())
-            {
-                SetTimer(hwnd, TIMER_ID_CANDIDATE_MOVE_SETTLE, kCandidateMoveSettleMs, nullptr);
                 break;
             }
             const POINT layoutCaret = GetCandidateLayoutCaret();
@@ -576,32 +503,24 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
                     BroadcastTrilingualCycleState();
                 if (previous_character_set != GetConfiguredCharacterSet())
                 {
-                    UpdateFtbCharacterSetState(::webviewFtbWnd);
+                    UpdateFtbCharacterSetState();
                 }
                 if (previous_character_set != GetConfiguredCharacterSet() ||
                     previous_translation_show_pos != GetConfiguredCandidateTranslationShowPos())
                 {
                     FanyNamedPipe::EnqueueRefreshCandidatePageTask();
                 }
-                // 收紧宽度写在候选页的 <html> 属性上，开关变了与换排列方式一样重建候选页；D2D 由皮肤指纹重新套用。
+                // 候选窗由皮肤指纹在下一次显示时重新套用；常驻的工具栏跟着候选窗皮肤走，要立刻刷新。
+                // 外部皮肤可能只声明了部分布局，换布局后皮肤是否生效会变，所以布局变了也要刷新。
                 if (previous_layout != GetConfiguredCandidateWindowLayout() ||
                     previous_fit_content != GetConfiguredCandidateWindowFitContent())
-                    ApplyConfiguredCandidateWindowLayout();
+                    ApplyConfiguredUiThemes();
                 if (previous_candidate_skin != GetConfiguredCandidateSkin() ||
                     previous_theme_mode != GetConfiguredThemeMode() ||
                     previous_theme_cand != GetConfiguredThemeCand() || previous_theme_ftb != GetConfiguredThemeFtb() ||
                     previous_theme_menu != GetConfiguredThemeMenu())
                 {
                     ApplyConfiguredUiThemes();
-                }
-                else if (previous_font != GetConfiguredCandidateFont() ||
-                         previous_english_font != GetConfiguredCandidateEnglishFont() ||
-                         previous_default_font != GetConfiguredCandidateDefaultFont() ||
-                         previous_font_size != GetConfiguredCandidateFontSize() ||
-                         previous_preedit_font_size != GetConfiguredCandidateWindowPreeditFontSize() ||
-                         previous_cand_text_color != GetConfiguredCandidateTextColor())
-                {
-                    ApplyConfiguredCandidateAppearance();
                 }
                 if (::is_global_wnd_cand_shown &&
                     (previous_layout != GetConfiguredCandidateWindowLayout() ||
@@ -616,10 +535,6 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
                     if (CandidatePresenter::Instance().IsBound())
                     {
                         CandidatePresenter::Instance().ShowFromGlobalState(GetCandidateLayoutCaret());
-                    }
-                    else
-                    {
-                        FineTuneWindow(hwnd);
                     }
                 }
                 if (previous_floating_toolbar != GetConfiguredFloatingToolbarEnabled())
@@ -701,11 +616,11 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
                     const std::string &punctuation_lock = GetConfiguredPunctuationLock();
                     if (punctuation_lock == "chinese")
                     {
-                        UpdateFtbPuncState(::webviewFtbWnd, 1);
+                        UpdateFtbPuncState(1);
                     }
                     else if (punctuation_lock == "english")
                     {
-                        UpdateFtbPuncState(::webviewFtbWnd, 0);
+                        UpdateFtbPuncState(0);
                     }
                 }
                 if (previous_tsf_diagnostic_log != GetConfiguredTsfDiagnosticLogEnabled())
@@ -766,7 +681,6 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
                 }
             }
             FanyNamedPipe::EnqueueEnsureInputSessionMatchesConfigTask();
-            ApplyConfiguredCandidateSkinIfChanged();
         }
         break;
     }
@@ -779,14 +693,6 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
         if (LOWORD(wParam) != WA_INACTIVE)
         {
             ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-        }
-        break;
-    }
-
-    case WM_SIZE: {
-        if (::webviewControllerCandWnd && wParam != SIZE_MINIMIZED)
-        {
-            SyncCandidateWebViewBoundsToHost(hwnd);
         }
         break;
     }
@@ -839,9 +745,8 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
         break;
 
     case WM_PAGE_CANDIDATE:
-        // Both candidate hosts funnel wheel paging through here — the D2D
-        // presenter and the WebView2 page's `candidateWheel` message — so this is
-        // the one place the setting has to be honoured.
+        // The presenter funnels wheel paging through here, so this is the one
+        // place the setting has to be honoured.
         if (!GetConfiguredPagingMouseWheelEnabled())
         {
             break;

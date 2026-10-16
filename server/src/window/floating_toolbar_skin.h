@@ -3,9 +3,8 @@
 #include <d2d1.h>
 #include <string>
 
-// Colors and corner radii of the D2D floating toolbar. Mirrors the standalone
-// WebView2 toolbar pages in ui-html/webview2/ftb/<skin>(_light).html, which are
-// the reference for both renderers. Radii are in DIPs before the user scale.
+// Colors and corner radii of the D2D floating toolbar, one set per built-in
+// skin and theme. Radii are in DIPs before the user scale.
 struct FloatingToolbarSkin
 {
     D2D1_COLOR_F fill;

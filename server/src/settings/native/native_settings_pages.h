@@ -10,8 +10,11 @@
 #include <string>
 #include <vector>
 
-// Page builders of the Direct2D settings window, one per sidebar entry of the WebView2
-// page (ui-html/.../partials/<id>.html + modules/<id>.ts). A builder returns the page
+// Page builders of the Direct2D settings window, one per sidebar entry. They were ported
+// one to one from the former WebView2 settings page, which was removed together with
+// WebView2; the "partials/<id>.html + modules/<id>.ts" notes at the top of each
+// native_page_*.cpp name its sources, still in git history under
+// ui-html/webview2/settings/ime-settings/src/. A builder returns the page
 // content once; afterwards the page keeps itself in sync through PageContext::OnConfig
 // and the model's message listeners.
 namespace native_settings

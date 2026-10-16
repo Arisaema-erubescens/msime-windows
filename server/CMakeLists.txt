@@ -264,18 +264,8 @@ set(SRC_FILES
     "./src/utils/serial_task_runner.h"
     "./src/utils/shuangpin_preedit_display.cpp"
     "./src/utils/shuangpin_preedit_display.h"
-    "./src/utils/webview_utils.cpp"
-    "./src/utils/webview_utils.h"
     "./src/utils/window_utils.cpp"
     "./src/utils/window_utils.h"
-    "./src/webview2/windows_webview2.cpp"
-    "./src/webview2/windows_webview2_candidate.cpp"
-    "./src/webview2/windows_webview2_internal.h"
-    "./src/webview2/windows_webview2_menu.cpp"
-    "./src/webview2/windows_webview2_skin.cpp"
-    "./src/webview2/windows_webview2_toolbar.cpp"
-    "./src/webview2/skin_css_policy.cpp"
-    "./src/webview2/windows_webview2.h"
     "./src/window/candidate_presenter.cpp"
     "./src/window/candidate_presenter.h"
     "./src/window/candidate_skin_overlay.cpp"
@@ -293,11 +283,11 @@ set(SRC_FILES
     "./src/window/ime_windows.cpp"
     "./src/window/ime_windows.h"
     "./src/window/ime_windows_candidate.cpp"
-    "./src/window/ime_windows_candidate_layout.cpp"
-    "./src/window/ime_windows_candidate_show.cpp"
     "./src/window/ime_windows_internal.h"
     "./src/window/ime_windows_menu.cpp"
     "./src/window/ime_windows_toolbar.cpp"
+    "./src/window/small_windows.cpp"
+    "./src/window/small_windows.h"
     "./src/window/window_hook.cpp"
     "./src/window/window_hook.h"
     "./src/voice-input/voice_input_service.cpp"
@@ -322,7 +312,7 @@ add_executable(${MY_EXECUTABLE_NAME} WIN32
     ${SRC_FILES}
 )
 
-# Tomlplusplus, Webview2 and other head-only libraries
+# Tomlplusplus and other header-only libraries
 target_include_directories(${PROJECT_NAME}
     PRIVATE
     "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/include"
@@ -342,7 +332,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE ZLIB::ZLIB)
 target_link_libraries(${PROJECT_NAME} PRIVATE d2d1 dwrite dwmapi shell32 shcore ole32 bcrypt)
 
 # The helper executables below already build at /W4. The server itself -- the process that owns
-# every network call, the WebView2 hosts and the skin loader -- was still at the default /W3.
+# every network call and the skin loader -- was still at the default /W3.
 if(MSVC)
     target_compile_options(${MY_EXECUTABLE_NAME} PRIVATE /W4)
 endif()
@@ -447,15 +437,6 @@ if(MSVC)
 endif()
 add_dependencies(${PROJECT_NAME} ${HANDWRITING_EXECUTABLE_NAME})
 
-# WebView2 loader (required for CreateCoreWebView2EnvironmentWithOptions)
-set(WEBVIEW2_VCPKG_ROOT "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows")
-set(WEBVIEW2_LOADER_RELEASE "${WEBVIEW2_VCPKG_ROOT}/lib/WebView2Loader.dll.lib")
-set(WEBVIEW2_LOADER_DEBUG "${WEBVIEW2_VCPKG_ROOT}/debug/lib/WebView2Loader.dll.lib")
-target_link_libraries(${PROJECT_NAME} PRIVATE
-    $<$<CONFIG:Debug>:${WEBVIEW2_LOADER_DEBUG}>
-    $<$<CONFIG:Release>:${WEBVIEW2_LOADER_RELEASE}>
-)
-
 set(SETTINGS_EXECUTABLE_NAME "MetasequoiaImeSettings")
 add_executable(${SETTINGS_EXECUTABLE_NAME} WIN32
     "./src/settings/settings_app.cpp"
@@ -474,10 +455,6 @@ add_executable(${SETTINGS_EXECUTABLE_NAME} WIN32
     "./src/settings/default_input_method.h"
     "./src/settings/game_compat_name.cpp"
     "./src/settings/game_compat_name.h"
-    "./src/settings/settings_mouse_input.cpp"
-    "./src/settings/settings_mouse_input.h"
-    "./src/settings/settings_splash.cpp"
-    "./src/settings/settings_splash.h"
     "./src/settings/settings_launcher.cpp"
     "./src/settings/settings_launcher.h"
     "./src/settings/native/native_settings_bindings.cpp"
@@ -593,8 +570,6 @@ target_link_libraries(${SETTINGS_EXECUTABLE_NAME} PRIVATE
     d2d1
     dwrite
     shell32
-    $<$<CONFIG:Debug>:${WEBVIEW2_LOADER_DEBUG}>
-    $<$<CONFIG:Release>:${WEBVIEW2_LOADER_RELEASE}>
 )
 if(MSVC)
     target_compile_options(${SETTINGS_EXECUTABLE_NAME} PRIVATE /W4)
@@ -603,21 +578,13 @@ endif()
 # Building the server target alone must therefore also produce Settings.
 add_dependencies(${PROJECT_NAME} ${SETTINGS_EXECUTABLE_NAME})
 add_custom_command(TARGET ${SETTINGS_EXECUTABLE_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        $<$<CONFIG:Debug>:${WEBVIEW2_VCPKG_ROOT}/debug/bin/WebView2Loader.dll>
-        $<$<CONFIG:Release>:${WEBVIEW2_VCPKG_ROOT}/bin/WebView2Loader.dll>
-        $<TARGET_FILE_DIR:${SETTINGS_EXECUTABLE_NAME}>
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${MSIME_VENDOR_DIR}/cpp-pinyin/res/dict"
         "$<TARGET_FILE_DIR:${SETTINGS_EXECUTABLE_NAME}>/dict"
 )
 
-# Ensure the loader DLL is next to the executable
+# Runtime assets next to the executable
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        $<$<CONFIG:Debug>:${WEBVIEW2_VCPKG_ROOT}/debug/bin/WebView2Loader.dll>
-        $<$<CONFIG:Release>:${WEBVIEW2_VCPKG_ROOT}/bin/WebView2Loader.dll>
-        $<TARGET_FILE_DIR:${PROJECT_NAME}>
     COMMAND ${CMAKE_COMMAND} -E make_directory
         $<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/audios
     COMMAND ${CMAKE_COMMAND} -E copy_if_different

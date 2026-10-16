@@ -185,7 +185,7 @@ Release：
 .\scripts\lcompile-release.ps1 32
 ```
 
-本目录的 `windows_ipc_contract` 在 x64/x86 上验证协议布局、版本握手与语音分帧；CI 还构建 Server、GUI 框架和页面，并在锁定词库上运行 Server 测试。这些检查不能替代真实 TSF 宿主行为回归。按改动范围做手工回归：
+本目录的 `windows_ipc_contract` 在 x64/x86 上验证协议布局、版本握手与语音分帧；CI 还构建 Server 和 GUI 框架，并在锁定词库上运行 Server 测试。这些检查不能替代真实 TSF 宿主行为回归。按改动范围做手工回归：
 
 - 至少验证 x64 宿主；协议、注册、资源或发布改动同时验证 x86 DLL；
 - 输入首键、连续输入、空格/数字键盘选词、翻页、退格、光标移动和标点提交；
@@ -214,7 +214,7 @@ Set-Location ..\server
 .\scripts\lcompile-release.ps1
 
 Set-Location ..\installer
-.\Prepare-PackageFiles.ps1 -RepoRoot .. -TsfDirectory windows -ServerDirectory server -UiHtmlDirectory ui-html -NoticesDirectory .
+.\Prepare-PackageFiles.ps1 -RepoRoot .. -TsfDirectory windows -ServerDirectory server -NoticesDirectory .
 .\Sign-PackageBinaries-Local.ps1
 .\Compile-Installer.ps1
 ```
@@ -232,7 +232,7 @@ C++ 组件编译完成且相关前端/词库产物已准备好之后运行。`Si
 
 ## 提交纪律
 
-一次改动经常同时落在 `windows/`、`server/` 和 `ui-html/`，现在它们在同一次提交里。提交前执行
+一次改动经常同时落在 `windows/`、`server/` 和 `engine/`，现在它们在同一次提交里。提交前执行
 `git status --short`，只暂存本任务涉及的显式路径，禁止 `git add -A` / `git add .` 把构建产物或其他
 会话改动卷入提交。
 

@@ -14,8 +14,7 @@ CompileFlags:
       "-I@VOICE_INCLUDE@",
       "-I@MINIAUDIO@",
       "-I@GUI_INCLUDE@",
-      # WebView2 includes
-      "-I@WEBVIEW2@",
+      # Windows Implementation Library includes
       "-I@WIL@",
       # Boost includes
       "-I@BOOST@",

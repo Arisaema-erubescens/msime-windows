@@ -3370,7 +3370,7 @@ void BitmapImage::Render(msimeui::DeviceResources &dr)
 std::wstring AssetPath(const std::wstring &relativePath)
 {
     static const std::filesystem::path root =
-        std::filesystem::path(CommonUtils::get_ime_data_path_w()) / L"html/webview2/settings/ime-settings/dist/assets";
+        std::filesystem::path(CommonUtils::get_ime_data_path_w()) / L"assets/settings";
     return (root / relativePath).wstring();
 }
 

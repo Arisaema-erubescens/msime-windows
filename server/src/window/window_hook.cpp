@@ -2,8 +2,8 @@
 #include "config/ime_config.h"
 #include "ime_windows.h"
 #include "settings/settings_launcher.h"
-#include "utils/webview_utils.h"
-#include "webview2/windows_webview2.h"
+#include "utils/window_utils.h"
+#include "window/floating_toolbar_presenter.h"
 #include "defines/globals.h"
 #include "defines/defines.h"
 #include "watchdog/watchdog_protocol.h"
@@ -200,13 +200,11 @@ void OnWinEvent(HWND hwnd)
     if (!IsWindow(hwnd) || !IsWindowVisible(hwnd))
         return;
 
-    // Stay out of the way until the toolbar can actually paint. While WebView2 is
-    // warming up the host is deliberately kept "visible" (DWM-cloaked), so the
-    // check below would happily act on a toolbar that is not on screen yet and
-    // leave g_isHiddenDueToFullscreen set for a restore nobody asked for.
-    // Skipping loses nothing: the apply that runs on navigation-completed
-    // evaluates fullscreen itself.
-    if (!IsFloatingToolbarWebviewReady())
+    // Stay out of the way while the toolbar cannot paint: without a presenter
+    // the host is only ever cloaked, so the check below would act on a toolbar
+    // that is not on screen and leave g_isHiddenDueToFullscreen set for a
+    // restore nobody asked for.
+    if (!FloatingToolbarPresenter::Instance().IsBound())
         return;
 
     hwnd = GetForegroundWindow();

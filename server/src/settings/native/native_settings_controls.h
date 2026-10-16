@@ -14,9 +14,9 @@
 #include <string>
 #include <vector>
 
-// Controls of the Direct2D settings window. Each one reproduces a component of the
-// WebView2 settings page; the CSS selector it mirrors is named on the class, and the
-// numbers inside come from that rule. Every color is read from CurrentPalette() at
+// Controls of the Direct2D settings window. Each one was ported from a component of the
+// former web settings page (see native_settings_pages.h); the CSS selector it came from
+// is named on the class, and the numbers inside come from that rule. Every color is read from CurrentPalette() at
 // render time, so switching the theme only needs a repaint.
 //
 // Layout units are DIPs, which is what CSS px are at the page's zoom factor 1.0.
@@ -882,7 +882,7 @@ class BitmapImage : public msimeui::Visual
     float radius_ = 0.0f;
 };
 
-// Reads an SVG asset of the WebView2 page (".../dist/assets/<relative>").
+// Reads an SVG asset of the settings window (<data dir>\assets\settings\<relative>).
 std::string LoadAssetSvg(const std::wstring &relativePath);
 std::wstring AssetPath(const std::wstring &relativePath);
 // CSS `filter: invert(1) brightness(b)` applied to every color literal of an SVG,

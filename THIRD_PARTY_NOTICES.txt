@@ -2,7 +2,7 @@ Metasequoia IME for Windows - Third-Party Notices
 =================================================
 
 The installer ships the TSF text service, the Server process and its helper
-executables, the WebView2 interface resources, and the dictionary and helpcode
+executables, the settings window's image assets, and the dictionary and helpcode
 data. Every binary in it statically links the input engine in engine/, which is
 licensed under the GNU General Public License version 3, so the product as a
 whole is distributed under the GPLv3; see the LICENSE file for its full text.
@@ -36,40 +36,29 @@ dependencies are installed beside it as DLLs rather than linked into it.
   Boost                   BSL-1.0       https://www.boost.org/
   miniaudio               MIT-0         https://github.com/mackron/miniaudio
 
-Binaries redistributed unmodified
----------------------------------
-
-  WebView2Loader.dll      Microsoft Edge WebView2 SDK
-
-The Server links the WebView2 loader and the installer ships the loader DLL as
-built by Microsoft. It is redistributed under the Microsoft Software License
-Terms for the WebView2 SDK, which permit redistribution of the loader with an
-application: https://developer.microsoft.com/microsoft-edge/webview2/
-
 Interface resources
 -------------------
 
-  ui-html                 GPL-3.0       ui-html/ in this repository
+  settings window assets  GPL-3.0       server/assets/settings/ in this repository
 
-The candidate window, floating toolbar, tray menu and settings page are HTML,
-CSS and JavaScript loaded by the Server at runtime. They are part of this
-project and carry the same license as the rest of it.
+The icons and images the settings window draws are installed into the data
+directory under assets\settings. They are part of this project and carry the
+same license as the rest of it.
 
 ------------------------------------------------------------------------------
 1. The input engine, msimeui and the interface resources - GNU General Public License version 3
 ------------------------------------------------------------------------------
 
-The input engine, the msimeui GUI framework and the WebView2 interface resources
-are all parts of this project and are licensed under the GNU General Public
-License version 3. Its full text is reproduced in the LICENSE file at the root of
-this repository and is not duplicated here. All three are directories of this
-repository rather than separate projects; the GUI framework and the interface
-resources were MSIME-UI and MSIME-UiHtml, and the engine was MSIME-Engine, until
-those repositories were archived or, in the engine's case, imported and
-specialized for Windows. See engine/UPSTREAM.md.
+The input engine, the msimeui GUI framework and the settings window's image
+assets are all parts of this project and are licensed under the GNU General
+Public License version 3. Its full text is reproduced in the LICENSE file at the
+root of this repository and is not duplicated here. All three are directories of
+this repository rather than separate projects; the GUI framework was MSIME-UI
+and the engine was MSIME-Engine, until those repositories were archived or, in
+the engine's case, imported and specialized for Windows. See engine/UPSTREAM.md.
 
 Sources:
-  engine/, ui/ and ui-html/ in this repository
+  engine/, ui/ and server/assets/settings/ in this repository
 
 ------------------------------------------------------------------------------
 2. googlepinyinime-rev, OpenCC and cpp-pinyin - Apache License 2.0

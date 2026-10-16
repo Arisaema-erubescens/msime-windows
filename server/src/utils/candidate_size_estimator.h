@@ -5,8 +5,7 @@
 #include <vector>
 
 // Layout inputs for a candidate card. Text widths are measured with DirectWrite
-// (same font engine WebView uses) so the first show can clip/uncloak without
-// waiting for a DOM reflow.
+// so a card size can be estimated before anything is painted.
 struct CandidateSizeEstimateInput
 {
     std::wstring preedit;

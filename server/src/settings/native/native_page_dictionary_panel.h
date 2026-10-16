@@ -10,7 +10,7 @@
 #include <vector>
 
 // Pieces shared by the dictionary page and the quick-phrase card of the tools page, both
-// built on the WebView2 page's dict.css: `.dict-card`, `.dict-toolbar`, `.dict-input`,
+// ported from the former web page's dict.css: `.dict-card`, `.dict-toolbar`, `.dict-input`,
 // `.dict-table`, `.dict-pagination`, `.dict-dialog`, and the dictionaryRequest client.
 namespace native_settings
 {

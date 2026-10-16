@@ -1,4 +1,3 @@
-#include "window/ui_backend_policy.h"
 #include "window/caret_state_indicator_policy.h"
 #include "window/candidate_view_model.h"
 #include "ime_config.h"
@@ -203,15 +202,12 @@ std::string g_punctuation_lock = "follow";
 std::string g_candidate_window_layout = "vertical";
 bool g_candidate_window_follow_cursor = true;
 bool g_candidate_window_fit_content = false;
-std::string g_ui_backend = "d2d";
-std::string g_ui_backend_active = "d2d";
 std::string g_candidate_skin = "fluent";
 std::string g_candidate_window_preedit_style = "pinyin";
 bool g_candidate_fixed_badge = true;
 std::string g_candidate_fixed_badge_style = "paperclip";
 std::string g_candidate_ai_badge_style = "robot";
 std::string g_settings_window_linger = "off";
-std::string g_settings_ui_backend = "webview2";
 std::string g_theme_mode = "system";
 std::string g_theme_settings = "follow";
 std::string g_theme_cand = "follow";
@@ -275,13 +271,6 @@ void PublishVoiceInput(VoiceInputConfig voice)
 
 namespace ime_config_detail
 {
-std::string NormalizeSmallWindowUiBackend(const std::string &value)
-{
-    if (UiBackendPolicy::Resolve(UiBackendPolicy::Surface::Candidate, value) == UiBackendPolicy::Backend::WebView2)
-        return "webview2";
-    return "d2d";
-}
-
 bool IsValidCandidateSkinId(const std::string &skin)
 {
     if (skin.empty() || skin.size() > 64 || !std::isalnum(static_cast<unsigned char>(skin.front())))
@@ -311,11 +300,6 @@ bool IsValidSettingsWindowLinger(const std::string &linger)
 {
     return linger == "off" || linger == "1m" || linger == "5m" || linger == "10m" || linger == "30m" ||
            linger == "60m" || linger == "forever";
-}
-
-bool IsValidSettingsUiBackend(const std::string &backend)
-{
-    return backend == "webview2" || backend == "d2d";
 }
 
 bool IsValidTranslationTargetLanguage(const std::string &language)
@@ -743,7 +727,6 @@ bool LoadImeConfig()
         g_candidate_window_layout = layout == "horizontal" ? "horizontal" : "vertical";
         g_candidate_window_follow_cursor = tbl["appearance"]["candidate_window_follow_cursor"].value_or(true);
         g_candidate_window_fit_content = tbl["appearance"]["candidate_window_fit_content"].value_or(false);
-        g_ui_backend = NormalizeSmallWindowUiBackend(tbl["appearance"]["ui_backend"].value_or(std::string("d2d")));
         const std::string skin = tbl["appearance"]["candidate_skin"].value_or(std::string("fluent"));
         g_candidate_skin = IsValidCandidateSkinId(skin) ? skin : "fluent";
         {
@@ -769,10 +752,6 @@ bool LoadImeConfig()
         {
             const std::string linger = tbl["appearance"]["settings_window_linger"].value_or(std::string("off"));
             g_settings_window_linger = IsValidSettingsWindowLinger(linger) ? linger : "off";
-        }
-        {
-            const std::string backend = tbl["appearance"]["settings_ui_backend"].value_or(std::string("webview2"));
-            g_settings_ui_backend = IsValidSettingsUiBackend(backend) ? backend : "webview2";
         }
         {
             const std::string theme_mode = tbl["appearance"]["theme_mode"].value_or(std::string("system"));
@@ -1197,7 +1176,6 @@ void InitImeConfig()
         (void)0;
 #endif
     }
-    g_ui_backend_active = g_ui_backend;
 }
 
 bool ReloadImeConfigIfChanged()

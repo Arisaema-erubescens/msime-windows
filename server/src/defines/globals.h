@@ -6,14 +6,6 @@
 inline float SCALE = 1.0f;
 inline int POP_UP_WND_WIDTH = 43;
 inline int POP_UP_WND_HEIGHT = 55;
-// WebView2 candidate shadow reserve in CSS DIPs. Keep these in sync with the
-// two-layer shadows in ui-html/webview2/candwnd/skins. The shadow is biased to
-// the lower right, so symmetric padding either clips its soft tail or reserves
-// too much transparent hit-test area on the upper-left side.
-inline constexpr int CANDIDATE_SHADOW_PAD_LEFT = 16;
-inline constexpr int CANDIDATE_SHADOW_PAD_TOP = 14;
-inline constexpr int CANDIDATE_SHADOW_PAD_RIGHT = 32;
-inline constexpr int CANDIDATE_SHADOW_PAD_BOTTOM = 34;
 
 //
 // 候选窗口
@@ -23,8 +15,6 @@ inline constexpr int CANDIDATE_SHADOW_PAD_BOTTOM = 34;
 //
 inline int CANDIDATE_WINDOW_WIDTH = 120;
 inline int CANDIDATE_WINDOW_HEIGHT = 232;
-// Horizontal (and long vertical) candidates wrap beyond this CSS DIP width.
-inline constexpr int CANDIDATE_WINDOW_MAX_WIDTH_DIP = 720;
 
 inline int DEFAULT_WINDOW_WIDTH = CANDIDATE_WINDOW_WIDTH;
 inline int DEFAULT_WINDOW_HEIGHT = CANDIDATE_WINDOW_HEIGHT;
@@ -41,7 +31,7 @@ inline bool is_global_wnd_cand_shown = false;
 
 //
 // 托盘区语言栏菜单窗口
-// MENU_CONTENT_*_DIP is the measured CSS size; MENU_WINDOW_* is the derived
+// MENU_CONTENT_*_DIP is the measured content size; MENU_WINDOW_* is the derived
 // physical host size (dip * current scale). Caching DIPs lets live DPI changes
 // and each show recompute physical size without a stale pixel cache.
 //
@@ -57,11 +47,11 @@ inline bool is_global_wnd_menu_shown = false;
 // 悬浮工具栏窗口
 //
 inline int FTB_WND_WIDTH = 207;
-// Content bar height in DIPs (matches CSS --ftb-bar-height). Shadow is added on
-// the host separately so box-shadow is not clipped.
+// Content bar height in DIPs. The initial host adds the shadow margin
+// separately so the shadow is not clipped.
 inline int FTB_WND_HEIGHT = 35;
 inline int FTB_WND_SHADOW_WIDTH = 8;
-// Last measured .status-bar size in CSS DIPs (0 until first successful measure).
+// Last measured bar size in DIPs (0 until first successful measure).
 inline double FTB_CONTENT_WIDTH_DIP = 0.0;
 inline double FTB_CONTENT_HEIGHT_DIP = 0.0;
 // Off-screen margin (physical px) the host was last placed with, so a resize

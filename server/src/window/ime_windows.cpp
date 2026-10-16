@@ -12,7 +12,6 @@
 #include <memory>
 #include <string>
 #include <fmt/xchar.h>
-#include "webview2/windows_webview2.h"
 #include "utils/window_utils.h"
 #include <dwmapi.h>
 #include "ipc/event_listener.h"
@@ -30,55 +29,28 @@ using namespace ime_windows_detail;
 namespace ime_windows_detail
 {
 bool g_is_ime_active = false;
-// Drop stale FineTune measure callbacks when a newer show/update supersedes them.
-std::atomic<uint64_t> g_candidate_finetune_generation{0};
-std::atomic<bool> g_candidate_layout_inflight{false};
-// Drop clip measurements that completed after newer candidate content was
-// already submitted to WebView2.
-std::atomic<uint64_t> g_candidate_content_generation{0};
 int g_last_placed_caret_x = Global::INVALID_Y;
 int g_last_placed_caret_y = Global::INVALID_Y;
 bool g_candidate_session_anchor_valid = false;
 POINT g_candidate_session_anchor{};
-bool g_has_last_candidate_clip = false;
-std::pair<double, double> g_last_candidate_clip_size{};
-FLOAT g_last_candidate_clip_scale = 1.0f;
-bool g_candidate_placed_above_caret = false;
-std::pair<double, double> g_last_candidate_card_size{};
-bool g_has_candidate_clip_envelope = false;
-double g_clip_envelope_top_dip = 0.0;
-double g_clip_envelope_bottom_dip = 0.0;
-double g_clip_envelope_left_dip = 0.0;
-double g_clip_envelope_right_dip = 0.0;
 // SetWindowPos on the candidate host can synchronously deliver WM_DPICHANGED on
-// the same call stack (hide-to-offscreen, FineTune cross-monitor moves). Applying
-// the suggested rect or re-entering FineTune from that handler races the hide
-// park and can recurse until the UI thread stalls — seen when switching apps.
+// the same call stack (hide, cross-monitor moves). Applying the suggested rect
+// from that handler races the hide and can recurse until the UI thread stalls —
+// seen when switching apps.
 int g_candidate_dpi_change_suppress_count = 0;
 
 // WM_SETTINGCHANGE lParam points to "ImmersiveColorSet" when the user flips
-// the Windows app light/dark theme. Only meaningful for the D2D presenters:
-// they own their colors, while WebView2 pages restyle themselves.
+// the Windows app light/dark theme. The presenters own their colors, so they
+// have to be told.
 bool IsSystemLightDarkToggle(UINT message, LPARAM lParam)
 {
-    return message == WM_SETTINGCHANGE && lParam != 0 && UseD2dSmallWindowUi() &&
+    return message == WM_SETTINGCHANGE && lParam != 0 &&
            lstrcmpiW(reinterpret_cast<LPCWSTR>(lParam), L"ImmersiveColorSet") == 0;
 }
 
-void SyncHostWebViewBounds(ICoreWebView2Controller *controller, HWND hwnd)
-{
-    if (!controller || !hwnd)
-    {
-        return;
-    }
-    RECT bounds{};
-    GetClientRect(hwnd, &bounds);
-    controller->put_Bounds(bounds);
-    controller->NotifyParentWindowPositionChanged();
-}
-
-// WebView2 needs a real on-monitor, "visible" HWND to finish controller/raster
-// setup. Cloak keeps that warmup invisible (same idea as the settings window).
+// The small-window hosts start shown but DWM-cloaked, and every hide of the
+// candidate window is a cloak as well: each presenter uncloaks its host when it
+// actually has something to show.
 void SetHostWindowCloaked(HWND hwnd, bool cloaked)
 {
     if (!hwnd)
@@ -139,17 +111,14 @@ std::wstring DescribeCloak(DWORD cloaked)
     return L"yes(" + description;
 }
 
-// A WebView2 host can be fully transparent while every ordinary check says it
-// is fine, which is what "invisible but the screenshot tool can still frame it"
-// and "invisible but the clicks land on the right item" both mean. Only a
-// handful of things produce that, and none of them are visible from
+// A host can be fully transparent while every ordinary check says it is fine.
+// Only a handful of things produce that, and none of them are visible from
 // IsWindowVisible: a layered window whose alpha was lost or whose WS_EX_LAYERED
 // style went away paints nothing at all, a host still DWM-cloaked is excluded
-// from composition while input routing continues normally, a controller that
-// believes it is hidden or was given empty bounds paints nothing either, and a
-// host parked off every monitor has nowhere to paint. Record all of them
-// together so a blank window can be attributed instead of guessed at.
-std::wstring DescribeHostWindowState(HWND hwnd, bool has_controller, bool webview_visible, const RECT &webview_bounds)
+// from composition while input routing continues normally, and a host parked
+// off every monitor has nowhere to paint. Record all of them together so a
+// blank window can be attributed instead of guessed at.
+std::wstring DescribeHostWindowState(HWND hwnd)
 {
     if (!hwnd)
     {
@@ -170,29 +139,13 @@ std::wstring DescribeHostWindowState(HWND hwnd, bool has_controller, bool webvie
     const bool layered_ok = GetLayeredWindowAttributes(hwnd, &color_key, &alpha, &layered_flags) != FALSE;
     const LONG_PTR ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
 
-    // WebView2 hosts its renderer in a child HWND. If that child is missing or
-    // zero-sized the host is an empty shell no matter how healthy it looks.
-    const HWND child = FindWindowExW(hwnd, nullptr, nullptr, nullptr);
-    wchar_t child_class[64] = {};
-    RECT child_rect{};
-    if (child)
-    {
-        GetClassNameW(child, child_class, ARRAYSIZE(child_class));
-        GetWindowRect(child, &child_rect);
-    }
-
     return fmt::format(L"rect=({},{},{}x{}) client={}x{} on_monitor={} visible={} cloaked={} "
-                       L"layered_attrs={} alpha={} lwa_flags={:#x} ex_layered={} ex_topmost={} "
-                       L"controller={} wv_visible={} wv_bounds={}x{} child={} child_visible={} child_size={}x{}",
+                       L"layered_attrs={} alpha={} lwa_flags={:#x} ex_layered={} ex_topmost={}",
                        window_rect.left, window_rect.top, window_rect.right - window_rect.left,
                        window_rect.bottom - window_rect.top, client_rect.right, client_rect.bottom,
                        MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL) != nullptr, IsWindowVisible(hwnd) != FALSE,
                        DescribeCloak(cloaked), layered_ok ? L"ok" : L"MISSING", static_cast<unsigned>(alpha),
-                       layered_flags, (ex_style & WS_EX_LAYERED) != 0, (ex_style & WS_EX_TOPMOST) != 0, has_controller,
-                       webview_visible, webview_bounds.right - webview_bounds.left,
-                       webview_bounds.bottom - webview_bounds.top, child ? child_class : L"NONE",
-                       child && IsWindowVisible(child) != FALSE, child_rect.right - child_rect.left,
-                       child_rect.bottom - child_rect.top);
+                       layered_flags, (ex_style & WS_EX_LAYERED) != 0, (ex_style & WS_EX_TOPMOST) != 0);
 }
 
 } // namespace
@@ -201,10 +154,7 @@ namespace ime_windows_detail
 {
 std::wstring DescribeFloatingToolbarHostState()
 {
-    bool webview_visible = false;
-    RECT webview_bounds{};
-    const bool has_controller = GetFloatingToolbarWebviewState(webview_visible, webview_bounds);
-    return DescribeHostWindowState(::global_hwnd_ftb, has_controller, webview_visible, webview_bounds);
+    return DescribeHostWindowState(::global_hwnd_ftb);
 }
 } // namespace ime_windows_detail
 
@@ -215,21 +165,12 @@ void SetCandidateHostCloaked(bool cloaked)
 
 std::wstring DescribeCandidateHostState()
 {
-    bool webview_visible = false;
-    RECT webview_bounds{};
-    const bool has_controller = GetCandidateWebviewState(webview_visible, webview_bounds);
-    return fmt::format(L"logical_shown={} nav_ready={} {}", ::is_global_wnd_cand_shown, IsCandidateWebviewReady(),
-                       DescribeHostWindowState(::global_hwnd, has_controller, webview_visible, webview_bounds));
+    return fmt::format(L"logical_shown={} {}", ::is_global_wnd_cand_shown, DescribeHostWindowState(::global_hwnd));
 }
 
-// External linkage, unlike its toolbar counterpart: the menu's own lifecycle
-// events live in windows_webview2_menu.cpp and are the ones worth recording.
 std::wstring DescribeTrayMenuHostState()
 {
-    bool webview_visible = false;
-    RECT webview_bounds{};
-    const bool has_controller = GetTrayMenuWebviewState(webview_visible, webview_bounds);
-    return DescribeHostWindowState(::global_hwnd_menu, has_controller, webview_visible, webview_bounds);
+    return DescribeHostWindowState(::global_hwnd_menu);
 }
 
 namespace
@@ -246,8 +187,9 @@ void PrepareLayeredHostWindow(HWND hwnd)
     DwmExtendFrameIntoClientArea(hwnd, &mar);
 }
 
-// Show on a real monitor while cloaked so WebView2 can warm up without a flash.
-void WarmupHostWindowCloaked(HWND hwnd)
+// Shown on a real monitor but DWM-cloaked: the user sees nothing until the
+// presenter uncloaks the host for its first real show.
+void ShowHostWindowCloaked(HWND hwnd)
 {
     if (!hwnd)
     {
@@ -262,7 +204,7 @@ void WarmupHostWindowCloaked(HWND hwnd)
 void ApplyConfiguredInputScheme()
 {
     FanyNamedPipe::EnqueueReloadInputSessionTask();
-    UpdateFtbInputModeState(::webviewFtbWnd, GetActiveInputMode() == "japanese" ? 1 : 0);
+    UpdateFtbInputModeState(GetActiveInputMode() == "japanese" ? 1 : 0);
     BroadcastConfiguredInputModeState();
 }
 
@@ -316,20 +258,16 @@ int CreateCandidateWindow(HINSTANCE hInstance)
 {
     //
     // 候选框窗口
-    // Create on a real monitor and show while DWM-cloaked. Hidden / far
-    // off-screen hosts prevent WebView2 from finishing init; cloaking avoids
-    // the old (100,100)/(200,200) startup flash without breaking warmup.
+    // Create on a real monitor and show while DWM-cloaked; the presenter sizes
+    // and uncloaks it on the first show.
     //
 #ifndef WS_EX_NOREDIRECTIONBITMAP
 #define WS_EX_NOREDIRECTIONBITMAP 0x00200000L
 #endif
-    const bool d2dUi = UseD2dSmallWindowUi();
-    DWORD dwExStyle = d2dUi ? (WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)
-                            : (WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
+    DWORD dwExStyle = WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
     FLOAT scale = GetForegroundWindowScale();
-    const auto quarterHost = ComputeQuarterScreenHostPixels(GetMainMonitorCoordinates());
-    const int candWidth = d2dUi ? (std::max)(8, static_cast<int>(32 * scale)) : quarterHost.first;
-    const int candHeight = d2dUi ? (std::max)(8, static_cast<int>(32 * scale)) : quarterHost.second;
+    const int candWidth = (std::max)(8, static_cast<int>(32 * scale));
+    const int candHeight = (std::max)(8, static_cast<int>(32 * scale));
 
     HWND hwnd_cand = CreateWindowEx( //
         dwExStyle,                   //
@@ -361,15 +299,8 @@ int CreateCandidateWindow(HINSTANCE hInstance)
     }
 
     ::global_hwnd = hwnd_cand;
-    if (d2dUi)
-    {
-        CandidatePresenter::Instance().Bind(hwnd_cand);
-    }
-    else
-    {
-        PrepareLayeredHostWindow(hwnd_cand);
-    }
-    CAND_DIAG_LOGF(L"candidate host created backend={} {}", d2dUi ? L"d2d" : L"webview2", DescribeCandidateHostState());
+    CandidatePresenter::Instance().Bind(hwnd_cand);
+    CAND_DIAG_LOGF(L"candidate host created {}", DescribeCandidateHostState());
 
     // A client can activate while the pipe server is already listening but this
     // window does not exist yet, which is the race that leaves the toolbar
@@ -379,8 +310,6 @@ int CreateCandidateWindow(HINSTANCE hInstance)
 
     //
     // 任务栏托盘区的菜单窗口
-    // TODO: 这里的初始 width 和 height 需要设置足够大，不然，底部的 item 会不接受响应。不然，也可以在 wndProc
-    // 中刷新一下 webview
     //
     dwExStyle = WS_EX_LAYERED |                               //
                 WS_EX_TOOLWINDOW |                            //
@@ -409,10 +338,7 @@ int CreateCandidateWindow(HINSTANCE hInstance)
     }
     PrepareLayeredHostWindow(hwnd_menu);
     ::global_hwnd_menu = hwnd_menu;
-    if (UseD2dSmallWindowUi())
-    {
-        TrayMenuPresenter::Instance().Bind(hwnd_menu);
-    }
+    TrayMenuPresenter::Instance().Bind(hwnd_menu);
 
     //
     // floating toolbar 窗口
@@ -467,41 +393,21 @@ int CreateCandidateWindow(HINSTANCE hInstance)
     PrepareLayeredHostWindow(hwnd_ftb);
     ::global_hwnd_ftb = hwnd_ftb;
     FanyNamedPipe::RegisterStatusSnapshotWindow(hwnd_ftb);
-    if (UseD2dSmallWindowUi())
-    {
-        FloatingToolbarPresenter::Instance().Bind(hwnd_ftb);
-    }
+    FloatingToolbarPresenter::Instance().Bind(hwnd_ftb);
 
-    // Cloaked show: WebView2 sees a visible on-monitor host; the user does not.
-    WarmupHostWindowCloaked(hwnd_cand);
-    WarmupHostWindowCloaked(hwnd_menu);
-    // The toolbar used to be the one small window left out of this, so whenever
-    // no client was active at startup its controller was created against a
-    // hidden host. WebView2 then never finished raster setup, and the later
-    // ShowWindow produced a layered window that reports a correct rect to window
-    // enumeration while painting nothing at all.
-    WarmupHostWindowCloaked(hwnd_ftb);
+    // Cloaked show: the hosts are on a real monitor but invisible to the user
+    // until their presenters uncloak them.
+    ShowHostWindowCloaked(hwnd_cand);
+    ShowHostWindowCloaked(hwnd_menu);
+    ShowHostWindowCloaked(hwnd_ftb);
     ApplyConfiguredFloatingToolbarVisibility(L"startup");
     UpdateWindow(hwnd_ftb);
-
-    //
-    // Preparing webview2 env (skipped when appearance.ui_backend is d2d)
-    //
-    if (!UseD2dSmallWindowUi())
-    {
-        PrepareHtmlForWnds();
-        /* 候选框、托盘语言区右键菜单和 floating toolbar 共用一个 WebView2 environment */
-        InitSmallWindowWebviews(hwnd_cand, hwnd_menu, hwnd_ftb);
-
-        /* 菜单窗口：首屏导航完成后量一次尺寸（暂不 TOPMOST） */
-        SetTimer(hwnd_menu, TIMER_ID_INIT_WEBVIEW_MENU, 200, nullptr);
-    }
 
     /* 监听文本配置文件变化，并同步到运行中的候选框。Settings 已是独立进程。 */
     SetTimer(hwnd_cand, TIMER_ID_CONFIG_SYNC, 300, nullptr);
 
-    /* floating toolbar：再确认一次落在主屏右下角（不依赖 WebView 就绪） */
-    SetTimer(hwnd_ftb, TIMER_ID_MOVE_WEBVIEW_FTB, 200, nullptr);
+    /* floating toolbar：再确认一次落在主屏右下角 */
+    SetTimer(hwnd_ftb, TIMER_ID_PLACE_FTB, 200, nullptr);
 
     //
     // 注册一下全局钩子
@@ -544,14 +450,10 @@ int CreateCandidateWindow(HINSTANCE hInstance)
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    if (message == WM_SHOWWINDOW)
+    if (message == WM_SHOWWINDOW && hwnd == ::global_hwnd)
     {
-        UpdateSmallWindowWebviewVisibility(hwnd, wParam != FALSE);
-        if (hwnd == ::global_hwnd)
-        {
-            CAND_DIAG_LOGF(L"host WM_SHOWWINDOW showing={} reason={} {}", wParam != FALSE,
-                           static_cast<unsigned long long>(lParam), DescribeCandidateHostState());
-        }
+        CAND_DIAG_LOGF(L"host WM_SHOWWINDOW showing={} reason={} {}", wParam != FALSE,
+                       static_cast<unsigned long long>(lParam), DescribeCandidateHostState());
     }
 
     if (message == WM_APPLY_IME_CONFIG || message == WM_APPLY_IME_INPUT_SCHEME)

@@ -9,7 +9,7 @@ This directory used to be a submodule of `metasequoiaime/MSIME-Engine`. It is no
 | Directory | Purpose |
 | --- | --- |
 | `core/`, `quanpin/`, `shuangpin/`, `english/`, `japanese/` | Input sessions and candidate lookup |
-| `contracts/` | The authoritative IPC wire format, dictionary format, punctuation policy and WebView message schema |
+| `contracts/` | The authoritative IPC wire format, dictionary format, punctuation policy and settings-window message schema |
 | `helpcode/` | Helpcode (形码) tables and generators |
 | `local_modes/`, `providers/`, `user_dictionary/` | Local modes, online candidate sources, the user dictionary |
 | `voice/` | Recording, WAV encoding, recognition and text cleanup; builds independently |
@@ -36,7 +36,7 @@ Formatting is driven from the repository root by `scripts/format.sh`, using the 
 
 ## Contract rules
 
-The IPC wire format, opcodes, voice framing and WebView message definitions live in `contracts/` and are the single source of truth. Consumers include the same headers; do not restate them on either side. Dictionary naming is defined by `contracts/dictionary/format.json`, shared with the repository root's `scripts/dictionary_product.py`.
+The IPC wire format, opcodes, voice framing and settings-window message definitions live in `contracts/` and are the single source of truth. Consumers include the same headers; do not restate them on either side. Dictionary naming is defined by `contracts/dictionary/format.json`, shared with the repository root's `scripts/dictionary_product.py`.
 
 ## Data and licensing
 

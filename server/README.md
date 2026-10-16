@@ -11,7 +11,6 @@ This is the server end of [MSIME-Windows](https://github.com/metasequoiaime/MSIM
 - vcpkg
 - Python3.10+
 - Boost
-- Node.js and pnpm 10 (settings page build)
 
 Make sure vcpkg and Boost are installed by **Scoop**.
 
@@ -31,21 +30,9 @@ Copy-Item MetasequoiaImeDict/out/* $devData -Force
 Copy-Item engine/helpcode/helpcodes $devData -Recurse -Force
 Copy-Item server/assets/tables/* $devData -Force
 Copy-Item server/assets/config/config.toml $devData -Force
-Push-Location ui-html/webview2/settings/ime-settings
-try {
-    pnpm install --frozen-lockfile
-    if ($LASTEXITCODE -ne 0) { throw 'Settings dependencies failed' }
-    pnpm build
-    if ($LASTEXITCODE -ne 0) { throw 'Settings page build failed' }
-} finally { Pop-Location }
-$devWebview = Join-Path $devData 'html/webview2'
-New-Item -ItemType Directory -Force $devWebview | Out-Null
-foreach ($part in @('shared', 'candwnd', 'ftb', 'menu')) {
-    Copy-Item "ui-html/webview2/$part" $devWebview -Recurse -Force
-}
-$devSettings = Join-Path $devWebview 'settings/ime-settings'
-New-Item -ItemType Directory -Force $devSettings | Out-Null
-Copy-Item ui-html/webview2/settings/ime-settings/dist $devSettings -Recurse -Force
+$devAssets = Join-Path $devData 'assets'
+New-Item -ItemType Directory -Force $devAssets | Out-Null
+Copy-Item server/assets/settings $devAssets -Recurse -Force
 python server/scripts/prepare_env.py
 if ($LASTEXITCODE -ne 0) { throw 'Server environment setup failed' }
 $env:LOCALAPPDATA = $devLocalData
@@ -54,10 +41,10 @@ cd server
 ```
 
 Use a dedicated PowerShell terminal. These steps stage the same locked data as CI
-and the current product pages in a separate development directory. Both
-`LOCALAPPDATA` (Windows config/pages) and `METASEQUOIA_IME_DATA_DIR` (Engine data)
+and the settings window assets in a separate development directory. Both
+`LOCALAPPDATA` (Windows config/assets) and `METASEQUOIA_IME_DATA_DIR` (Engine data)
 are set for that terminal; setting only the latter would still use installed
-Windows configuration and pages. Close the terminal after development.
+Windows configuration and assets. Close the terminal after development.
 Dictionary source changes belong in Engine's `dictionary/`; use its root `build_profile.py`
 to build data instead of calling internal stages in the archived Dict repository.
 

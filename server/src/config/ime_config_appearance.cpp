@@ -1,6 +1,5 @@
-// 候选窗外观配置：每页候选数、字体与字号、文字颜色、布局与跟随光标、小窗 UI 后端、
+// 候选窗外观配置：每页候选数、字体与字号、文字颜色、布局与跟随光标、
 // 皮肤、预编辑样式、固定徽标和设置窗口保留时长。
-#include "window/ui_backend_policy.h"
 #include "config/ime_config_internal.h"
 #include <algorithm>
 #include <cctype>
@@ -222,35 +221,6 @@ bool SetConfiguredCandidateWindowFitContent(bool enabled)
     return true;
 }
 
-const std::string &GetConfiguredUiBackend()
-{
-    return g_ui_backend;
-}
-
-bool SetConfiguredUiBackend(const std::string &backend)
-{
-    if (!UiBackendPolicy::IsSupported(backend))
-        return false;
-    const std::string normalized = NormalizeSmallWindowUiBackend(backend);
-    if (!WriteConfiguredValue("appearance", "ui_backend", EscapeTomlBasicString(normalized)))
-    {
-        return false;
-    }
-    g_ui_backend = normalized;
-    return true;
-}
-
-bool UseD2dSmallWindowUi()
-{
-    return UiBackendPolicy::Resolve(UiBackendPolicy::Surface::Candidate, g_ui_backend_active) ==
-           UiBackendPolicy::Backend::Native;
-}
-
-void FallBackToD2dSmallWindowUi()
-{
-    g_ui_backend_active = "d2d";
-}
-
 const std::string &GetConfiguredCandidateSkin()
 {
     return g_candidate_skin;
@@ -373,24 +343,5 @@ bool SetConfiguredSettingsWindowLinger(const std::string &linger)
         return false;
     }
     g_settings_window_linger = linger;
-    return true;
-}
-
-const std::string &GetConfiguredSettingsUiBackend()
-{
-    return g_settings_ui_backend;
-}
-
-bool SetConfiguredSettingsUiBackend(const std::string &backend)
-{
-    if (!IsValidSettingsUiBackend(backend))
-    {
-        return false;
-    }
-    if (!WriteConfiguredValue("appearance", "settings_ui_backend", EscapeTomlBasicString(backend)))
-    {
-        return false;
-    }
-    g_settings_ui_backend = backend;
     return true;
 }

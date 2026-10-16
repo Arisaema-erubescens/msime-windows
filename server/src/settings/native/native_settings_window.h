@@ -6,10 +6,9 @@
 #include <memory>
 #include <string>
 
-// The Direct2D settings window (appearance.settings_ui_backend = "d2d"). It adopts the
-// HWND that settings_app.cpp creates, so the window class, single-instance activation,
-// lingering and the worker that applies config writes stay shared with the WebView2
-// frontend; only painting and input are handled here.
+// The Direct2D settings window. It adopts the HWND that settings_app.cpp creates; the
+// window class, single-instance activation, lingering and the worker that applies config
+// writes live there, and only painting and input are handled here.
 namespace native_settings
 {
 class SettingsWindowImpl;
@@ -19,7 +18,7 @@ class SettingsWindow
   public:
     struct Callbacks
     {
-        // A client message, serialized exactly as the WebView2 page would post it.
+        // A client message of the webview contract (engine/contracts/webview), serialized.
         std::function<void(const std::string &message)> postToHost;
     };
 

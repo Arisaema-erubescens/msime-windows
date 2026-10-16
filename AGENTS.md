@@ -11,10 +11,9 @@ Windows 端的全部一方源码在本仓。**合仓改变的是仓库数量，�
 | 目录 | 职责 | 本目录的规则 |
 |---|---|---|
 | `windows/` | TSF 文本服务 DLL：按键预判、焦点、edit session、管道客户端 | [windows/AGENTS.md](windows/AGENTS.md) |
-| `server/` | 常驻后端：候选状态、配置、词库、管道服务、窗口与 WebView2 宿主 | [server/AGENTS.md](server/AGENTS.md) |
+| `server/` | 常驻后端：候选状态、配置、词库、管道服务，以及候选窗、悬浮工具栏、托盘菜单和设置窗口（均由 `msimeui` 以 Direct2D 绘制） | [server/AGENTS.md](server/AGENTS.md) |
 | `engine/` | 输入引擎：输入会话、候选查询、辅助码、跨进程契约、语音模块 | [engine/AGENTS.md](engine/AGENTS.md) |
 | `ui/` | 通用 Win32 / Direct2D / DirectWrite 控件库 `msimeui` | [ui/AGENTS.md](ui/AGENTS.md) |
-| `ui-html/` | 候选窗、工具栏、菜单、设置页的 HTML / CSS / JS | [ui-html/README.md](ui-html/README.md) |
 | `installer/` | 收集产物、自签名、Inno Setup 打包 | [installer/README.md](installer/README.md) |
 | `log/` | 日志采集库 | — |
 | `skins/` | 外部皮肤合集，每个子目录一个 `skin.toml` 皮肤包；除素材授权未核实的外随安装包装到数据目录，同名且改过的旧版改名 `.bak` 保留 | [skins/README.md](skins/README.md) |
@@ -27,11 +26,10 @@ Windows 端的全部一方源码在本仓。**合仓改变的是仓库数量，�
 
 ## 组件之间的边界
 
-- **协议的唯一来源是 `engine/contracts/`**。IPC 线格式、opcode、语音分帧和 WebView 消息定义都在那里，`windows/` 和 `server/` 各自引用同一份头文件。不要在任何一侧重新定义或复制一份。
+- **协议的唯一来源是 `engine/contracts/`**。IPC 线格式、opcode、语音分帧和设置窗口的消息定义（`engine/contracts/webview/`，名字是历史遗留）都在那里，`windows/` 和 `server/` 各自引用同一份头文件。不要在任何一侧重新定义或复制一份。
 - **`ui/` 不许反向依赖产品**。它不读 Server 配置、IPC、引擎、词库或全局输入状态；业务通过数据和回调接入。`ui/scripts/check-boundary.py` 在 CI 里检查已知的反向依赖，新增依赖会红。
-- **窗口归 `server/`，页面归 `ui-html/`**。HWND、尺寸、位置、DPI、Z-order 和 WebView2 controller 的生命周期在 `server/src/window/` 与 `server/src/webview2/`；页面结构、样式和浏览器端交互在 `ui-html/webview2/`。改消息 `type`、JSON 字段或页面导出的 JS 函数时两侧要一起改。
-- **候选与输入状态的权威在 Server 和引擎**，页面只负责展示和发出用户动作，不要在网页侧复制状态机。
-- `ui-html/webview2/shared/` 是引擎 web 契约的副本，由 `ui-html/scripts/sync-contracts.py` 生成，CI 用 `--check` 验证它和 `engine/contracts/webview/` 一致。手改这个目录会被 CI 拦下来，改契约要改 `engine/contracts/`，然后在同一个提交里重新生成。
+- **界面只有 Direct2D 一套**。候选窗、悬浮工具栏、托盘菜单的 HWND、尺寸、位置、DPI、Z-order 和绘制在 `server/src/window/`（presenter 用 `ui/` 的 `msimeui` 控件）；设置窗口是独立进程 `server/src/settings/`，界面在 `server/src/settings/native/`，用到的图片资源在 `server/assets/settings/`，安装到数据目录的 `assets\settings\`。WebView2 与 `ui-html/` 已移除，不要再引入浏览器内核或网页前端。
+- **候选与输入状态的权威在 Server 和引擎**，界面只负责展示和发出用户动作，不要在 presenter 或设置窗口里复制状态机。
 - **新增配置项必须同时写进出厂模板 `installer/default_config/config.default.toml`。** 这个文件是安装包真正打进去的那一份，Server 升级时用 `MergeConfigIntoTemplate` 以它为骨架重建用户配置：**模板里没有的键会被丢弃**。只在 `ime_config.cpp` 里加读取和默认值，代码本身能跑，但用户在设置页改过的值会在下次升级时静默消失，而且没有任何编译期或运行期报错。同一个提交里要一并更新的还有 `server/assets/config/config.toml`（开发和 CI 测试用的工作配置），以及设置页的配置读写映射——服务端进程内已不再内嵌设置宿主，读写映射只剩独立设置进程 `server/src/settings/settings_app.cpp` 一处，其中 `BuildConfigMessage` 里 `configSnapshot` 的字段列表和 `ApplyConfigUpdate` 里 `path == "..."` 的分发两边都要加，漏掉任一边的表现是「设置页能点，重开就回退」。
 - **`engine/` 是本仓的一等代码，不是 vendored 第三方。** 需要为 Windows 改引擎就直接改，和改 `server/` 一样评审和测试，不用绕上游。唯一例外是 `engine/` 下的 `ngram/kenlm/`、`ngram/octagram/darts.h`、`utfcpp/` 和 `voice/third_party/`，那几个是上游副本，保留原格式与许可；`darts.h` 按精确路径单独排除，同目录的 `octagram_gram.{h,cpp}` 是我们的代码，仍受格式门禁管。`googlepinyinime-rev/` 已与上游解绑，可以直接改，但保留它原有的格式与许可，本地改动记在 UPSTREAM.md。来源与裁剪清单见 [engine/UPSTREAM.md](engine/UPSTREAM.md)。
 
@@ -59,7 +57,7 @@ cmake -S ui      -B ui/build -A x64                # GUI 框架
 
 **格式化会卡 CI，提交前务必自查，注意两个坑：**
 
-- **版本必须是 clang-format `18.1.8`**。`format.sh` 把版本钉死在这个值并从 PyPI 装，不同版本的默认排版不一致，用系统自带的 clang-format 本地过了、CI 仍可能红。`quality.yml` 的 `Check formatting` 步骤只跑 C++（`server`/`windows`/`ui`/`log`/`engine`），**不覆盖 `ui-html/` 的 TS/CSS**——那边只有 `pnpm build`（`tsc`）和 `pnpm test` 把关，没有 prettier/eslint 格式门禁。
+- **版本必须是 clang-format `18.1.8`**。`format.sh` 把版本钉死在这个值并从 PyPI 装，不同版本的默认排版不一致，用系统自带的 clang-format 本地过了、CI 仍可能红。`quality.yml` 的 `Check formatting` 步骤只跑 C++（`server`/`windows`/`ui`/`log`/`engine`）。
 - **`format.sh` 在 Windows 上跑不起来**：它假设 venv 是 Unix 布局（`bin/pip`、`bin/clang-format`），而 Windows 的 `python -m venv` 生成的是 `Scripts/`，脚本会以 `No such file or directory` 退出。在 Windows 上改了 C++ 就直接调 18.1.8 的 clang-format 自查，绕过这个脚本：
 
   ```powershell
@@ -74,7 +72,7 @@ cmake -S ui      -B ui/build -A x64                # GUI 框架
 
 ## 产品输入清单
 
-`product-lock.json` 只记录仍来自仓外的东西，现在只剩一项：词库 Release 的 tag、source commit 和每个产物的 SHA256。**引擎、Server、页面、GUI 框架和安装器都不在清单里**——它们是本仓的目录，本仓的一个 commit 就已经把它们钉住了。辅助码在 `engine/helpcode/`，同理。
+`product-lock.json` 只记录仍来自仓外的东西，现在只剩一项：词库 Release 的 tag、source commit 和每个产物的 SHA256。**引擎、Server、GUI 框架和安装器都不在清单里**——它们是本仓的目录，本仓的一个 commit 就已经把它们钉住了。辅助码在 `engine/helpcode/`，同理。
 
 - 引擎没有 `repositories` 条目，这是有意的。它不再有 gitlink，锁里写一个上游 commit 就等于声称这棵树仍等于上游——第一个 Windows 专门化的改动落地时这句话就假了，而且没有任何 CI 能发现。来源改记在 [engine/UPSTREAM.md](engine/UPSTREAM.md)。
 - `refresh` 不解析任何浮动源码引用，词库取自指定 tag。词库清单里记录了构建它的 commit 和当时工作树是否干净，`verify-assets` 一并校验——摘要只能证明字节是评审过的字节，证明不了它来自一个能重建的源。
@@ -139,7 +137,7 @@ release workflow 里的每一段 shell 都抽在 `scripts/ci/` 下，workflow �
 | `revalidate-draft-release.sh` | 发布前复查 draft 仍指向被构建的那个 commit |
 | `publish-release.sh` | 上传产物、追加说明、发布 |
 
-合仓之前 CI 要把五个仓 checkout 到历史目录名下，`Prepare-PackageFiles.ps1` 才能不改一行地跑。现在源目录名由 workflow 显式传参（`-TsfDirectory windows -ServerDirectory server -UiHtmlDirectory ui-html -NoticesDirectory . -HelpCodeDirectory engine/helpcode`），只有词库还落在仓根的 `MetasequoiaImeDict/`，用的是那个参数的默认值。改动这些脚本里的产物路径时，要连同 release workflow 一起核对。
+合仓之前 CI 要把五个仓 checkout 到历史目录名下，`Prepare-PackageFiles.ps1` 才能不改一行地跑。现在源目录名由 workflow 显式传参（`-TsfDirectory windows -ServerDirectory server -NoticesDirectory . -HelpCodeDirectory engine/helpcode`），只有词库还落在仓根的 `MetasequoiaImeDict/`，用的是那个参数的默认值。改动这些脚本里的产物路径时，要连同 release workflow 一起核对。
 
 词库不在 CI 里现建，从产品锁指定仓库的 `dict-*` release 下载并校验 SHA256。**建库流水线不在本仓**——它随引擎的专门化一并裁掉了（见 [engine/UPSTREAM.md](engine/UPSTREAM.md)），现有 MSIME-Dict release 作为不可变旧产物保留；换发布源要在 `product_lock.py` 里明确评审，不是改个 tag 就能悄悄完成的事。词库改了要先在上游把新词库发布出来，再发 Windows 版本；通过 `scripts/product_lock.py refresh --dictionary-tag <tag>` 更新产品锁并评审摘要变更；发布构建不能临时覆盖词库版本。
 
@@ -149,4 +147,4 @@ release workflow 里的每一段 shell 都抽在 `scripts/ci/` 下，workflow �
 
 ## 提交
 
-提交信息用 `type(scope): 摘要`，scope 用目录名（`windows`、`server`、`engine`、`ui`、`ui-html`、`installer`）。不要添加 `Co-Authored-By`、`Generated with` 或其他 AI 生成标记。
+提交信息用 `type(scope): 摘要`，scope 用目录名（`windows`、`server`、`engine`、`ui`、`installer`）。不要添加 `Co-Authored-By`、`Generated with` 或其他 AI 生成标记。

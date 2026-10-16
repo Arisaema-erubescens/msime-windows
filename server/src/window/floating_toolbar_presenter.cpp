@@ -10,7 +10,7 @@
 #include "skin/candidate_skin_catalog.h"
 #include "utils/common_utils.h"
 #include "utils/window_utils.h"
-#include "webview2/windows_webview2.h"
+#include "window/small_windows.h"
 #include "window/floating_toolbar_skin.h"
 
 #include "msimeui/Controls.h"
@@ -42,8 +42,8 @@ D2D1_COLOR_F ColorFromRgb(UINT rgb, float alpha = 1.0f)
     return D2D1::ColorF(((rgb >> 16) & 0xFF) / 255.0f, ((rgb >> 8) & 0xFF) / 255.0f, (rgb & 0xFF) / 255.0f, alpha);
 }
 
-// Same reserve as the WebView2 candidate host (CANDIDATE_SHADOW_PAD_*): about 2σ
-// of the candidate shadow below, biased to the lower right like the shadow is.
+// Same reserve as the candidate card shadow: about 2σ of the shadow below,
+// biased to the lower right like the shadow is.
 constexpr float kShadowPadLeft = 16.0f;
 constexpr float kShadowPadTop = 14.0f;
 constexpr float kShadowPadRight = 32.0f;
@@ -585,8 +585,8 @@ void FloatingToolbarPresenter::ApplyTheme()
         return;
     }
     const bool light = ResolveConfiguredTheme(GetConfiguredThemeFtb()) == "light";
-    // 与 WebView2 端选工具栏页面的规则一致：跟随候选窗皮肤，外部皮肤用其 base，再叠上 [toolbar] 的覆盖。
-    // 皮肤在当前候选布局/主题下不生效时整份不套用，与两个候选窗后端同一条判定。
+    // 跟随候选窗皮肤，外部皮肤用其 base，再叠上 [toolbar] 的覆盖。
+    // 皮肤在当前候选布局/主题下不生效时整份不套用，与候选窗同一条判定。
     const std::string skinId = GetConfiguredCandidateSkin();
     std::optional<CandidateSkinCatalog::Package> package;
     std::string baseSkinId = skinId;

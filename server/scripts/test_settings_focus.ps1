@@ -173,8 +173,8 @@ function Test-Activation([IntPtr]$Target, [IntPtr]$Settings, [uint32]$SettingsTh
     $finalActive = if ($activeValues.Count) { $activeValues[$activeValues.Count - 1] } else { 0 }
     $finalFocus = if ($focusValues.Count) { $focusValues[$focusValues.Count - 1] } else { 0 }
     $requiresSettingsFocus = $targetValue -eq $Settings.ToInt64()
-    # MoveFocus transfers keyboard focus from the host HWND into WebView2's
-    # Composition input HWND, so a non-zero focus HWND is expected here.
+    # Once the settings window is active it owns keyboard focus (on itself or
+    # one of its child HWNDs), so a non-zero focus HWND is expected here.
     $settingsFocusCorrect = -not $requiresSettingsFocus -or `
         ($finalActive -eq $Settings.ToInt64() -and $finalFocus -ne 0)
 

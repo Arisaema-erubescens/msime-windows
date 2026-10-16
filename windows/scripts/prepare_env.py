@@ -32,18 +32,6 @@ vcpkg_include_path = normpath(
     )
 )
 utfcpp_path = normpath(os.path.join(project_root_path, "..", "engine", "utfcpp", "source"))
-webview2_path = normpath(
-    os.path.join(
-        user_home,
-        ".nuget",
-        "packages",
-        "microsoft.web.webview2",
-        "1.0.3240.44",
-        "build",
-        "native",
-        "include",
-    )
-)
 wim_path = normpath(
     os.path.join(
         user_home,

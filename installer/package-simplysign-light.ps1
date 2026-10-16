@@ -1,4 +1,4 @@
-# Build a light (hotfix) installer that only replaces TSF, Server and HTML, then sign its payload
+# Build a light (hotfix) installer that only replaces TSF, Server and the settings window assets, then sign its payload
 # and the finished installer with the real Certum certificate exposed by SimplySign Desktop.
 #
 # The light installer carries no dictionaries, neural models or factory config template, so it is

@@ -13,7 +13,7 @@
 ;   4. Sign-Installer-Local.ps1         用同一张本机测试证书给安装包签名
 ;
 ; 也可以直接运行 .\test.ps1 走完整测试流程。
-; 只改 TSF / Server / HTML 时用 .\test-light.ps1：ISCC /DLightPackage=1，
+; 只改 TSF / Server 时用 .\test-light.ps1：ISCC /DLightPackage=1，
 ; 打出不含词库的轻量包，安装时也不会删本机已有词库。
 ; 上面两条都不把 PDB 打进包；要带符号用 .\test-symbols.ps1。
 ; 本仓库不包含任何预置代码签名证书。
@@ -79,17 +79,13 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "{#MyTsfRoot32}\{code:GetVersionDir}"
 Name: "{#MyTsfRoot64}\{code:GetVersionDir}"
 Name: "{commonpf64}\metasequoiaime\server"
-; 用户数据（词库、配置、皮肤、前端资源）。默认在 LocalAppData，安装时可以改到别的盘，
+; 用户数据（词库、配置、皮肤、界面资源）。默认在 LocalAppData，安装时可以改到别的盘，
 ; 选择写进 HKLM 的 DataDir，Server / TSF DLL / 引擎三方都从那里读。
 Name: "{code:GetDataDir}"; Permissions: users-modify
 ; 用户自己的辅助码方案放这里，Server 扫描后列进设置页，升级时保留。
 Name: "{code:GetDataDir}\helpcodes\custom"
 ; 用户自己的双拼方案（.toml）放这里，同样由 Server 扫描、升级时保留。
 Name: "{code:GetDataDir}\shuangpin\custom"
-; WebView2 子进程是中完整性，写不进内置 Administrator 的高完整性 LocalAppData。
-Name: "{commonappdata}\metasequoiaime"
-Name: "{commonappdata}\metasequoiaime\webview2"; Permissions: users-modify
-Name: "{commonappdata}\metasequoiaime\webview2-settings"; Permissions: users-modify
 
 [Files]
 ; 独立安装应用图标，供 Windows“已安装的应用”列表稳定显示。
@@ -155,9 +151,9 @@ Source: "{#MySourceRoot}\bundled_skins\*"; \
 Source: "{#MySourceRoot}\bundled_skins.manifest"; Flags: dontcopy
 
 #ifdef LightPackage
-; 轻量包只覆盖前端 HTML，不带词库/辅助码/出厂配置。
-Source: "{#MySourceRoot}\app_data\html\*"; \
-    DestDir: "{code:GetDataDir}\html"; \
+; 轻量包只覆盖设置窗口的图片资源，不带词库/辅助码/出厂配置。
+Source: "{#MySourceRoot}\app_data\assets\settings\*"; \
+    DestDir: "{code:GetDataDir}\assets\settings"; \
     Flags: ignoreversion recursesubdirs createallsubdirs uninsneveruninstall
 #else
 ; 包内故意不带 config.toml。通配复制再排除一次，防止以后又把用户配置打进包内。
@@ -208,16 +204,9 @@ const
   { 用户选的目录里已有别的文件时，数据改放到这个子目录里。}
   DataDirSubfolderName = 'metasequoiaime';
 
-  { WebView2 Evergreen Runtime 在 EdgeUpdate 里的固定客户端 ID。}
-  WebView2ClientKey =
-    'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
-  { 安装器界面本身就是中文（InitializeSetup 在选语言对话框之前跑，拿不到用户选的语言），
-    下载页也统一给简体中文版，省得用户落到英文页上再自己切。}
-  WebView2DownloadUrl =
-    'https://developer.microsoft.com/zh-cn/microsoft-edge/webview2';
-  { Evergreen Bootstrapper 直链，点开就是安装器。}
-  WebView2DirectUrl = 'https://go.microsoft.com/fwlink/p/?LinkId=2124703';
   VCRuntimeKey = 'Software\Microsoft\VisualStudio\14.0\VC\Runtimes\x64';
+  { 安装器界面本身就是中文（InitializeSetup 在选语言对话框之前跑，拿不到用户选的语言），
+    说明页也统一给简体中文版，省得用户落到英文页上再自己切。}
   VCRuntimeDownloadUrl =
     'https://learn.microsoft.com/zh-cn/cpp/windows/latest-supported-vc-redist?view=msvc-170';
   { 微软给的「最新受支持 v14 x64 运行库」固定直链。}
@@ -235,29 +224,10 @@ var
   UserConfigExistedBeforeInstall: Boolean;
   DataDirAdoptedEmpty: Boolean;
 
-{ WebView2 Runtime 与 VC 运行库都不随包分发：前者有自己的 Evergreen 更新通道，
-  后者是系统级共享组件，安装器不该替用户装。缺 VC 运行库 Server 直接起不来；
-  缺 WebView2 设置页打不开（默认 D2D 候选窗照常可用，选了 WebView2 渲染的
-  Server 启动时会临时退回 D2D）。故障现场都在安装结束之后，用户看不到任何解释，
-  所以在安装开始前查一遍，把原因当场说清楚。
-
-  返回空串表示没装；否则是 pv 里的版本号。}
-function ReadWebView2Version: String;
-begin
-  Result := '';
-  { 机器级安装由 32 位的 EdgeUpdate 写入，键落在 WOW6432Node 下。本安装器跑在
-    64 位模式，HKLM 默认就是 64 位视图，所以主查 HKLM32；HKLM64 作为后备，
-    以防将来的 ARM64 / 原生 64 位布局换了位置。用户级安装写在 HKCU。
-    卸载没清干净的机器上 pv 可能残留成 0.0.0.0。}
-  if not RegQueryStringValue(HKLM32, WebView2ClientKey, 'pv', Result) then
-    if not RegQueryStringValue(HKLM64, WebView2ClientKey, 'pv', Result) then
-      if not RegQueryStringValue(HKCU, WebView2ClientKey, 'pv', Result) then
-        Result := '';
-  Result := Trim(Result);
-  if Result = '0.0.0.0' then
-    Result := '';
-end;
-
+// VC 运行库不随包分发：它是系统级共享组件，安装器不该替用户装。缺了它 Server 直接
+// 起不来，而故障现场在安装结束之后，用户看不到任何解释，所以在安装开始前查一遍，
+// 把原因当场说清楚。
+//
 // 用注册表判定，而不是去 System32 里找 vcruntime140.dll：Setup.exe 是 32 位进程，
 // Pascal Script 的 FileExists 会被 WOW64 重定向到 SysWOW64（[Files] 和 Exec 里的
 // {sys} 由 Inno 自己处理，脚本函数不管），结果查的是 x86 运行库——只装了 x64 redist
@@ -319,20 +289,11 @@ end;
 
 function InitializeSetup: Boolean;
 var
-  WebView2Version: String;
-  NeedsWebView2: Boolean;
   NeedsVCRuntime: Boolean;
   VCRuntimeVersion: String;
   Prompt: String;
 begin
   Result := True;
-
-  WebView2Version := ReadWebView2Version;
-  NeedsWebView2 := WebView2Version = '';
-  if NeedsWebView2 then
-    Log('Prerequisite missing: Microsoft Edge WebView2 Runtime.')
-  else
-    Log('WebView2 Runtime found: ' + WebView2Version);
 
   NeedsVCRuntime := not VCRuntimeIsInstalled;
   { 有版本号却没通过判定，就是装了但太旧，提示里要和「没装」分开说。}
@@ -343,45 +304,30 @@ begin
   else
     Log('Visual C++ runtime found: ' + VCRuntimeVersion);
 
-  if not (NeedsWebView2 or NeedsVCRuntime) then
+  if not NeedsVCRuntime then
     exit;
 
-  Prompt := '这台电脑缺少输入法用到的系统组件，或版本过旧：' + #13#10;
-  if NeedsVCRuntime then
-  begin
-    Prompt := Prompt + #13#10 +
-      '● Visual C++ 2015-2022 可再发行组件包（x64），需要 14.' +
-      IntToStr(VCRuntimeMinMinor) + ' 或更高版本' + #13#10;
-    if VCRuntimeVersion <> '' then
-      Prompt := Prompt +
-        '   当前已安装 ' + VCRuntimeVersion + '，版本过旧，设置页等程序会启动即闪退。' + #13#10
-    else
-      Prompt := Prompt +
-        '   缺少它输入法主程序根本无法启动（提示找不到 VCRUNTIME140.dll 之类）。' + #13#10;
+  Prompt := '这台电脑缺少输入法用到的系统组件，或版本过旧：' + #13#10 + #13#10 +
+    '● Visual C++ 2015-2022 可再发行组件包（x64），需要 14.' +
+    IntToStr(VCRuntimeMinMinor) + ' 或更高版本' + #13#10;
+  if VCRuntimeVersion <> '' then
     Prompt := Prompt +
-      '   直接下载：' + VCRuntimeDirectUrl + #13#10 +
-      '   说明页面：' + VCRuntimeDownloadUrl + #13#10;
-  end;
-  if NeedsWebView2 then
-    Prompt := Prompt + #13#10 +
-      '● Microsoft Edge WebView2 Runtime' + #13#10 +
-      '   缺少它设置页面打不开。默认的 D2D 候选窗不依赖它，打字不受影响；' + #13#10 +
-      '   选了 WebView2 渲染的候选窗会临时改用 D2D，装好后自动恢复。' + #13#10 +
-      '   直接下载：' + WebView2DirectUrl + #13#10 +
-      '   说明页面：' + WebView2DownloadUrl + #13#10;
-  Prompt := Prompt + #13#10 +
-    '点击「是」直接下载上述组件并结束本次安装，装好后重新运行本安装程序；' + #13#10 +
-    '点击「否」继续安装（装完仍需自行补齐上述组件，对应功能才能正常使用）。';
+      '   当前已安装 ' + VCRuntimeVersion + '，版本过旧，设置页等程序会启动即闪退。' + #13#10
+  else
+    Prompt := Prompt +
+      '   缺少它输入法主程序根本无法启动（提示找不到 VCRUNTIME140.dll 之类）。' + #13#10;
+  Prompt := Prompt +
+    '   直接下载：' + VCRuntimeDirectUrl + #13#10 +
+    '   说明页面：' + VCRuntimeDownloadUrl + #13#10 + #13#10 +
+    '点击「是」直接下载该组件并结束本次安装，装好后重新运行本安装程序；' + #13#10 +
+    '点击「否」继续安装（装完仍需自行补齐该组件，输入法才能正常使用）。';
 
   { 静默安装（CI、企业批量部署）不该被一个对话框卡住：默认继续，缺什么已经写进日志了。}
   if
     SuppressibleMsgBox(Prompt, mbConfirmation, MB_YESNO, IDNO) = IDYES
   then
   begin
-    if NeedsVCRuntime then
-      OpenDownloadPage(VCRuntimeDirectUrl);
-    if NeedsWebView2 then
-      OpenDownloadPage(WebView2DirectUrl);
+    OpenDownloadPage(VCRuntimeDirectUrl);
     Result := False;
   end;
 end;
@@ -642,7 +588,7 @@ end;
   升级时跳过：那时 config.toml 已经属于用户，安装器不该替他重新决定。}
 procedure InitializeWizard;
 begin
-  { 词库、用户配置、皮肤和前端资源都在这个目录下，整包有几百 MB，
+  { 词库、用户配置、皮肤和界面资源都在这个目录下，整包有几百 MB，
     所以要让用户能把它放到别的盘。程序本体仍然装在 Program Files：
     Server 带 uiAccess=true，只有装在受信任目录里这个标志才生效。}
   DataDirPage := CreateInputDirPage(
@@ -892,7 +838,7 @@ begin
     (CompareText(FileName, 'config.default.toml') = 0) or
     (CompareText(FileName, 'helpcodes') = 0) or
     (CompareText(FileName, 'radical') = 0) or
-    (CompareText(FileName, 'html') = 0);
+    (CompareText(FileName, 'assets') = 0);
 end;
 
 { Server、引擎和安装器自己运行时在数据目录根下写出来的条目（不含 IsPreservedAppDataItem 已列的）。}
@@ -919,14 +865,18 @@ begin
     (CompareText(FileName, 'logs') = 0);
 end;
 
-{ 数据目录不整个归我们时，只有这些名字允许删（#537）。html、logs 这种通用目录名
+{ 数据目录不整个归我们时，只有这些名字允许删（#537）。assets、html、logs 这种通用目录名
   由 DeleteKnownAppDataDir 只删输入法自己写进去的部分。log\、webview2\ 等只会出现在
   历史默认位置，那里整个目录归我们，不必列。}
 { 旧版随包装进数据目录根下、现已不再分发的条目。留在名单里，覆盖安装与卸载才会继续清掉它们。
-  神经整句效果档模型改为设置页按需下载到 models\neural-desktop\（归 IsCollocationModelDirectory 保留）。}
+  神经整句效果档模型改为设置页按需下载到 models\neural-desktop\（归 IsCollocationModelDirectory 保留）。
+  html\webview2\ 是旧版 WebView2 界面的页面，界面改由 Direct2D 绘制后不再分发；设置窗口
+  用到的图片改装在 assets\settings\。}
 function IsRetiredAppDataItem(const FileName: String): Boolean;
 begin
-  Result := CompareText(FileName, 'sentence-model-desktop.safetensors') = 0;
+  Result :=
+    (CompareText(FileName, 'sentence-model-desktop.safetensors') = 0) or
+    (CompareText(FileName, 'html') = 0);
 end;
 
 function IsKnownAppDataItem(const FileName: String): Boolean;
@@ -994,7 +944,7 @@ var
   SettingsWindow: HWND;
   WaitedMs: Integer;
 begin
-  // 设置窗口关闭后只是隐藏，进程还要驻留十分钟保住已导航完的 WebView2。
+  // 设置窗口关闭后可能只是隐藏，进程按 appearance.settings_window_linger 继续驻留。
   // 覆盖安装要删掉整个 server 目录，所以这里必须把它请走：先投 kQuitSettings
   // 让它自己收尾（Server 已被强杀，没人替我们发这条消息了），再强杀兜底。
   SettingsWindow := FindWindowByClassName('{#MySettingsWindowClass}');
@@ -1072,34 +1022,6 @@ begin
   );
 end;
 
-procedure EnsureSharedWebView2DataDir;
-var
-  RootPath: String;
-  ResultCode: Integer;
-begin
-  { Edge 子进程需要 Users 可写、中完整性的目录。安装器本身是高完整性，
-    只 CreateDir 会带上高完整性标签，所以还要降完整性。 }
-  RootPath := ExpandConstant('{commonappdata}\metasequoiaime');
-  ForceDirectories(RootPath + '\webview2');
-  ForceDirectories(RootPath + '\webview2-settings');
-  Exec(
-    ExpandConstant('{sys}\icacls.exe'),
-    '"' + RootPath + '" /grant *S-1-5-32-545:(OI)(CI)M /T /C /Q',
-    '',
-    SW_HIDE,
-    ewWaitUntilTerminated,
-    ResultCode
-  );
-  Exec(
-    ExpandConstant('{sys}\icacls.exe'),
-    '"' + RootPath + '" /setintegritylevel (OI)(CI)M /T /C /Q',
-    '',
-    SW_HIDE,
-    ewWaitUntilTerminated,
-    ResultCode
-  );
-end;
-
 procedure CreateWatchdogLogonTask;
 var
   WatchdogPath: String;
@@ -1137,7 +1059,7 @@ begin
 end;
 
 { 不独占的数据目录里删一个名单上的子目录。名字通用的几个只删我们写进去的内容，
-  目录空了才删掉它：用户自己恰好也有一个 html、logs 或 skins 文件夹时不能跟着没了。
+  目录空了才删掉它：用户自己恰好也有一个 assets、html、logs 或 skins 文件夹时不能跟着没了。
   skins 里分不清哪些是外部皮肤、哪些是别人的东西，宁可留下。}
 procedure DeleteKnownAppDataDir(const ItemPath, FileName: String);
 begin
@@ -1145,7 +1067,10 @@ begin
   begin
     { 只删空目录。}
   end
+  else if CompareText(FileName, 'assets') = 0 then
+    TryDeleteTree(AddBackslash(ItemPath) + 'settings')
   else if CompareText(FileName, 'html') = 0 then
+    { 旧版的 WebView2 页面，见 IsRetiredAppDataItem。}
     TryDeleteTree(AddBackslash(ItemPath) + 'webview2')
   else if CompareText(FileName, 'logs') = 0 then
   begin
@@ -1203,6 +1128,33 @@ begin
   { 只删得掉空目录；用户的文件还在，目录就留着。}
   RemoveDir(Directory);
 end;
+
+{ 旧版 WebView2 的用户数据（浏览器缓存、Cookie 等）。界面改由 Direct2D 绘制后不再有人
+  读写它们，覆盖安装和卸载都清掉。正常情况下在 ProgramData 下；那里不可写时旧版 Server
+  退到历史默认数据目录下的同名子目录，那个目录整个归我们，按名字删是安全的。}
+procedure RemoveLegacyWebView2UserData;
+begin
+  TryDeleteTree(ExpandConstant('{commonappdata}\metasequoiaime\webview2'));
+  TryDeleteTree(ExpandConstant('{commonappdata}\metasequoiaime\webview2-settings'));
+  RemoveDir(ExpandConstant('{commonappdata}\metasequoiaime'));
+  TryDeleteTree(ExpandConstant('{localappdata}\metasequoiaime\webview2'));
+  TryDeleteTree(ExpandConstant('{localappdata}\metasequoiaime\webview2-settings'));
+end;
+
+#ifdef LightPackage
+{ 轻量包只替换数据目录里的个别子目录。整个目录归我们时整个删；只有旧版标记时（#537）
+  按 DeleteKnownAppDataDir 的规则只删输入法自己写进去的部分。}
+procedure CleanLightPackageItem(const FileName: String);
+var
+  AppDataPath: String;
+begin
+  AppDataPath := GetDataDir('');
+  if OwnsDataDirExclusively(AppDataPath) then
+    TryDeleteTree(AddBackslash(AppDataPath) + FileName)
+  else if DataDirHasMarker(AppDataPath) then
+    DeleteKnownAppDataDir(AddBackslash(AppDataPath) + FileName, FileName);
+end;
+#endif
 
 { helpcodes 里的内置表由本次安装重写，custom 子目录是用户自己放的辅助码，升级不得清掉。}
 procedure CleanHelpcodesExceptCustom(const HelpcodesPath: String);
@@ -1394,7 +1346,7 @@ begin
 end;
 
 { 用户改了数据目录：把上一处的用户数据搬过来。只搬真正属于用户、装不回来的东西——
-  词库主体、前端资源和辅助码都会由本次安装重新写入新目录。
+  词库主体、界面资源和辅助码都会由本次安装重新写入新目录。
   用 robocopy 而不是 RenameFile：跨盘移动目录时 MoveFile 会直接失败。}
 function MigrateUserDataDir(const OldDir, NewDir: String): String;
 var
@@ -1494,7 +1446,7 @@ begin
     exit;
   end;
 
-  { 旧目录里剩下的是可重建的资源（词库、html、cache 等）。}
+  { 旧目录里剩下的是可重建的资源（词库、界面资源、cache 等）。}
   RemoveDataDir(OldDir);
 end;
 
@@ -1658,8 +1610,10 @@ begin
   { 轻量包不清根目录，但新 Server 同样只认 models\neural-desktop\，所以两种包都要挪。}
   AdoptRetiredDesktopModel('0a6ecba69bf1d39c7eb49549c716477dd6c03fdf05757773e1f50435262fb469');
 #ifdef LightPackage
-  { 轻量包不替换词库：只清 HTML 和 Server/TSF，保留本机 msime.db 等。}
-  TryDeleteTree(AddBackslash(GetDataDir('')) + 'html');
+  { 轻量包不替换词库：只清设置窗口图片资源和 Server/TSF，保留本机 msime.db 等。
+    旧版留下的 html（WebView2 页面）也一并清掉。}
+  CleanLightPackageItem('assets');
+  CleanLightPackageItem('html');
 #else
   { 不能让旧 WAL/SHM 与即将复制的新主数据库混用。}
   if not RemoveOldTargetDatabaseFiles(FailedPath) then
@@ -1669,13 +1623,10 @@ begin
       '它可能仍被输入法相关进程占用。请关闭相关程序后重试安装。';
     exit;
   end;
-  { 目标词库已安全移除，再清理旧前端资源与 WebView2 用户数据。
-    用户配置和外部皮肤目录在这里保留；webview2 目录故意重建，
-    由 Server 冷启动路径保证 FTB/候选窗仍能稳定揭罩。}
+  { 目标词库已安全移除，再清理旧的随包资源。用户配置和外部皮肤目录在这里保留。}
   CleanAppDataExceptUserFiles;
 #endif
-  TryDeleteTree(ExpandConstant('{commonappdata}\metasequoiaime\webview2'));
-  TryDeleteTree(ExpandConstant('{commonappdata}\metasequoiaime\webview2-settings'));
+  RemoveLegacyWebView2UserData;
   TryDeleteTree(ExpandConstant(
     '{commonpf64}\metasequoiaime\server'));
   TryDeleteOldVersionDirs(TsfRoot32);
@@ -1703,7 +1654,6 @@ begin
 #endif
     CreateWatchdogLogonTask;
     EnsureImeUserDataDir;
-    EnsureSharedWebView2DataDir;
     { Keep the old autostart intact until its scheduled-task replacement has
       been created successfully, then remove the Explorer-delayed Run entry. }
     RegDeleteValue(
@@ -1759,6 +1709,10 @@ begin
     TryDeleteTree(ExpandConstant('{commonpf64}\metasequoiaime'));
     { 数据目录可能被用户指到了别的盘，甚至指到一个本来就有文件的文件夹（#537）。}
     RemoveDataDir(ResolvePreviousDataDir);
+    { 旧版 WebView2 的用户数据，见 RemoveLegacyWebView2UserData。}
+    RemoveLegacyWebView2UserData;
+    { 数据目录在别处时，历史默认位置里可能只剩上面删掉的那两样；还有别的东西就删不掉，原样留着。}
+    RemoveDir(ExpandConstant('{localappdata}\metasequoiaime'));
     TryDeleteTree(ExpandConstant('{commonappdata}\metasequoiaime'));
   end;
 end;

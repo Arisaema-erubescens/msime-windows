@@ -114,26 +114,6 @@ std::wstring QueryKnownFolder(REFKNOWNFOLDERID folder_id)
     return result;
 }
 
-bool DirectoryIsWritable(const std::wstring &path)
-{
-    std::error_code ec;
-    std::filesystem::create_directories(path, ec);
-    if (ec)
-    {
-        return false;
-    }
-    const std::filesystem::path probe = std::filesystem::path(path) / L".ime-write-probe";
-    {
-        std::ofstream out(probe, std::ios::binary | std::ios::trunc);
-        if (!out)
-        {
-            return false;
-        }
-    }
-    std::filesystem::remove(probe, ec);
-    return true;
-}
-
 void ClearReadOnlyAttribute(const std::wstring &path)
 {
     const DWORD attributes = GetFileAttributesW(path.c_str());
@@ -149,8 +129,8 @@ bool GrantsFullAccess(ACCESS_MASK mask)
     return (mask & GENERIC_ALL) != 0 || (mask & FILE_ALL_ACCESS) == FILE_ALL_ACCESS;
 }
 
-// SetNamedSecurityInfoW 写入可继承 ACE 时会把它传播到整棵子树，WebView2 用户数据目录下有成百上千个
-// 文件，每次启动都重写一遍要花上百毫秒。已经授过权（安装器或上次启动）就不再写。
+// SetNamedSecurityInfoW 写入可继承 ACE 时会把它传播到整棵子树，目录下文件一多，每次启动都重写一遍
+// 就要花上百毫秒。已经授过权（安装器或上次启动）就不再写。
 bool HasUsersFullAccessAce(PACL dacl, PSID users_sid)
 {
     ACL_SIZE_INFORMATION info{};
@@ -359,33 +339,5 @@ void ensure_ime_data_writable()
     {
         EnsureMediumIntegrityWritableExistingPath((std::filesystem::path(dir) / name).wstring());
     }
-}
-
-std::wstring get_webview2_user_data_path(const std::wstring &folder_name)
-{
-    std::wstring program_data = QueryKnownFolder(FOLDERID_ProgramData);
-    if (!IsUsableAbsolutePath(program_data))
-    {
-        program_data = QueryEnvironmentW(L"ProgramData");
-    }
-    if (!IsUsableAbsolutePath(program_data))
-    {
-        program_data = L"C:\\ProgramData";
-    }
-    const std::wstring root = program_data + L"\\" + kAppName;
-    const std::wstring path = root + L"\\" + folder_name;
-    EnsureMediumIntegrityWritableDirectory(root);
-    EnsureMediumIntegrityWritableDirectory(path);
-    if (DirectoryIsWritable(path))
-    {
-        return path;
-    }
-
-    const std::wstring local = get_local_appdata_path_w();
-    if (!IsUsableAbsolutePath(local))
-    {
-        return path;
-    }
-    return local + L"\\" + kAppName + L"\\" + folder_name;
 }
 } // namespace CommonUtils

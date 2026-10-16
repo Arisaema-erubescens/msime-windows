@@ -12,8 +12,8 @@
 
 [CmdletBinding()]
 param(
-    # 轻量包：跳过词库、辅助码、拼音表和出厂配置，只刷新 TSF、Server、HTML。
-    # 适用：只改了 TSF、Server 或 HTML，本机已有完整安装（词库已在
+    # 轻量包：跳过词库、辅助码、拼音表和出厂配置，只刷新 TSF、Server 和设置窗口图片资源。
+    # 适用：只改了 TSF 或 Server，本机已有完整安装（词库已在
     # %LOCALAPPDATA%\metasequoiaime）。不要用轻量包做首次安装。
     [switch]$Light,
     # 把 PDB 打进安装包。PDB 有 ~140 MB，而真正的二进制只有 ~20 MB，Inno Setup 还要对它们做
@@ -34,12 +34,11 @@ try {
     $repoRoot = Split-Path -Parent $PSScriptRoot
     $tsfCompile = Join-Path $repoRoot 'windows\scripts\lcompile-release-both.ps1'
     $serverCompile = Join-Path $repoRoot 'server\scripts\lcompile-release.ps1'
-    $settingsDir = Join-Path $repoRoot 'ui-html\webview2\settings\ime-settings'
 
-    # All three are directories of this repository now, so a missing one is a broken checkout rather
+    # Both are directories of this repository now, so a missing one is a broken checkout rather
     # than a neighbour nobody cloned. Skipping the build and packaging whatever binaries happen to be
     # lying around would produce an installer you then run on your own machine.
-    foreach ($required in @($tsfCompile, $serverCompile, (Join-Path $settingsDir 'package.json'))) {
+    foreach ($required in @($tsfCompile, $serverCompile)) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
             throw "缺少组件构建入口：$required"
         }
@@ -51,16 +50,6 @@ try {
     Push-Location (Join-Path $repoRoot 'server')
     try { & $serverCompile -Reconfigure:$Reconfigure } finally { Pop-Location }
 
-    Push-Location $settingsDir
-    try {
-        # 首次运行或 node_modules 缺失时需要安装依赖
-        if (-not (Test-Path -LiteralPath 'node_modules' -PathType Container)) {
-            pnpm install
-            if ($LASTEXITCODE -ne 0) { throw "Settings page dependencies installation failed ($LASTEXITCODE)" }
-        }
-        pnpm run build
-        if ($LASTEXITCODE -ne 0) { throw "Settings page build failed ($LASTEXITCODE)" }
-    } finally { Pop-Location }
 
     # 轻量包不带任何数据文件，所以只有完整包需要语言模型。脚本是幂等的：摘要对得上时
     # 直接返回，不重下也不重转，因此这里无条件调用不会让日常 test.ps1 变慢。首次运行
@@ -79,7 +68,7 @@ try {
     }
 
     & (Join-Path $PSScriptRoot 'Prepare-PackageFiles.ps1') -Light:$Light -IncludeSymbols:$IncludeSymbols `
-        -RepoRoot $repoRoot -TsfDirectory windows -ServerDirectory server -UiHtmlDirectory ui-html -NoticesDirectory .
+        -RepoRoot $repoRoot -TsfDirectory windows -ServerDirectory server -NoticesDirectory .
     & (Join-Path $PSScriptRoot 'Sign-PackageBinaries-Local.ps1')
     & (Join-Path $PSScriptRoot 'Compile-Installer.ps1') -Light:$Light
     & (Join-Path $PSScriptRoot 'Sign-Installer-Local.ps1') -Light:$Light

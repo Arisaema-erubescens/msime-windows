@@ -486,7 +486,7 @@ bool ImportModel(const std::string &model_id, const std::filesystem::path &sourc
 
 std::filesystem::path PromptForModelFile(HWND owner)
 {
-    // 设置窗口的 UI 线程早已为 WebView2 初始化过 STA，这里的 CoInitializeEx 只是配平引用计数。
+    // 设置窗口的 UI 线程启动时已初始化过 STA，这里的 CoInitializeEx 只是配平引用计数。
     const HRESULT init = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     std::filesystem::path selected;
     IFileOpenDialog *dialog = nullptr;

@@ -537,7 +537,7 @@ std::unique_ptr<Scene> CreateDemoScene()
     candidateStack->AddChild(
         std::make_shared<TextBlock>(L"Candidate Window Target", 20.0f, D2D1::ColorF(0x1F2937), true));
     candidateStack->AddChild(
-        std::make_shared<TextBlock>(L"This is the first candidate-window-oriented preview for replacing the WebView2 "
+        std::make_shared<TextBlock>(L"This is the first candidate-window-oriented preview for replacing the web-based "
                                     L"IME candidate popup with native retained-mode rendering.",
                                     14.0f, D2D1::ColorF(0x6B7280)));
     candidateStack->AddChild(candidateStatus);

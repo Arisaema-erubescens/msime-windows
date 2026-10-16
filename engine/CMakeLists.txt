@@ -161,8 +161,8 @@ if(MSVC)
     # what the TCHAR-flavoured entry points resolve to, so a consumer that disagrees with the engine
     # would be compiling against a different API surface. WIN32_LEAN_AND_MEAN is only an
     # include-time trim of Windows.h, and forcing it on consumers breaks any of them that go on to
-    # include a header needing the fuller surface - WebView2.h, for one, relies on the `interface`
-    # macro that combaseapi.h provides.
+    # include a header needing the fuller surface - COM-based SDK headers, for instance, rely on the
+    # `interface` macro that combaseapi.h provides.
     target_compile_definitions(MetasequoiaImeEngine PUBLIC NOMINMAX UNICODE _UNICODE)
     target_compile_definitions(MetasequoiaImeEngine PRIVATE WIN32_LEAN_AND_MEAN)
     target_compile_options(MetasequoiaImeEngine PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)

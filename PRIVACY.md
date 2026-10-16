@@ -18,7 +18,7 @@ Every claim below is checkable against this repository. Where a default matters,
 
 ## No telemetry
 
-There is no analytics, telemetry, crash reporting, or usage measurement that leaves this machine. The input method does not record, store or transmit what you type: the only records it can keep are the optional local counters described below, and those cover character classes, activity time and candidate-choice counts, never text. No third-party SDK for those purposes is linked, and there is no endpoint that receives usage data. This is verifiable: searching the `server/`, `windows/`, `ui/`, `ui-html/` and `installer/` trees for `telemetry`, `analytics`, `sentry`, `matomo`, `posthog`, `amplitude`, `mixpanel`, `crashpad` and `breakpad` returns nothing.
+There is no analytics, telemetry, crash reporting, or usage measurement that leaves this machine. The input method does not record, store or transmit what you type: the only records it can keep are the optional local counters described below, and those cover character classes, activity time and candidate-choice counts, never text. No third-party SDK for those purposes is linked, and there is no endpoint that receives usage data. This is verifiable: searching the `server/`, `windows/`, `ui/` and `installer/` trees for `telemetry`, `analytics`, `sentry`, `matomo`, `posthog`, `amplitude`, `mixpanel`, `crashpad` and `breakpad` returns nothing.
 
 ## Local input statistics (built-in, off by default)
 

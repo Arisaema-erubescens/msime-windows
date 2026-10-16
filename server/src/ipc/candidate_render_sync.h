@@ -14,7 +14,7 @@ namespace FanyImeIpc
 // condition variable timeout (rounded up to one timer tick, ~16ms) is the only slack on top of
 // this bound; together with candidate resolution it must stay well inside that budget. The
 // frequency write runs after the reply and no longer competes for it. On a slow machine (battery,
-// WebView2 paint) a paint regularly takes longer than 30ms, and settling against the unpainted
+// busy GPU) a paint regularly takes longer than 30ms, and settling against the unpainted
 // page is exactly the "committed something I did not see" bug, so the bound leaves room for a slow
 // paint. On timeout the caller continues with the current data and the diagnostic log records the
 // miss. Do not raise this without re-deriving the TSF budget.
@@ -37,10 +37,9 @@ constexpr bool ShouldWaitForCandidateRender(std::uint64_t rendered, std::uint64_
     return rendered < current;
 }
 
-// The render echo only moves forward. WebView2 echoes from async DOM callbacks, so a content-only
-// update's callback can land after a dedup of the same content already echoed the newer generation;
-// storing the older one left rendered one behind published and every selection waited out the full
-// bound.
+// The render echo only moves forward. An echo for an older page can arrive after a dedup of the
+// same content already echoed the newer generation; storing the older one would leave rendered one
+// behind published, and every selection would wait out the full bound.
 constexpr std::uint64_t AdvanceRenderedCandidateGeneration(std::uint64_t rendered, std::uint64_t echoed) noexcept
 {
     return echoed > rendered ? echoed : rendered;

@@ -217,7 +217,7 @@ struct VoicePage : std::enable_shared_from_this<VoicePage>
 
     void Write(const std::string &path, Json value)
     {
-        // The page applies host snapshots only, as the WebView2 page does; its own writes
+        // The page applies host snapshots only; its own writes
         // do not loop back through Sync.
         ++localWrites;
         context.model.Update(path, std::move(value));

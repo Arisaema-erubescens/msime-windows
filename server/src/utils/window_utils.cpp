@@ -2,7 +2,7 @@
 #include "config/ime_config.h"
 #include "defines/globals.h"
 #include "ipc/ipc.h"
-#include "webview_utils.h"
+#include "global/globals.h"
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -274,8 +274,8 @@ POINT PlaceResizedHost(HWND hwnd, int width, int height, const RECT *suggestedRe
 FLOAT GetWindowScale(HWND hwnd)
 {
     // GetDpiForWindow returns 0 for an invalid HWND. A 0 scale silently collapses
-    // every host window to 0x0, which breaks WebView2 bring-up and hides the
-    // floating toolbar, so fall back to the system DPI instead.
+    // every host window to 0x0, which hides the floating toolbar, so fall back
+    // to the system DPI instead.
     UINT dpi = hwnd ? GetDpiForWindow(hwnd) : 0;
     if (dpi == 0)
     {
@@ -502,8 +502,6 @@ int AdjustCandidateWindowPosition(                  //
     double minWidthDip                              //
 )
 {
-    Global::MarginTop = 0;
-
     const bool isVertical = GetConfiguredCandidateWindowLayout() == "vertical";
     if (isVertical && containerSize.second > g_max_vertical_container_height_dip)
     {

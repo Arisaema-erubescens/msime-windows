@@ -1,5 +1,5 @@
 // 悬浮工具栏宿主：按配置计算尺寸、拖动后收回可见屏幕、随 DPI 重新布局与放置、
-// 显隐决策与首帧绘制宽限，以及 WndProcFtbWindow。
+// 显隐决策与自动隐藏，以及 WndProcFtbWindow。
 #include "window/ime_windows_internal.h"
 #include "global/globals.h"
 #include "config/ime_config.h"
@@ -12,8 +12,6 @@
 #include <cmath>
 #include <string>
 #include <fmt/xchar.h>
-#include "webview2/windows_webview2.h"
-#include "utils/webview_utils.h"
 #include "utils/window_utils.h"
 #include "window/floating_toolbar_visibility_policy.h"
 #include "log/ftb_diag_log.h"
@@ -63,25 +61,7 @@ RECT FloatingToolbarShadowInsetsPx(int hostWidthPx, int hostHeightPx, FLOAT scal
     {
         return FloatingToolbarPresenter::Instance().ShadowInsetsPx(hostWidthPx, hostHeightPx, scale);
     }
-    if (scale <= 0.0f)
-    {
-        return {};
-    }
-    // The page pins .status-bar (border included) to the top-left, so the margin
-    // is right/bottom only: the host minus the bar, shadow and the 1-DIP
-    // rounding pad included.
-    double barWidthDip = ::FTB_CONTENT_WIDTH_DIP;
-    double barHeightDip = ::FTB_CONTENT_HEIGHT_DIP;
-    if (barWidthDip <= 1.0 || barHeightDip <= 1.0)
-    {
-        const int shadowWidth = GetConfiguredFloatingToolbarShadow() ? ::FTB_WND_SHADOW_WIDTH : 0;
-        barWidthDip = static_cast<double>(hostWidthPx) / scale - shadowWidth;
-        barHeightDip = static_cast<double>(hostHeightPx) / scale - shadowWidth;
-    }
-    const auto inset = [scale](int hostPx, double barDip) {
-        return (std::max)(0L, static_cast<LONG>(hostPx - std::ceil(barDip * static_cast<double>(scale))));
-    };
-    return {0, 0, inset(hostWidthPx, barWidthDip), inset(hostHeightPx, barHeightDip)};
+    return {};
 }
 
 void KeepFloatingToolbarInsideVisibleScreens(HWND hwnd)
@@ -108,7 +88,6 @@ void KeepFloatingToolbarInsideVisibleScreens(HWND hwnd)
 
     SetWindowPos(hwnd, nullptr, rect.left, rect.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     ClipWindowToVisibleScreens(hwnd, ScreenArea::WorkArea);
-    SyncHostWebViewBounds(::webviewControllerFtbWnd.Get(), hwnd);
 
     MONITORINFO info{sizeof(info)};
     GetMonitorInfo(monitor, &info);
@@ -118,7 +97,7 @@ void KeepFloatingToolbarInsideVisibleScreens(HWND hwnd)
 
 // Recompute FTB outer HWND from design DIPs * current DPI. Placement used to be
 // SWP_NOSIZE-only, so a live display-scale change left the host stuck at the
-// create-time physical size while WebView content grew.
+// create-time physical size while the content grew.
 //
 // reset_to_default_corner=true snaps to the primary-monitor bottom-right slot
 // (startup / first layout). false keeps the current top-left so IME activate,
@@ -137,31 +116,23 @@ void LayoutFloatingToolbar(HWND hwnd, bool reset_to_default_corner, FLOAT scaleO
     {
         return;
     }
-    const bool d2d = FloatingToolbarPresenter::Instance().IsBound();
     if (::FTB_CONTENT_WIDTH_DIP > 1.0 && ::FTB_CONTENT_HEIGHT_DIP > 1.0)
     {
-        // ceil + 1 DIP pad: fractional CSS sizes rounded down in physical px make
-        // the WebView viewport slightly smaller than .status-bar and Chromium
-        // adds both scrollbars (seen after live DPI changes).
-        const int pad = d2d ? 0 : 1;
-        ::FTB_WND_WIDTH = static_cast<int>(std::ceil(::FTB_CONTENT_WIDTH_DIP)) + pad;
-        ::FTB_WND_HEIGHT = static_cast<int>(std::ceil(::FTB_CONTENT_HEIGHT_DIP)) + pad;
+        ::FTB_WND_WIDTH = static_cast<int>(std::ceil(::FTB_CONTENT_WIDTH_DIP));
+        ::FTB_WND_HEIGHT = static_cast<int>(std::ceil(::FTB_CONTENT_HEIGHT_DIP));
     }
     else
     {
         ::FTB_WND_WIDTH = ConfiguredFloatingToolbarWidth();
         ::FTB_WND_HEIGHT = ConfiguredFloatingToolbarHeight();
     }
-    const FLOAT nativeScale = GetWindowScale(hwnd);
-    const FLOAT rasterScale = d2d ? nativeScale : GetWebViewRasterizationScale(hwnd);
-    const FLOAT textScale = !d2d && nativeScale > 0.0f ? rasterScale / nativeScale : 1.0f;
-    FLOAT scale = scaleOverride > 0.0f ? scaleOverride * textScale : rasterScale;
+    FLOAT scale = scaleOverride > 0.0f ? scaleOverride : GetWindowScale(hwnd);
     if (scale <= 0.0f)
     {
         scale = 1.0f;
     }
-    // Main-path half-screen cap so HTML wrap/scroll and HWND agree before show.
-    HalfScreenDipLimits limits = QueryWebViewHalfScreenDipLimitsForHwnd(hwnd);
+    // Half-screen cap so content layout and HWND agree before show.
+    HalfScreenDipLimits limits = QueryHalfScreenDipLimitsForHwnd(hwnd);
     if (scaleOverride > 0.0f)
     {
         if (suggestedRect)
@@ -179,11 +150,9 @@ void LayoutFloatingToolbar(HWND hwnd, bool reset_to_default_corner, FLOAT scaleO
         static_cast<int>(std::ceil(ClampWidthDipToHalfScreen(static_cast<double>(::FTB_WND_WIDTH), limits)));
     ::FTB_WND_HEIGHT =
         static_cast<int>(std::ceil(ClampHeightDipToHalfScreen(static_cast<double>(::FTB_WND_HEIGHT), limits)));
-    // D2D measures its shadow margin into the scene. With the shadow off the
-    // WebView2 host drops its margin too, so the bar can sit flush with an edge.
-    const int shadowWidth = d2d || !GetConfiguredFloatingToolbarShadow() ? 0 : ::FTB_WND_SHADOW_WIDTH;
-    const int width = static_cast<int>(std::ceil((::FTB_WND_WIDTH + shadowWidth) * static_cast<double>(scale)));
-    const int height = static_cast<int>(std::ceil((::FTB_WND_HEIGHT + shadowWidth) * static_cast<double>(scale)));
+    // The presenter measures its shadow margin into the scene.
+    const int width = static_cast<int>(std::ceil(::FTB_WND_WIDTH * static_cast<double>(scale)));
+    const int height = static_cast<int>(std::ceil(::FTB_WND_HEIGHT * static_cast<double>(scale)));
     const int cornerInset = static_cast<int>(std::lround(10.0 * static_cast<double>(scale)));
     const RECT shadowInsets = FloatingToolbarShadowInsetsPx(width, height, scale);
     int posX = 0;
@@ -215,12 +184,7 @@ void LayoutFloatingToolbar(HWND hwnd, bool reset_to_default_corner, FLOAT scaleO
     ::FTB_HOST_INSETS_PX = shadowInsets;
     ::FTB_HOST_INSETS_VALID = true;
     ClipWindowToVisibleScreens(hwnd, ScreenArea::WorkArea);
-    if (!d2d)
-    {
-        SyncHostWebViewBounds(::webviewControllerFtbWnd.Get(), hwnd);
-        InjectSurfaceViewportLimits(::webviewFtbWnd.Get(), hwnd);
-    }
-    else
+    if (FloatingToolbarPresenter::Instance().IsBound())
     {
         FloatingToolbarPresenter::Instance().Present();
     }
@@ -259,9 +223,9 @@ ULONGLONG FloatingToolbarAutoHideDelayMs()
 
 void SetFloatingToolbarAlpha(BYTE alpha)
 {
-    // Both backends share the layered host from PrepareLayeredHostWindow. A
-    // lost alpha is what the host-state trace calls an invisible toolbar, so
-    // every path that ends a fade puts 255 back.
+    // The host is layered (PrepareLayeredHostWindow). A lost alpha is what the
+    // host-state trace calls an invisible toolbar, so every path that ends a
+    // fade puts 255 back.
     SetLayeredWindowAttributes(::global_hwnd_ftb, 0, alpha, LWA_ALPHA);
 }
 
@@ -279,7 +243,7 @@ void RestoreFloatingToolbarAlpha()
 
 // GetCursorPos and GetWindowRect are both physical pixels under per-monitor-v2,
 // so this needs no DPI conversion. Sampling the rect instead of tracking mouse
-// messages covers the WebView2 child and the D2D caption drag area alike.
+// messages also covers the caption drag area.
 bool IsCursorOverFloatingToolbar()
 {
     POINT cursor{};
@@ -334,9 +298,9 @@ void PollFloatingToolbarAutoHide()
         return;
     }
     const ULONGLONG now = GetTickCount64();
-    // Hover is interaction. Warmup and paint grace would make the hide a
-    // cloak or a no-op, so the countdown only runs on a settled toolbar.
-    if (IsCursorOverFloatingToolbar() || IsFloatingToolbarPaintGraceActive() || !IsFloatingToolbarWebviewReady() ||
+    // Hover is interaction. A toolbar that is still cloaked would make the
+    // hide a no-op, so the countdown only runs on a settled toolbar.
+    if (IsCursorOverFloatingToolbar() || !FloatingToolbarPresenter::Instance().IsBound() ||
         IsHostWindowCloaked(::global_hwnd_ftb))
     {
         CancelFloatingToolbarAutoHideFade();
@@ -392,7 +356,7 @@ void StepFloatingToolbarAutoHideFade()
     HideFloatingToolbarHost();
     if (IsWindowVisible(::global_hwnd_ftb) && !IsHostWindowCloaked(::global_hwnd_ftb))
     {
-        // The hide was deferred (paint grace), so the host is still on screen.
+        // The hide did not take, so the host is still on screen.
         RestoreFloatingToolbarAlpha();
     }
 }
@@ -457,27 +421,23 @@ void ApplyConfiguredFloatingToolbarVisibility(const wchar_t *reason)
     const bool should_show =
         FanyImeUi::ShouldShowFloatingToolbar(configured, fullscreen, g_is_ime_active, g_ftb_auto_hidden);
     const bool is_visible = IsWindowVisible(::global_hwnd_ftb) != FALSE;
-    const bool paint_grace = IsFloatingToolbarPaintGraceActive();
-    // First successful navigation: show briefly so cold WebView2 can paint, then
-    // reconcile. Do not jump straight to SW_HIDE when IME is not active yet.
-    const bool start_paint_grace =
-        reason && wcscmp(reason, L"ftb-navigation-completed") == 0 && IsFloatingToolbarWebviewReady();
+    const bool presenter_ready = FloatingToolbarPresenter::Instance().IsBound();
 
     // Each host-state snapshot crosses into DWM and walks the child windows, and
     // a burst of queued activations can drive hundreds of applies through here on
     // the UI thread. Collapsing identical consecutive records keeps the trace
-    // complete without letting the diagnostics starve WebView2 initialisation.
+    // complete without letting the diagnostics starve the UI thread.
     bool trace = false;
     if (::DiagnosticLog::IsEnabled())
     {
         // Every input of the decision, so a blank toolbar can be attributed to a
-        // specific term rather than guessed at. Cloak and webview readiness
-        // matter more than IsWindowVisible once the host is warmed up.
-        std::wstring decision = fmt::format(
-            L"apply reason={} active_client={} ime_active={} configured={} fullscreen={} "
-            L"auto_hidden={} should_show={} was_visible={} was_cloaked={} webview_ready={} paint_grace={}",
-            reason, active_client, g_is_ime_active, configured, fullscreen, g_ftb_auto_hidden, should_show, is_visible,
-            IsHostWindowCloaked(::global_hwnd_ftb), IsFloatingToolbarWebviewReady(), paint_grace);
+        // specific term rather than guessed at. Cloak and presenter readiness
+        // matter more than IsWindowVisible once the host exists.
+        std::wstring decision =
+            fmt::format(L"apply reason={} active_client={} ime_active={} configured={} fullscreen={} "
+                        L"auto_hidden={} should_show={} was_visible={} was_cloaked={} presenter_ready={}",
+                        reason, active_client, g_is_ime_active, configured, fullscreen, g_ftb_auto_hidden, should_show,
+                        is_visible, IsHostWindowCloaked(::global_hwnd_ftb), presenter_ready);
 
         // Applies are confined to the UI thread, so plain statics suffice.
         static std::wstring last_decision;
@@ -497,7 +457,7 @@ void ApplyConfiguredFloatingToolbarVisibility(const wchar_t *reason)
             last_decision = decision;
             ::DiagnosticLog::Write(decision);
             // The decision above only explains a hidden toolbar. A blank one
-            // needs the host and controller state, which nothing else reports.
+            // needs the host state, which nothing else reports.
             FTB_DIAG_LOGF(L"  state before reason={} {}", reason, DescribeFloatingToolbarHostState());
         }
     }
@@ -516,8 +476,7 @@ void ApplyConfiguredFloatingToolbarVisibility(const wchar_t *reason)
         }
     } state_after{reason, trace};
 
-    const bool force_show = should_show || start_paint_grace || paint_grace;
-    if (force_show)
+    if (should_show)
     {
         // Keep the dragged position across IME activate / config / fullscreen
         // exit. Only resize for the current DPI.
@@ -525,8 +484,7 @@ void ApplyConfiguredFloatingToolbarVisibility(const wchar_t *reason)
         EnsureSmallWindowsTopmost(L"show-floating-toolbar");
         // Ensure may pin FTB last while the tray menu is open; put the menu
         // back on top without a visible flash. IsWindowVisible() cannot express
-        // "open" here: the menu host spends all of startup visible-but-cloaked
-        // for warmup, and raising it in that state is what leaves it blank.
+        // "open" here: the menu host spends all of startup visible-but-cloaked.
         if (IsTrayMenuOpenToUser())
         {
             RaiseTrayMenuAboveSmallWindows(L"after-show-floating-toolbar");
@@ -537,23 +495,11 @@ void ApplyConfiguredFloatingToolbarVisibility(const wchar_t *reason)
         {
             ShowWindow(::global_hwnd_ftb, SW_SHOWNA);
         }
-        UpdateSmallWindowWebviewVisibility(::global_hwnd_ftb, true);
-        // Reveal only once there is something to reveal. Before the first
-        // navigation completes the host is deliberately visible-but-cloaked for
-        // warmup, and uncloaking it there would just park an empty transparent
-        // rectangle on screen. The navigation-completed apply repeats this call.
-        if (IsFloatingToolbarWebviewReady())
+        // Reveal only once there is something to reveal: without a presenter
+        // uncloaking would just park an empty transparent rectangle on screen.
+        if (presenter_ready)
         {
             SetHostWindowCloaked(::global_hwnd_ftb, false);
-        }
-        if (start_paint_grace)
-        {
-            BeginFloatingToolbarPaintGrace();
-            KillTimer(::global_hwnd_ftb, TIMER_ID_FTB_VISIBILITY_RECONCILE);
-            // Fallback only: page posts type=ready to reconcile earlier.
-            SetTimer(::global_hwnd_ftb, TIMER_ID_FTB_VISIBILITY_RECONCILE, kFloatingToolbarPaintGraceMs, nullptr);
-            FTB_DIAG_LOGF(L"ftb paint grace started; waiting for page ready (fallback {}ms)",
-                          kFloatingToolbarPaintGraceMs);
         }
         // A toolbar coming back from hidden counts down afresh; one that was
         // already up keeps its running countdown across repeated applies.
@@ -572,26 +518,8 @@ void ApplyConfiguredFloatingToolbarVisibility(const wchar_t *reason)
     }
 }
 
-void ReconcileFloatingToolbarVisibilityAfterReady(const wchar_t *reason)
-{
-    if (!::global_hwnd_ftb)
-    {
-        return;
-    }
-    KillTimer(::global_hwnd_ftb, TIMER_ID_FTB_VISIBILITY_RECONCILE);
-    if (IsFloatingToolbarPaintGraceActive())
-    {
-        EndFloatingToolbarPaintGrace();
-        FTB_DIAG_LOGF(L"ftb paint grace ended reason={}", reason ? reason : L"unspecified");
-    }
-    ApplyConfiguredFloatingToolbarVisibility(reason ? reason : L"ftb-ready");
-}
-
-// Hiding the host before its WebView2 has painted once is what leaves the
-// toolbar permanently blank, so during warmup the hide is expressed as a cloak:
-// invisible to the user, still on-monitor and "visible" to WebView2. Until the
-// page reports ready (or the fallback timer fires), skip hide so first paint can
-// finish and the real visibility decision can be applied afterwards.
+// A toolbar whose presenter never came up has nothing to hide; keep it cloaked
+// so it stays out of the way.
 void HideFloatingToolbarHost()
 {
     if (!::global_hwnd_ftb)
@@ -600,19 +528,14 @@ void HideFloatingToolbarHost()
     }
     // The fullscreen hook calls this directly, so without a line here the trace
     // shows a toolbar that became hidden with no apply to account for it.
-    if (FanyImeUi::ShouldDeferFloatingToolbarHide(IsFloatingToolbarPaintGraceActive()))
-    {
-        FTB_DIAG_LOGF(L"hide host skipped: paint grace active");
-        return;
-    }
-    FTB_DIAG_LOGF(L"hide host webview_ready={} (cloak-only while warming up)", IsFloatingToolbarWebviewReady());
-    if (!IsFloatingToolbarWebviewReady())
+    const bool presenter_ready = FloatingToolbarPresenter::Instance().IsBound();
+    FTB_DIAG_LOGF(L"hide host presenter_ready={}", presenter_ready);
+    if (!presenter_ready)
     {
         SetHostWindowCloaked(::global_hwnd_ftb, true);
         return;
     }
     ShowWindow(::global_hwnd_ftb, SW_HIDE);
-    UpdateSmallWindowWebviewVisibility(::global_hwnd_ftb, false);
 }
 
 void ApplyConfiguredFloatingToolbarSize()
@@ -625,41 +548,15 @@ void ApplyConfiguredFloatingToolbarSize()
     ::FTB_WND_WIDTH = ConfiguredFloatingToolbarWidth();
     ::FTB_WND_HEIGHT = ConfiguredFloatingToolbarHeight();
     LayoutFloatingToolbar(::global_hwnd_ftb, false);
-
-    if (!::webviewFtbWnd || !::global_hwnd_ftb)
-    {
-        return;
-    }
-    // Wait for CSS vars to land, then measure .status-bar so HWND matches content.
-    ApplyConfiguredFloatingToolbarAppearance([]() {
-        GetContainerSizeFtb(::webviewFtbWnd, [](std::pair<double, double> size) {
-            if (size.first > 1.0 && size.second > 1.0)
-            {
-                ::FTB_CONTENT_WIDTH_DIP = size.first;
-                ::FTB_CONTENT_HEIGHT_DIP = size.second;
-                ::FTB_WND_WIDTH = static_cast<int>(std::ceil(size.first));
-                ::FTB_WND_HEIGHT = static_cast<int>(std::ceil(size.second));
-            }
-            LayoutFloatingToolbar(::global_hwnd_ftb, false);
-        });
-    });
 }
 
 namespace
 {
-void RemeasureFloatingToolbarAfterDpiChange(HWND hwnd)
+void RemeasureFloatingToolbarAfterDpiChange(HWND /*hwnd*/)
 {
     if (FloatingToolbarPresenter::Instance().IsBound())
     {
         FloatingToolbarPresenter::Instance().RelayoutHost();
-    }
-    else if (::webviewFtbWnd)
-    {
-        ApplyConfiguredFloatingToolbarSize();
-    }
-    else
-    {
-        SetTimer(hwnd, TIMER_ID_FTB_DPI_REMEASURE, 100, nullptr);
     }
 }
 } // namespace
@@ -699,21 +596,20 @@ LRESULT CALLBACK WndProcFtbWindow(HWND hwnd, UINT message, WPARAM wParam, LPARAM
         int cnEnState = (wParam >> 2) & 0x1;
         int doubleSingleByteState = (wParam >> 1) & 0x1;
         int puncState = wParam & 0x1;
-        UpdateFtbCnEnAndDoubleSingleAndPuncState(::webviewFtbWnd, cnEnState, doubleSingleByteState, puncState,
-                                                 capsLockState);
+        UpdateFtbCnEnAndDoubleSingleAndPuncState(cnEnState, doubleSingleByteState, puncState, capsLockState);
         break;
     }
 
     case UPDATE_FTB_ENGLISH_INPUT_MODE:
-        UpdateFtbEnglishInputModeState(::webviewFtbWnd, wParam != 0 ? 1 : 0);
+        UpdateFtbEnglishInputModeState(wParam != 0 ? 1 : 0);
         break;
 
     case UPDATE_FTB_INPUT_MODE:
-        UpdateFtbInputModeState(::webviewFtbWnd, wParam != 0 ? 1 : 0);
+        UpdateFtbInputModeState(wParam != 0 ? 1 : 0);
         break;
 
     case UPDATE_FTB_CAPS_LOCK:
-        UpdateFtbCapsLockState(::webviewFtbWnd, wParam != 0 ? 1 : 0);
+        UpdateFtbCapsLockState(wParam != 0 ? 1 : 0);
         BroadcastToTsfWorkerThreadViaNamedpipe(Global::DataFromServerMsgTypeToTsfWorkerThread::CapsLockChanged,
                                                wParam != 0 ? L"1" : L"0");
         break;
@@ -753,9 +649,7 @@ LRESULT CALLBACK WndProcFtbWindow(HWND hwnd, UINT message, WPARAM wParam, LPARAM
             ScheduleFloatingToolbarDpiRemeasure(hwnd);
             return 0;
         }
-        // Same contract as the tray menu: size from DIPs * the DPI in wParam
-        // (GetWindowScale can lag), then remeasure once WebView2 settles so a
-        // fractional undersize cannot leave Chromium scrollbars over 中/简.
+        // Size from DIPs * the DPI in wParam (GetWindowScale can lag).
         ::FTB_CONTENT_WIDTH_DIP = 0.0;
         ::FTB_CONTENT_HEIGHT_DIP = 0.0;
         LayoutFloatingToolbar(hwnd, false, scale > 0.0f ? scale : 0.0f, suggested);
@@ -769,28 +663,11 @@ LRESULT CALLBACK WndProcFtbWindow(HWND hwnd, UINT message, WPARAM wParam, LPARAM
         return 0;
     }
 
-    case WM_SIZE: {
-        if (::webviewControllerFtbWnd && wParam != SIZE_MINIMIZED)
-        {
-            SyncHostWebViewBounds(::webviewControllerFtbWnd.Get(), hwnd);
-        }
-        break;
-    }
-
     case WM_TIMER: {
-        if (wParam == TIMER_ID_MOVE_WEBVIEW_FTB)
+        if (wParam == TIMER_ID_PLACE_FTB)
         {
-            KillTimer(hwnd, TIMER_ID_MOVE_WEBVIEW_FTB);
-            // Host HWND placement must not wait for WebView2. After reboot /
-            // uiAccess, WebView can lag for a long time while the toolbar would
-            // otherwise stay off-screen or never become discoverable.
+            KillTimer(hwnd, TIMER_ID_PLACE_FTB);
             PlaceFloatingToolbarOnScreen(hwnd);
-            break;
-        }
-        if (wParam == TIMER_ID_FTB_VISIBILITY_RECONCILE)
-        {
-            KillTimer(hwnd, TIMER_ID_FTB_VISIBILITY_RECONCILE);
-            ReconcileFloatingToolbarVisibilityAfterReady(L"ftb-ready-fallback-timeout");
             break;
         }
         if (wParam == TIMER_ID_FTB_AUTO_HIDE)

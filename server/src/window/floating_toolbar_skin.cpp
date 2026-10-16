@@ -5,7 +5,7 @@
 
 FloatingToolbarSkin ResolveFloatingToolbarSkin(const std::string &skinId, bool light)
 {
-    // default(_light).html: the base every skin page starts from.
+    // The default skin: the base every other skin starts from.
     FloatingToolbarSkin skin = light ? FloatingToolbarSkin{CandidateColorFromRgb(0xFFFFFF),
                                                            D2D1::ColorF(0, 0.12f),
                                                            CandidateColorFromRgb(0x1A1A1A),

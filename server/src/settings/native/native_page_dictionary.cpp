@@ -81,7 +81,7 @@ class DictTabs : public msimeui::Visual
 
   private:
     // Chrome lays the 15px system font out in a ~21.3px line, a little taller than
-    // DirectWrite's natural line (measured against the WebView2 page).
+    // DirectWrite's natural line (measured against the former web page).
     static float TabLineHeight()
     {
         return std::max(LineHeight(TabStyle()), 21.33f);

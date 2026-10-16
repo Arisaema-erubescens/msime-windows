@@ -14,9 +14,3 @@ TEST_CASE(floating_toolbar_stays_hidden_once_auto_hidden)
 {
     REQUIRE(!FanyImeUi::ShouldShowFloatingToolbar(true, false, true, true));
 }
-
-TEST_CASE(floating_toolbar_defers_hide_during_paint_grace)
-{
-    REQUIRE(FanyImeUi::ShouldDeferFloatingToolbarHide(true));
-    REQUIRE(!FanyImeUi::ShouldDeferFloatingToolbarHide(false));
-}

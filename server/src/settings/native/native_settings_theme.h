@@ -3,9 +3,9 @@
 #include <d2d1.h>
 #include <string>
 
-// Colors and type scale of the Direct2D settings window. Every value mirrors a CSS
-// custom property of the WebView2 settings page (ui-html/.../styles/variables.css);
-// the property name is noted where it is not obvious, so the two stay comparable.
+// Colors and type scale of the Direct2D settings window. Every value was taken from a CSS
+// custom property of the former web settings page (styles/variables.css, see
+// native_settings_pages.h); the property name is noted where it is not obvious.
 namespace native_settings
 {
 constexpr D2D1_COLOR_F Hex(unsigned rgb, float alpha = 1.0f)

@@ -9,14 +9,11 @@
 #include "settings/neural_model.h"
 #include "settings/default_input_method.h"
 #include "settings/game_compat_name.h"
-#include "settings/settings_mouse_input.h"
-#include "settings/settings_splash.h"
 #include "settings/dictionary_manager.h"
 #include "settings/native/native_settings_window.h"
 
 #include "msimeui/DeviceResources.h"
 #include "settings/serial_task_queue.h"
-#include "window/ui_backend_policy.h"
 #include "statistics/stats_overview.h"
 #include "statistics/stats_store.h"
 #include <chrono>
@@ -29,18 +26,12 @@
 #include "utils/single_instance.h"
 #include "voice-input/voice_providers.h"
 
-#include <WebView2.h>
-#include <WebView2EnvironmentOptions.h>
-#include <WebView2EnvironmentOptions.h>
 #include <boost/json.hpp>
-#include <dcomp.h>
 #include <dwmapi.h>
 #include <nlohmann/json.hpp>
-#include <wil/com.h>
 #include <windows.h>
 #include <windowsx.h>
 #include <shellapi.h>
-#include <wrl.h>
 
 #include <algorithm>
 #include <array>
@@ -51,13 +42,9 @@
 #include <string>
 #include <string_view>
 
-#pragma comment(lib, "dcomp.lib")
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "shell32.lib")
 
-using Microsoft::WRL::Callback;
-using Microsoft::WRL::ComPtr;
-using Microsoft::WRL::Make;
 namespace json = boost::json;
 
 namespace
@@ -69,32 +56,17 @@ constexpr UINT kActivateExistingWindow = WM_APP + 1;
 constexpr UINT kOpenAboutSection = WM_APP + 2;
 constexpr UINT kScanSkinCatalog = WM_APP + 3;
 constexpr UINT kWorkerCompleted = WM_APP + 4;
+// Sent by settings_launcher.cpp (the Server exiting) and by the installer: close for real.
 constexpr UINT kQuitSettings = WM_APP + 5;
 // Timer 1 is msimeui's caret blink in the Direct2D window, so ours start elsewhere.
 constexpr UINT_PTR kConfigReloadTimer = 0x5301;
 constexpr UINT_PTR kLingerTimer = 0x5302;
 
-// Direct2D frontend (appearance.settings_ui_backend = "d2d"); null in WebView2 mode.
+// The Direct2D settings window (msimeui). Null until wWinMain builds it.
 std::unique_ptr<native_settings::SettingsWindow> g_native;
-// Set when the user switched the renderer: the process reopens itself after exiting.
-bool g_relaunch_after_exit = false;
 
-ComPtr<ICoreWebView2Controller> g_controller;
-ComPtr<ICoreWebView2CompositionController> g_composition_controller;
-ComPtr<ICoreWebView2> g_webview;
-ComPtr<ICoreWebView2_3> g_webview3;
-ComPtr<ICoreWebView2Controller2> g_controller2;
-ComPtr<IDCompositionDevice> g_dcomp_device;
-ComPtr<IDCompositionTarget> g_dcomp_target;
-ComPtr<IDCompositionVisual> g_dcomp_root;
-RECT g_maximize_button_rect{};
-bool g_has_maximize_button_rect = false;
-bool g_maximize_button_hover = false;
-bool g_window_active = true;
-SettingsMouseInput g_mouse_input;
 bool g_window_minimized = false;
 bool g_open_about_on_ready = false;
-bool g_webview_content_started = false;
 HWND g_settings_hwnd = nullptr;
 std::optional<CandidateSkinCatalog::ScanResult> g_candidate_skin_catalog;
 uint64_t g_candidate_skin_catalog_revision = 0;
@@ -110,22 +82,19 @@ bool g_worker_com_initialized = false; // worker-only
 void CloseSettings(HWND hwnd);
 void HideSettings(HWND hwnd);
 
-// The active frontend is ready to receive host messages.
+// The settings window is ready to receive host messages.
 bool FrontendReady()
 {
-    return g_native || g_webview;
+    return static_cast<bool>(g_native);
 }
 
-// Host -> page message for whichever frontend runs: the WebView2 page or the Direct2D
-// window, which consumes the same JSON.
+// Host -> window message: the settings window consumes the webview-contract JSON.
 bool PostToPage(const std::wstring &message)
 {
-    if (g_native)
-    {
-        g_native->OnHostMessage(message);
-        return true;
-    }
-    return g_webview && SUCCEEDED(g_webview->PostWebMessageAsJson(message.c_str()));
+    if (!g_native)
+        return false;
+    g_native->OnHostMessage(message);
+    return true;
 }
 
 // 冷启动打点：设置 METASEQUOIA_IME_SETTINGS_TRACE=1 后，各阶段距进程启动的毫秒数追加到
@@ -158,36 +127,6 @@ void TraceStartup(const char *stage)
         fprintf(file, "%lu %8.1f ms  %s\n", GetCurrentProcessId(), static_cast<double>(now - start) / 10000.0, stage);
         fclose(file);
     }
-}
-
-// WebView2 起不来时设置窗口只剩一块空白（运行时缺失时同步失败、回调根本不来，splash 会一直转），
-// 用户看不出是怎么回事。把原因和下载地址说清楚，然后退出，不留一个空窗口。
-void ReportWebViewStartupFailure(HWND hwnd, const wchar_t *stage, HRESULT hr)
-{
-    static bool reported = false;
-    if (reported)
-        return;
-    reported = true;
-    TraceStartup("ui: webview startup failed");
-    SettingsSplash::Dismiss();
-
-    wchar_t message[1024]{};
-    swprintf_s(message,
-               L"设置页面需要 Microsoft Edge WebView2 Runtime，但它没能启动（%s，错误码 0x%08X）。\r\n"
-               L"The settings page needs the Microsoft Edge WebView2 Runtime, but it could not start "
-               L"(%s, error 0x%08X).\r\n\r\n"
-               L"输入法打字不受影响，只有设置页面需要它。\r\n"
-               L"Typing is not affected; only the settings page needs it.\r\n\r\n"
-               L"请安装或修复 WebView2 Runtime 后重新打开设置：\r\n"
-               L"Install or repair the WebView2 Runtime, then open the settings again:\r\n"
-               L"%s\r\n\r\n"
-               L"是否现在打开下载链接？\r\nOpen the download link now?",
-               stage, static_cast<unsigned>(hr), stage, static_cast<unsigned>(hr),
-               CommonUtils::kWebView2RuntimeDownloadUrl);
-    if (MessageBoxW(hwnd, message, L"水杉输入法 / Metasequoia IME", MB_YESNO | MB_ICONERROR | MB_SETFOREGROUND) ==
-        IDYES)
-        ShellExecuteW(hwnd, L"open", CommonUtils::kWebView2RuntimeDownloadUrl, nullptr, nullptr, SW_SHOWNORMAL);
-    DestroyWindow(hwnd);
 }
 
 nlohmann::json CandidateColorsToJson(const CandidateSkinCatalog::CandidateColors &colors)
@@ -268,85 +207,7 @@ void ShowAboutSection()
     if (g_native)
     {
         g_native->ShowPage("about-settings");
-        return;
     }
-    if (!g_webview)
-        return;
-    g_webview->ExecuteScript(LR"JS((() => {
-        const selectAbout = () => {
-            const item = document.querySelector('.sidebar .item[data-target="about-settings"]');
-            if (!item) return false;
-            if (!item.classList.contains('active')) item.click();
-            const section = document.getElementById('about-settings');
-            if (!item.classList.contains('active') || !section || getComputedStyle(section).display === 'none')
-                return false;
-            item.scrollIntoView({ block: 'nearest' });
-            return true;
-        };
-        if (selectAbout()) return;
-        const retry = setInterval(() => {
-            if (selectAbout()) clearInterval(retry);
-        }, 50);
-        setTimeout(() => clearInterval(retry), 10000);
-    })())JS",
-                             nullptr);
-}
-
-void ApplyWindowActivationAppearance()
-{
-    if (!g_webview)
-        return;
-
-    // Keep this effect in the native host so it follows the real top-level
-    // activation state rather than DOM focus. Only title-bar foreground
-    // elements are muted; the page and title-bar backgrounds remain intact.
-    const wchar_t *script = g_window_active ? LR"JS((() => {
-            document.getElementById('metasequoia-window-inactive-overlay')?.remove();
-            const id = 'metasequoia-window-activation-style';
-            if (!document.getElementById(id)) {
-                const style = document.createElement('style');
-                style.id = id;
-                style.textContent = `
-                    .titlebar-left, .window-button {
-                        transition: opacity 140ms ease-out;
-                    }
-                    html.metasequoia-window-inactive .titlebar-left,
-                    html.metasequoia-window-inactive .window-button {
-                        opacity: 0.52 !important;
-                    }
-                    html.metasequoia-window-inactive .window-button:hover,
-                    html.metasequoia-window-inactive .window-button.host-hover {
-                        opacity: 1 !important;
-                    }
-                `;
-                document.head.appendChild(style);
-            }
-            document.documentElement.classList.remove('metasequoia-window-inactive');
-        })())JS"
-                                            : LR"JS((() => {
-            document.getElementById('metasequoia-window-inactive-overlay')?.remove();
-            const id = 'metasequoia-window-activation-style';
-            if (!document.getElementById(id)) {
-                const style = document.createElement('style');
-                style.id = id;
-                style.textContent = `
-                    .titlebar-left, .window-button {
-                        transition: opacity 140ms ease-out;
-                    }
-                    html.metasequoia-window-inactive .titlebar-left,
-                    html.metasequoia-window-inactive .window-button {
-                        opacity: 0.52 !important;
-                    }
-                    html.metasequoia-window-inactive .window-button:hover,
-                    html.metasequoia-window-inactive .window-button.host-hover {
-                        opacity: 1 !important;
-                    }
-                `;
-                document.head.appendChild(style);
-            }
-            document.documentElement.classList.add('metasequoia-window-inactive');
-        })())JS";
-    g_webview->ExecuteScript(script, nullptr);
 }
 
 void ApplySettingsChromeTheme(HWND hwnd = nullptr)
@@ -358,12 +219,6 @@ void ApplySettingsChromeTheme(HWND hwnd = nullptr)
         BOOL dark = light ? FALSE : TRUE;
         DwmSetWindowAttribute(target, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
     }
-    if (g_controller2)
-    {
-        COREWEBVIEW2_COLOR background =
-            light ? COREWEBVIEW2_COLOR{255, 243, 243, 243} : COREWEBVIEW2_COLOR{255, 32, 32, 32};
-        g_controller2->put_DefaultBackgroundColor(background);
-    }
 }
 
 void ResetTitlebarHoverAfterVisibilityChange()
@@ -371,53 +226,7 @@ void ResetTitlebarHoverAfterVisibilityChange()
     if (g_native)
     {
         g_native->ResetTransientState();
-        return;
     }
-    if (!g_webview)
-        return;
-
-    g_webview->ExecuteScript(LR"JS((() => {
-        const root = document.documentElement;
-        const suppressClass = 'metasequoia-suppress-titlebar-tooltip';
-        const styleId = 'metasequoia-titlebar-tooltip-reset-style';
-        if (!document.getElementById(styleId)) {
-            const style = document.createElement('style');
-            style.id = styleId;
-            style.textContent = `
-                html.${suppressClass} .window-button[data-tooltip]::after,
-                html.${suppressClass} .window-button[data-tooltip]:hover::after {
-                    opacity: 0 !important;
-                    transform: translateX(-50%) !important;
-                    transition-delay: 0s !important;
-                }
-            `;
-            document.head.appendChild(style);
-        }
-
-        root.classList.add(suppressClass);
-        document.querySelector('.window-controls')
-            ?.classList.add('window-controls-click-reset');
-        document.querySelectorAll('.window-button').forEach((button) => {
-            button.classList.remove('host-hover', 'host-active');
-            if (button instanceof HTMLElement) button.blur();
-        });
-
-        const previousRelease = window.__metasequoiaReleaseTooltipReset;
-        if (typeof previousRelease === 'function') {
-            window.removeEventListener('pointermove', previousRelease, true);
-            window.removeEventListener('pointerdown', previousRelease, true);
-        }
-        const release = () => {
-            root.classList.remove(suppressClass);
-            window.removeEventListener('pointermove', release, true);
-            window.removeEventListener('pointerdown', release, true);
-            delete window.__metasequoiaReleaseTooltipReset;
-        };
-        window.__metasequoiaReleaseTooltipReset = release;
-        window.addEventListener('pointermove', release, {capture: true, once: true});
-        window.addEventListener('pointerdown', release, {capture: true, once: true});
-    })())JS",
-                             nullptr);
 }
 
 static nlohmann::json CustomHelpcodeSchemasJson()
@@ -735,9 +544,7 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
             {"show_double_single_byte", GetConfiguredLanguageBarShowDoubleSingleByte()},
             {"show_punctuation", GetConfiguredLanguageBarShowPunctuation()}}},
           {"appearance",
-           {{"ui_backend", GetConfiguredUiBackend()},
-            {"settings_window_linger", GetConfiguredSettingsWindowLinger()},
-            {"settings_ui_backend", GetConfiguredSettingsUiBackend()},
+           {{"settings_window_linger", GetConfiguredSettingsWindowLinger()},
             {"candidate_window_layout", GetConfiguredCandidateWindowLayout()},
             {"candidate_window_follow_cursor", GetConfiguredCandidateWindowFollowCursor()},
             {"candidate_window_fit_content", GetConfiguredCandidateWindowFitContent()},
@@ -886,7 +693,6 @@ SerialTaskQueue::Completion ConfigCompletion(bool refresh_skin_catalog = false, 
         g_settings_light = light;
         g_settings_window_linger = linger;
         ApplySettingsChromeTheme();
-        SettingsSplash::SetTheme(light);
         if (g_native)
             g_native->SetLightTheme(light);
         if (FrontendReady() && (force_snapshot || message != g_last_config_message))
@@ -899,7 +705,7 @@ SerialTaskQueue::Completion ConfigCompletion(bool refresh_skin_catalog = false, 
         }
         else if (!FrontendReady())
         {
-            TraceStartup("ui: config dropped (webview not ready)");
+            TraceStartup("ui: config dropped (window not ready)");
         }
     };
 }
@@ -909,32 +715,6 @@ void PostConfig(bool refresh_skin_catalog = false)
     if (!g_worker || g_closing)
         return;
     g_worker->Submit([refresh_skin_catalog] { return ConfigCompletion(refresh_skin_catalog); });
-}
-
-void PostValidatedServerMessage(json::object payload)
-{
-    if (!FrontendReady())
-        return;
-    payload["protocolVersion"] = metasequoia::webview::Version;
-    if (!metasequoia::webview::Validate(payload, "server"))
-        return;
-    PostToPage(string_to_wstring(json::serialize(payload)));
-}
-
-void PostWindowState(HWND hwnd)
-{
-    PostValidatedServerMessage({
-        {"type", "windowState"},
-        {"data", {{"isMaximized", IsZoomed(hwnd) != FALSE}}},
-    });
-}
-
-void PostMaximizeButtonEvent(const char *event_name)
-{
-    PostValidatedServerMessage({
-        {"type", "maxButtonEvent"},
-        {"data", {{"event", event_name}}},
-    });
 }
 
 bool ApplyConfigUpdate(const json::object &data)
@@ -998,12 +778,8 @@ bool ApplyConfigUpdate(const json::object &data)
         return SetConfiguredTsfPreeditStyle(json::value_to<std::string>(data.at("value")));
     if (path == "appearance.tsf_preedit_shuangpin_quanpin")
         return SetConfiguredTsfPreeditShuangpinQuanpin(json::value_to<bool>(data.at("value")));
-    if (path == "appearance.ui_backend")
-        return SetConfiguredUiBackend(json::value_to<std::string>(data.at("value")));
     if (path == "appearance.settings_window_linger")
         return SetConfiguredSettingsWindowLinger(json::value_to<std::string>(data.at("value")));
-    if (path == "appearance.settings_ui_backend")
-        return SetConfiguredSettingsUiBackend(json::value_to<std::string>(data.at("value")));
     if (path == "appearance.candidate_window_layout")
         return SetConfiguredCandidateWindowLayout(json::value_to<std::string>(data.at("value")));
     if (path == "appearance.candidate_window_follow_cursor")
@@ -1290,27 +1066,6 @@ bool ApplyConfigUpdate(const json::object &data)
     return false;
 }
 
-int HitTestName(const std::string &name)
-{
-    if (name == "left")
-        return HTLEFT;
-    if (name == "right")
-        return HTRIGHT;
-    if (name == "top")
-        return HTTOP;
-    if (name == "bottom")
-        return HTBOTTOM;
-    if (name == "left-top")
-        return HTTOPLEFT;
-    if (name == "right-top")
-        return HTTOPRIGHT;
-    if (name == "left-bottom")
-        return HTBOTTOMLEFT;
-    if (name == "right-bottom")
-        return HTBOTTOMRIGHT;
-    return HTCLIENT;
-}
-
 bool CopyTextToClipboard(HWND hwnd, const std::wstring &text)
 {
     if (!OpenClipboard(hwnd))
@@ -1531,8 +1286,8 @@ json::object HandleStatsRequest(const json::object &data, HWND hwnd)
     return response;
 }
 
-// One dispatcher for both frontends: the WebView2 page and the Direct2D window post the
-// same client messages, validated against the same contract.
+// The settings window posts its requests as webview-contract client messages, validated here
+// against the same contract as every other surface.
 void HandleClientMessage(HWND hwnd, const std::string &raw)
 {
     if (g_closing || !g_worker)
@@ -1544,56 +1299,9 @@ void HandleClientMessage(HWND hwnd, const std::string &raw)
         if (!metasequoia::webview::Validate(value, "client", "settings"))
             return;
         const std::string type = json::value_to<std::string>(value.at("type"));
-        if (type == "dragStart")
+        if (type == "configRequest")
         {
-            ReleaseCapture();
-            PostMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
-        }
-        else if (type == "resizeHitTest" || type == "resizeStart")
-        {
-            const int hit_test = HitTestName(json::value_to<std::string>(value.at("data")));
-            if (hit_test != HTCLIENT)
-            {
-                ReleaseCapture();
-                PostMessageW(hwnd, WM_NCLBUTTONDOWN, hit_test, 0);
-            }
-        }
-        else if (type == "focus")
-        {
-            SetFocus(hwnd);
-        }
-        else if (type == "windowControl")
-        {
-            const std::string command = json::value_to<std::string>(value.at("data"));
-            if (command == "minimize")
-                ShowWindow(hwnd, SW_MINIMIZE);
-            else if (command == "maximize")
-                ShowWindow(hwnd, SW_MAXIMIZE);
-            else if (command == "restore")
-                ShowWindow(hwnd, SW_RESTORE);
-            else if (command == "close")
-                HideSettings(hwnd);
-        }
-        else if (type == "maximizeButtonRect")
-        {
-            const auto &data = value.at("data").as_object();
-            const double x = data.if_contains("x") ? json::value_to<double>(*data.if_contains("x")) : 0.0;
-            const double y = data.if_contains("y") ? json::value_to<double>(*data.if_contains("y")) : 0.0;
-            const double width = data.if_contains("width") ? json::value_to<double>(*data.if_contains("width")) : 0.0;
-            const double height =
-                data.if_contains("height") ? json::value_to<double>(*data.if_contains("height")) : 0.0;
-            double scale = data.if_contains("dpr") ? json::value_to<double>(*data.if_contains("dpr")) : 0.0;
-            if (scale <= 0.0)
-                scale = static_cast<double>(GetDpiForWindow(hwnd)) / 96.0;
-            g_maximize_button_rect = {static_cast<LONG>(std::lround(x * scale)),
-                                      static_cast<LONG>(std::lround(y * scale)),
-                                      static_cast<LONG>(std::lround((x + width) * scale)),
-                                      static_cast<LONG>(std::lround((y + height) * scale))};
-            g_has_maximize_button_rect = true;
-        }
-        else if (type == "configRequest")
-        {
-            TraceStartup("ui: page configRequest (DOMContentLoaded)");
+            TraceStartup("ui: configRequest");
             // A snapshot sent before the new document installed its listener may be lost.
             g_last_config_message.clear();
             PostConfig(false);
@@ -1688,21 +1396,11 @@ void HandleClientMessage(HWND hwnd, const std::string &raw)
                 const std::string path = json::value_to<std::string>(data.at("path"));
                 // The shortcut editor waits for persisted state even for a failed/no-op write.
                 const bool force_snapshot = IsInputStateShortcutPath(path);
-                // A new renderer only takes effect in a new process: reopen in it.
-                const bool renderer_written = saved && path == "appearance.settings_ui_backend";
-                const bool native_requested =
-                    UiBackendPolicy::Resolve(UiBackendPolicy::Surface::Settings, GetConfiguredSettingsUiBackend()) ==
-                    UiBackendPolicy::Backend::Native;
                 auto completion = ConfigCompletion(false, force_snapshot);
-                return [saved, renderer_written, native_requested, completion = std::move(completion)] {
+                return [saved, completion = std::move(completion)] {
                     completion();
                     if (!saved)
                         MessageBoxW(g_settings_hwnd, L"设置保存失败，请重试。", L"水杉输入法", MB_OK | MB_ICONWARNING);
-                    if (renderer_written && native_requested != static_cast<bool>(g_native) && g_settings_hwnd)
-                    {
-                        g_relaunch_after_exit = true;
-                        PostMessageW(g_settings_hwnd, kQuitSettings, 0, 0);
-                    }
                 };
             });
         }
@@ -1957,243 +1655,11 @@ void HandleClientMessage(HWND hwnd, const std::string &raw)
     }
 }
 
-void HandleWebMessage(HWND hwnd, ICoreWebView2WebMessageReceivedEventArgs *args)
-{
-    wil::unique_cotaskmem_string raw;
-    if (FAILED(args->TryGetWebMessageAsString(&raw)) || !raw)
-        return;
-    HandleClientMessage(hwnd, wstring_to_string(raw.get()));
-}
-
-HRESULT EnsureCompositionTree(HWND hwnd)
-{
-    HRESULT hr = DCompositionCreateDevice(nullptr, __uuidof(IDCompositionDevice),
-                                          reinterpret_cast<void **>(g_dcomp_device.GetAddressOf()));
-    if (FAILED(hr))
-        return hr;
-    hr = g_dcomp_device->CreateTargetForHwnd(hwnd, TRUE, &g_dcomp_target);
-    if (FAILED(hr))
-        return hr;
-    hr = g_dcomp_device->CreateVisual(&g_dcomp_root);
-    if (FAILED(hr))
-        return hr;
-    hr = g_dcomp_target->SetRoot(g_dcomp_root.Get());
-    if (FAILED(hr))
-        return hr;
-    return g_dcomp_device->Commit();
-}
-
-HRESULT OnControllerCreated(HWND hwnd, HRESULT result, ICoreWebView2CompositionController *controller)
-{
-    TraceStartup("ui: controller created");
-    if (FAILED(result) || !controller)
-    {
-        SettingsSplash::Dismiss();
-        return FAILED(result) ? result : E_FAIL;
-    }
-    g_composition_controller = controller;
-    if (FAILED(g_composition_controller.As(&g_controller)))
-        return E_NOINTERFACE;
-    if (FAILED(g_controller->get_CoreWebView2(&g_webview)) || !g_webview)
-        return E_FAIL;
-
-    ComPtr<ICoreWebView2Settings> settings;
-    if (SUCCEEDED(g_webview->get_Settings(&settings)))
-    {
-        settings->put_IsScriptEnabled(TRUE);
-        settings->put_AreDefaultScriptDialogsEnabled(TRUE);
-        settings->put_IsWebMessageEnabled(TRUE);
-        settings->put_AreHostObjectsAllowed(TRUE);
-        settings->put_IsZoomControlEnabled(FALSE);
-        settings->put_IsStatusBarEnabled(FALSE);
-    }
-    g_controller->put_ZoomFactor(1.0);
-
-    if (SUCCEEDED(g_webview.As(&g_webview3)))
-    {
-        // 虚拟主机名必须带保留 TLD `.example`。不带点的单标签主机名会先走一轮网络名称解析，
-        // 实测导航前要空等约 2 秒才开始加载内容。
-        const std::filesystem::path assets =
-            std::filesystem::path(CommonUtils::get_ime_data_path_w()) / "html/webview2/settings/ime-settings/dist";
-        g_webview3->SetVirtualHostNameToFolderMapping(L"imesettings.example", assets.c_str(),
-                                                      COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
-        const std::filesystem::path skins = std::filesystem::path(CommonUtils::get_ime_data_path_w()) / L"skins";
-        std::error_code ec;
-        std::filesystem::create_directories(skins, ec);
-        g_webview3->SetVirtualHostNameToFolderMapping(L"candidate-skins.example", skins.c_str(),
-                                                      COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
-    }
-    if (SUCCEEDED(g_controller.As(&g_controller2)))
-    {
-        ApplySettingsChromeTheme(hwnd);
-    }
-
-    HRESULT hr = EnsureCompositionTree(hwnd);
-    if (FAILED(hr))
-        return hr;
-    hr = g_composition_controller->put_RootVisualTarget(g_dcomp_root.Get());
-    if (FAILED(hr))
-        return hr;
-    g_dcomp_device->Commit();
-
-    RECT bounds{};
-    GetClientRect(hwnd, &bounds);
-    g_controller->put_Bounds(bounds);
-
-    EventRegistrationToken token{};
-    g_webview->add_ContentLoading(
-        Callback<ICoreWebView2ContentLoadingEventHandler>([](ICoreWebView2 *,
-                                                             ICoreWebView2ContentLoadingEventArgs *) -> HRESULT {
-            TraceStartup("ui: ContentLoading");
-            g_last_config_message.clear();
-            g_webview_content_started = true;
-            SettingsSplash::Dismiss();
-            return S_OK;
-        }).Get(),
-        &token);
-    g_webview->add_NavigationCompleted(
-        Callback<ICoreWebView2NavigationCompletedEventHandler>([hwnd](ICoreWebView2 *,
-                                                                      ICoreWebView2NavigationCompletedEventArgs *args)
-                                                                   -> HRESULT {
-            BOOL success = FALSE;
-            args->get_IsSuccess(&success);
-            TraceStartup("ui: NavigationCompleted");
-            SettingsSplash::Dismiss();
-            if (success)
-            {
-                PostWindowState(hwnd);
-                PostConfig();
-                ApplyWindowActivationAppearance();
-                SetFocus(hwnd);
-                if (g_open_about_on_ready)
-                {
-                    ShowAboutSection();
-                    g_open_about_on_ready = false;
-                }
-            }
-            return S_OK;
-        }).Get(),
-        &token);
-    g_webview->add_WebMessageReceived(
-        Callback<ICoreWebView2WebMessageReceivedEventHandler>([hwnd](ICoreWebView2 *,
-                                                                     ICoreWebView2WebMessageReceivedEventArgs *args)
-                                                                  -> HRESULT {
-            HandleWebMessage(hwnd, args);
-            return S_OK;
-        }).Get(),
-        &token);
-    return g_webview->Navigate(L"https://imesettings.example/index.html");
-}
-
-void InitWebView(HWND hwnd)
-{
-    TraceStartup("ui: InitWebView begin");
-    std::filesystem::path user_data = CommonUtils::get_webview2_user_data_path(L"webview2-settings");
-    TraceStartup("ui: get_webview2_user_data_path end");
-    std::error_code ec;
-    std::filesystem::create_directories(user_data, ec);
-    auto options = Make<CoreWebView2EnvironmentOptions>();
-    options->put_AdditionalBrowserArguments(L"--disable-features=TranslateUI "
-                                            L"--disable-background-networking "
-                                            L"--disable-default-apps "
-                                            L"--disable-sync "
-                                            L"--disable-prompt-on-repost "
-                                            L"--no-first-run");
-    const HRESULT create_result = CreateCoreWebView2EnvironmentWithOptions(
-        nullptr, user_data.c_str(), options.Get(),
-        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-            [hwnd](HRESULT result, ICoreWebView2Environment *environment) -> HRESULT {
-                TraceStartup("ui: environment created");
-                if (FAILED(result) || !environment)
-                {
-                    const HRESULT hr = FAILED(result) ? result : E_FAIL;
-                    ReportWebViewStartupFailure(hwnd, L"environment", hr);
-                    return hr;
-                }
-                // ICoreWebView2Environment3 需要较新的运行时，过旧的 WebView2 会停在这里。
-                ComPtr<ICoreWebView2Environment3> environment3;
-                if (FAILED(environment->QueryInterface(IID_PPV_ARGS(&environment3))))
-                {
-                    ReportWebViewStartupFailure(hwnd, L"environment3", E_NOINTERFACE);
-                    return E_NOINTERFACE;
-                }
-                const HRESULT controller_request = environment3->CreateCoreWebView2CompositionController(
-                    hwnd,
-                    Callback<ICoreWebView2CreateCoreWebView2CompositionControllerCompletedHandler>(
-                        [hwnd](HRESULT controller_result, ICoreWebView2CompositionController *controller) -> HRESULT {
-                            const HRESULT hr = OnControllerCreated(hwnd, controller_result, controller);
-                            if (FAILED(hr))
-                                ReportWebViewStartupFailure(hwnd, L"controller", hr);
-                            return hr;
-                        })
-                        .Get());
-                if (FAILED(controller_request))
-                    ReportWebViewStartupFailure(hwnd, L"controller", controller_request);
-                return controller_request;
-            })
-            .Get());
-    // 运行时缺失时这里同步返回失败，上面的回调不会被调用。
-    if (FAILED(create_result))
-        ReportWebViewStartupFailure(hwnd, L"environment", create_result);
-}
-
-void RunMouseCommands(HWND hwnd, const SettingsMouseCommands &commands)
-{
-    if (commands.focus)
-        SetFocus(hwnd);
-    if (commands.capture)
-        SetCapture(hwnd);
-    for (const SettingsMouseEvent &event : commands.events)
-    {
-        POINT point = event.point;
-        if (event.screen_point)
-            ScreenToClient(hwnd, &point);
-        g_composition_controller->SendMouseInput(event.kind, event.keys, event.data, point);
-    }
-    if (commands.release_capture && GetCapture() == hwnd)
-        ReleaseCapture();
-    if (commands.track_leave)
-    {
-        TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, hwnd, 0};
-        TrackMouseEvent(&track);
-    }
-}
-
-bool ForwardMouse(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_param)
-{
-    if (!g_composition_controller)
-        return false;
-    const SettingsMouseCommands commands = g_mouse_input.OnMessage(message, w_param, l_param);
-    if (!commands.handled)
-        return false;
-    RunMouseCommands(hwnd, commands);
-    return true;
-}
-
-// 抓取被拿走时给页面补发抬起；窗口自己在抬起时释放抓取也会走到这里，那时已没有按着的键。
-void OnMouseCaptureLost(HWND hwnd)
-{
-    if (!g_composition_controller || !g_mouse_input.Capturing())
-        return;
-    POINT point{};
-    GetCursorPos(&point);
-    ScreenToClient(hwnd, &point);
-    RunMouseCommands(hwnd, g_mouse_input.OnCaptureLost(point));
-}
-
 // 隐藏或关闭窗口时按着的键不会再有抬起送到这里，不放掉抓取的话下一次抬起会落到隐藏的窗口上。
 void ReleaseMouseCapture(HWND hwnd)
 {
     if (GetCapture() == hwnd)
         ReleaseCapture();
-}
-
-bool IsMaximizeButton(HWND hwnd, POINT screen_point)
-{
-    if (!g_has_maximize_button_rect)
-        return false;
-    ScreenToClient(hwnd, &screen_point);
-    return PtInRect(&g_maximize_button_rect, screen_point) != FALSE;
 }
 
 int TopNonClientInset(HWND hwnd)
@@ -2208,21 +1674,6 @@ int TopNonClientInset(HWND hwnd)
            GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
 }
 
-// 首帧之前隐藏 WebView2 会卡住 raster 初始化，预热阶段不要碰可见性。
-void SetWebViewVisible(bool visible)
-{
-    if (g_controller && g_webview_content_started)
-        g_controller->put_IsVisible(visible ? TRUE : FALSE);
-}
-
-// 驻留期间让 WebView2 按低内存目标释放缓存和 GPU 资源，重新露面时恢复正常。
-void SetWebViewMemoryTarget(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL level)
-{
-    ComPtr<ICoreWebView2_19> webview19;
-    if (g_webview && SUCCEEDED(g_webview.As(&webview19)))
-        webview19->put_MemoryUsageTargetLevel(level);
-}
-
 // 重新露面：取消延迟退出，恢复渲染与配置轮询。
 void CancelLinger(HWND hwnd)
 {
@@ -2230,10 +1681,6 @@ void CancelLinger(HWND hwnd)
         return;
     g_lingering = false;
     KillTimer(hwnd, kLingerTimer);
-    SetWebViewMemoryTarget(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL);
-    if (g_webview3)
-        g_webview3->Resume();
-    SetWebViewVisible(true);
     SetTimer(hwnd, kConfigReloadTimer, 300, nullptr);
 }
 
@@ -2269,16 +1716,14 @@ std::optional<UINT> SettingsLingerTimeoutMs(const std::string &linger)
     return minutes * 60u * 1000u;
 }
 
-// 用户关闭窗口时走这里：只隐藏，进程继续持有导航完成的 WebView2，驻留到
-// appearance.settings_window_linger 指定的时长才真正退出，驻留期间重新打开不用再冷启动。
-// 隐藏期间停掉配置轮询、让 controller 不可见并冻结页面，避免白拿 CPU 和内存。
-// 首帧还没出来就被关掉，说明用户不想等这次冷启动，直接退出，别留一个半初始化的进程。
+// 用户关闭窗口时走这里：只隐藏，驻留到 appearance.settings_window_linger 指定的时长才真正退出，
+// 驻留期间重新打开不用再冷启动。隐藏期间停掉配置轮询，避免白拿 CPU。
 void HideSettings(HWND hwnd)
 {
     if (g_closing)
         return;
     const std::optional<UINT> linger_ms = SettingsLingerTimeoutMs(g_settings_window_linger);
-    if (!g_webview_content_started || linger_ms == 0u)
+    if (linger_ms == 0u)
     {
         CloseSettings(hwnd);
         return;
@@ -2291,21 +1736,11 @@ void HideSettings(HWND hwnd)
     }
     g_lingering = true;
     // 窗口隐藏时保留的那一帧会在下次打开时先显示出来，带着高亮的标题栏按钮就会闪一下。
-    // 页面自己的关闭按钮已经在点击时清过，这里覆盖 Alt+F4、启动图的关闭按钮等不经过页面的路径。
+    // 窗口自己的关闭按钮已经在点击时清过，这里覆盖 Alt+F4 等不经过它的路径。
     ResetTitlebarHoverAfterVisibilityChange();
-    // 隐藏的窗口收不到 WM_NCMOUSELEAVE，本地这份悬停状态要手动清掉，
-    // 否则下次真的移进去时不会再发 enter。
-    g_maximize_button_hover = false;
     KillTimer(hwnd, kConfigReloadTimer);
-    SettingsSplash::Dismiss();
     ReleaseMouseCapture(hwnd);
     ShowWindow(hwnd, SW_HIDE);
-    SetWebViewVisible(false);
-    // TrySuspend 要求 controller 已不可见；冻结页面脚本和定时器，重开时由 CancelLinger 的 Resume 恢复。
-    SetWebViewMemoryTarget(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW);
-    if (g_webview3)
-        g_webview3->TrySuspend(
-            Callback<ICoreWebView2TrySuspendCompletedHandler>([](HRESULT, BOOL) -> HRESULT { return S_OK; }).Get());
     if (linger_ms)
         SetTimer(hwnd, kLingerTimer, *linger_ms, nullptr);
 }
@@ -2318,7 +1753,6 @@ void CloseSettings(HWND hwnd)
     g_lingering = false;
     KillTimer(hwnd, kLingerTimer);
     KillTimer(hwnd, kConfigReloadTimer);
-    SettingsSplash::Dismiss();
     ReleaseMouseCapture(hwnd);
     ShowWindow(hwnd, SW_HIDE);
     if (g_worker)
@@ -2329,8 +1763,8 @@ void CloseSettings(HWND hwnd)
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_param)
 {
-    // The Direct2D window paints and takes input itself; everything else (activation,
-    // lingering, the worker, timers) stays shared with the WebView2 frontend below.
+    // The Direct2D window paints and takes input itself; activation, lingering, the
+    // worker and the timers are handled below.
     if (g_native)
     {
         LRESULT result = 0;
@@ -2358,104 +1792,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_pa
             return result;
         }
         break;
-    case WM_NCHITTEST: {
-        const LRESULT result = DefWindowProcW(hwnd, message, w_param, l_param);
-        POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
-        return result == HTCLIENT && IsMaximizeButton(hwnd, point) ? HTMAXBUTTON : result;
-    }
-    case WM_MOVE:
-    case WM_MOVING:
-        if (g_controller)
-            g_controller->NotifyParentWindowPositionChanged();
-        if (SettingsSplash::IsVisible())
-            SettingsSplash::SyncToOwner();
-        break;
-    case WM_SETFOCUS:
-        if (g_controller)
-            g_controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
-        break;
-    case WM_ACTIVATE: {
-        const bool active = LOWORD(w_param) != WA_INACTIVE;
-        if (g_window_active != active)
-        {
-            g_window_active = active;
-            ApplyWindowActivationAppearance();
-        }
-        if (active)
-        {
-            if (g_webview3)
-                g_webview3->Resume();
-            if (g_controller)
-                g_controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
-        }
-        break;
-    }
-    case WM_MOUSEMOVE:
-    case WM_MOUSELEAVE:
-    case WM_LBUTTONDOWN:
-    case WM_LBUTTONUP:
-    case WM_LBUTTONDBLCLK:
-    case WM_RBUTTONDOWN:
-    case WM_RBUTTONUP:
-    case WM_RBUTTONDBLCLK:
-    case WM_MBUTTONDOWN:
-    case WM_MBUTTONUP:
-    case WM_MBUTTONDBLCLK:
-    case WM_XBUTTONDOWN:
-    case WM_XBUTTONUP:
-    case WM_XBUTTONDBLCLK:
-    case WM_MOUSEWHEEL:
-    case WM_MOUSEHWHEEL:
-        if (ForwardMouse(hwnd, message, w_param, l_param))
-            return (message == WM_XBUTTONDOWN || message == WM_XBUTTONUP || message == WM_XBUTTONDBLCLK) ? TRUE : 0;
-        break;
-    case WM_CAPTURECHANGED:
-        if (reinterpret_cast<HWND>(l_param) != hwnd)
-            OnMouseCaptureLost(hwnd);
-        break;
-    case WM_SETCURSOR:
-        if (g_composition_controller && LOWORD(l_param) == HTCLIENT)
-        {
-            UINT32 cursor = 0;
-            if (SUCCEEDED(g_composition_controller->get_SystemCursorId(&cursor)) && cursor)
-            {
-                SetCursor(LoadCursorW(nullptr, MAKEINTRESOURCEW(cursor)));
-                return TRUE;
-            }
-        }
-        break;
-    case WM_NCMOUSEMOVE: {
-        POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
-        if (IsMaximizeButton(hwnd, point))
-        {
-            if (!g_maximize_button_hover)
-            {
-                g_maximize_button_hover = true;
-                PostMaximizeButtonEvent("enter");
-            }
-            TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE | TME_NONCLIENT, hwnd, 0};
-            TrackMouseEvent(&track);
-            return 0;
-        }
-        break;
-    }
-    case WM_NCMOUSELEAVE:
-        if (g_maximize_button_hover)
-        {
-            g_maximize_button_hover = false;
-            PostMaximizeButtonEvent("leave");
-        }
-        break;
-    case WM_NCLBUTTONDOWN:
-    case WM_NCLBUTTONUP: {
-        POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
-        if (IsMaximizeButton(hwnd, point))
-        {
-            PostMaximizeButtonEvent(message == WM_NCLBUTTONDOWN ? "down" : "up");
-            return 0;
-        }
-        break;
-    }
     case WM_ERASEBKGND: {
         RECT client{};
         GetClientRect(hwnd, &client);
@@ -2476,15 +1812,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_pa
         if (minimized || g_window_minimized)
             ResetTitlebarHoverAfterVisibilityChange();
         g_window_minimized = minimized;
-        if (g_controller)
-        {
-            RECT bounds{};
-            GetClientRect(hwnd, &bounds);
-            g_controller->put_Bounds(bounds);
-            PostWindowState(hwnd);
-        }
-        if (SettingsSplash::IsVisible())
-            SettingsSplash::SyncToOwner();
         break;
     }
     case WM_TIMER:
@@ -2520,12 +1847,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_pa
             g_worker->Drain(!g_closing);
             if (g_closing && g_worker->Stopped())
             {
-                // The Direct2D frontend leaves without destroying its window: see the
+                // The settings window leaves without destroying its window: see the
                 // end of wWinMain for why the process must skip the TSF teardown.
-                if (g_native)
-                    PostQuitMessage(0);
-                else
-                    DestroyWindow(hwnd);
+                PostQuitMessage(0);
             }
         }
         return 0;
@@ -2542,15 +1866,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_pa
             g_worker->Stop();
         KillTimer(hwnd, kLingerTimer);
         KillTimer(hwnd, kConfigReloadTimer);
-        SettingsSplash::Dismiss();
         g_native.reset();
-        g_webview.Reset();
-        g_controller2.Reset();
-        g_controller.Reset();
-        g_composition_controller.Reset();
-        g_dcomp_root.Reset();
-        g_dcomp_target.Reset();
-        g_dcomp_device.Reset();
         PostQuitMessage(0);
         return 0;
     }
@@ -2566,28 +1882,23 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line, int show_
         return elevated_result;
     const std::wstring arguments = command_line ? command_line : L"";
     g_open_about_on_ready = arguments.find(L"--about") != std::wstring::npos;
-    // Developer overrides of appearance.settings_ui_backend for one run.
-    const bool force_native = arguments.find(L"--d2d") != std::wstring::npos;
-    const bool force_webview = arguments.find(L"--webview2") != std::wstring::npos;
+    // Older shortcuts may still pass --d2d / --webview2, which used to pick the renderer
+    // for one run. There is only the Direct2D window now; both are ignored.
     // The Direct2D window's first frame spends ~200ms bringing up the GPU driver. Start
     // that now, alongside the config load and the page build; the window takes the
     // device when it first paints.
-    if (!force_webview)
-        msimeui::DeviceResources::PrewarmComposition();
+    msimeui::DeviceResources::PrewarmComposition();
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const HRESULT com_result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (FAILED(com_result))
         return 1;
 
-    // Released explicitly before a renderer switch reopens the process.
     // METASEQUOIA_IME_SETTINGS_INSTANCE gives a development build its own instance slot,
     // so it can run next to an installed copy that is open at the same time.
     std::wstring mutex_name = kSingleInstanceMutex;
     if (wchar_t suffix[64]{}; GetEnvironmentVariableW(L"METASEQUOIA_IME_SETTINGS_INSTANCE", suffix, 64) > 0)
         mutex_name += std::wstring(L".") + suffix;
-    std::optional<CommonUtils::SingleInstanceGuard> guard;
-    guard.emplace(mutex_name.c_str());
-    CommonUtils::SingleInstanceGuard &single_instance = *guard;
+    CommonUtils::SingleInstanceGuard single_instance(mutex_name.c_str());
     if (!single_instance.is_valid())
         return 1;
     if (single_instance.already_running())
@@ -2630,36 +1941,23 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line, int show_
             if (g_worker_com_initialized)
                 CoUninitialize();
         });
-    struct InitialConfig
-    {
-        bool light = false;
-        bool native = false;
-    };
-    auto initial_config = std::make_shared<std::promise<InitialConfig>>();
-    std::future<InitialConfig> initial = initial_config->get_future();
+    auto initial_config = std::make_shared<std::promise<bool>>();
+    std::future<bool> initial_light = initial_config->get_future();
     g_worker->Submit([initial_config] {
         g_worker_com_initialized = SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
         TraceStartup("worker: InitImeConfig begin");
         InitImeConfig();
         TraceStartup("worker: InitImeConfig end");
-        initial_config->set_value(
-            {ResolveConfiguredTheme(GetConfiguredThemeSettings()) == "light",
-             UiBackendPolicy::Resolve(UiBackendPolicy::Surface::Settings, GetConfiguredSettingsUiBackend()) ==
-                 UiBackendPolicy::Backend::Native});
+        initial_config->set_value(ResolveConfiguredTheme(GetConfiguredThemeSettings()) == "light");
         return ConfigCompletion();
     });
-    // 配置加载通常只要几毫秒，先短暂等它拿到主题再画窗口框架和 splash，免得浅色主题先闪一下深色。
-    // 等不到就按深色先亮出来，之后由 ConfigCompletion 切换。渲染方式也要靠它决定，所以多等一会儿；
-    // 实在等不到就用默认的 WebView2。
-    bool use_native = force_native;
-    if (initial.wait_for(std::chrono::milliseconds(force_native || force_webview ? 150 : 1000)) ==
-        std::future_status::ready)
+    // 配置加载通常只要几毫秒，先等它拿到主题再画窗口，免得浅色主题先闪一下深色。
+    // 等不到就按深色先亮出来，之后由 ConfigCompletion 切换。
+    if (initial_light.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready)
     {
         try
         {
-            const InitialConfig config = initial.get();
-            g_settings_light = config.light;
-            use_native = force_native || (config.native && !force_webview);
+            g_settings_light = initial_light.get();
         }
         catch (...)
         {
@@ -2680,40 +1978,23 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line, int show_
     SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 
     SetTimer(hwnd, kConfigReloadTimer, 300, nullptr);
-    if (use_native)
-    {
-        // The Direct2D window draws its first frame at once: no splash, no WebView2.
-        native_settings::SettingsWindow::Callbacks callbacks;
-        callbacks.postToHost = [hwnd](const std::string &message) { HandleClientMessage(hwnd, message); };
-        g_native = std::make_unique<native_settings::SettingsWindow>(hwnd, std::move(callbacks),
-                                                                     g_open_about_on_ready ? "about-settings" : "");
-        g_native->SetLightTheme(g_settings_light);
-        TraceStartup("ui: native window built");
-        g_open_about_on_ready = false;
-        // Lingering and the close path treat the frontend as started from here on.
-        g_webview_content_started = true;
-        // Cloaked until the first frame is drawn, so the compositor never shows the
-        // surface before it is painted (white, whatever the theme).
-        BOOL cloak = TRUE;
-        DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, &cloak, sizeof(cloak));
-        ShowWindow(hwnd, show_command == SW_HIDE ? SW_SHOWNORMAL : show_command);
-        UpdateWindow(hwnd);
-        cloak = FALSE;
-        DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, &cloak, sizeof(cloak));
-        TraceStartup("ui: native window shown");
-    }
-    else
-    {
-        // 先把窗口和 splash 亮出来，再做 WebView2 用户数据目录的准备和 environment 创建。
-        ShowWindow(hwnd, show_command == SW_HIDE ? SW_SHOWNORMAL : show_command);
-        UpdateWindow(hwnd);
-        SettingsSplash::Show(hwnd, g_settings_light);
-        TraceStartup("ui: window + splash shown");
-        InitWebView(hwnd);
-        TraceStartup("ui: InitWebView returned");
-        if (g_webview_content_started)
-            SettingsSplash::Dismiss();
-    }
+    // The Direct2D window draws its first frame at once, so there is no splash.
+    native_settings::SettingsWindow::Callbacks callbacks;
+    callbacks.postToHost = [hwnd](const std::string &message) { HandleClientMessage(hwnd, message); };
+    g_native = std::make_unique<native_settings::SettingsWindow>(hwnd, std::move(callbacks),
+                                                                 g_open_about_on_ready ? "about-settings" : "");
+    g_native->SetLightTheme(g_settings_light);
+    TraceStartup("ui: native window built");
+    g_open_about_on_ready = false;
+    // Cloaked until the first frame is drawn, so the compositor never shows the
+    // surface before it is painted (white, whatever the theme).
+    BOOL cloak = TRUE;
+    DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, &cloak, sizeof(cloak));
+    ShowWindow(hwnd, show_command == SW_HIDE ? SW_SHOWNORMAL : show_command);
+    UpdateWindow(hwnd);
+    cloak = FALSE;
+    DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, &cloak, sizeof(cloak));
+    TraceStartup("ui: native window shown");
 
     MSG message{};
     while (GetMessageW(&message, nullptr, 0, 0) > 0)
@@ -2722,35 +2003,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line, int show_
         DispatchMessageW(&message);
     }
     g_worker.reset(); // Drain accepted writes even if the window was destroyed externally.
-    // The Direct2D frontend skips CoUninitialize like it skips DestroyWindow: both tear
-    // down this thread's TSF state (see below).
-    if (!use_native)
-        CoUninitialize();
-    if (g_relaunch_after_exit)
-    {
-        // The renderer was switched: reopen in it once this instance no longer holds the
-        // single-instance mutex.
-        guard.reset();
-        std::wstring module_path(32768, L'\0');
-        const DWORD length = GetModuleFileNameW(nullptr, module_path.data(), static_cast<DWORD>(module_path.size()));
-        if (length > 0 && length < module_path.size())
-        {
-            module_path.resize(length);
-            ShellExecuteW(nullptr, L"open", module_path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-        }
-    }
-    if (use_native)
-    {
-        // The Direct2D window is a focused Win32 window, so this thread is an ordinary
-        // input client of the IME. Destroying the window or uninitializing COM lets TSF
-        // deactivate the text service here, which reports a terminal deactivation, and
-        // the Server hides the floating toolbar as if the user had switched input
-        // methods. The window the user returns to may not re-activate, so the toolbar
-        // stayed hidden until they clicked elsewhere. Every write has been drained
-        // above; end the process without that teardown, so the Server only sees the
-        // pipes close (a route suspension, which leaves the toolbar alone), as it does
-        // for the WebView2 frontend.
-        TerminateProcess(GetCurrentProcess(), static_cast<UINT>(message.wParam));
-    }
+    // The Direct2D window is a focused Win32 window, so this thread is an ordinary
+    // input client of the IME. Destroying the window or uninitializing COM lets TSF
+    // deactivate the text service here, which reports a terminal deactivation, and
+    // the Server hides the floating toolbar as if the user had switched input
+    // methods. The window the user returns to may not re-activate, so the toolbar
+    // stayed hidden until they clicked elsewhere. Every write has been drained
+    // above; end the process without that teardown (no DestroyWindow, no
+    // CoUninitialize), so the Server only sees the pipes close (a route suspension,
+    // which leaves the toolbar alone).
+    TerminateProcess(GetCurrentProcess(), static_cast<UINT>(message.wParam));
     return static_cast<int>(message.wParam);
 }

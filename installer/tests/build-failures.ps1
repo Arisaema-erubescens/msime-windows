@@ -70,34 +70,25 @@ try {
         throw 'CI manifest embedding did not verify resource 1'
     }
     Remove-Item Function:/cmake
-    # Each installer entry must stop before staging/signing when the settings build fails.
-    foreach ($relative in @('windows/scripts/lcompile-release-both.ps1', 'server/scripts/lcompile-release.ps1')) {
-        [IO.File]::WriteAllText((Join-Path $fixture $relative), '# successful synthetic component build')
-    }
-    $settings = Join-Path $fixture 'ui-html/webview2/settings/ime-settings'
-    New-Item -ItemType Directory -Force $settings | Out-Null
-    [IO.File]::WriteAllText((Join-Path $settings 'package.json'), '{}')
+    # Each installer entry must stop before staging/signing when the Server build fails.
+    [IO.File]::WriteAllText((Join-Path $fixture 'windows/scripts/lcompile-release-both.ps1'), '# successful synthetic component build')
+    [IO.File]::WriteAllText((Join-Path $fixture 'server/scripts/lcompile-release.ps1'), "throw 'Server build failed (23)'")
     $installer = Join-Path $fixture 'installer'
     New-Item -ItemType Directory -Force $installer | Out-Null
     [IO.File]::WriteAllText((Join-Path $installer 'Prepare-PackageFiles.ps1'), "throw 'Reached package staging after failure'")
-    function global:pnpm {
-        # 只让 'pnpm run build' 失败，允许 'pnpm install' 成功（用于首次依赖安装）
-        if ($args -contains 'build') { $global:LASTEXITCODE = 23 }
-        else { $global:LASTEXITCODE = 0 }
-    }
     Copy-Item (Join-Path $source 'installer/Invoke-LocalTest.ps1') $installer
     foreach ($entry in @('test.ps1', 'test-light.ps1', 'test-symbols.ps1')) {
         Copy-Item (Join-Path $source "installer/$entry") $installer
         $rejected = $false
         try { & (Join-Path $installer $entry) }
-        catch { $rejected = $_.Exception.Message -eq 'Settings page build failed (23)' }
-        if (-not $rejected) { throw "$entry continued after the settings build failed" }
+        catch { $rejected = $_.Exception.Message -eq 'Server build failed (23)' }
+        if (-not $rejected) { throw "$entry continued after the Server build failed" }
     }
     $global:LASTEXITCODE = 0
     Write-Host 'Configure/build failures stop local packaging before staging, signing or installation'
 } finally {
     Set-Location $originalLocation
-    Remove-Item Function:/cmake, Function:/pnpm, Function:/Invoke-MsimeManifestProbe -ErrorAction SilentlyContinue
+    Remove-Item Function:/cmake, Function:/Invoke-MsimeManifestProbe -ErrorAction SilentlyContinue
     Remove-Variable MsimeBuildCalls, MsimeFailAt, MsimeManifestExit, MsimeManifestArguments -Scope Global -ErrorAction SilentlyContinue
     if (Test-Path $fixture) { Remove-Item $fixture -Recurse -Force }
 }

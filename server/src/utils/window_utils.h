@@ -45,6 +45,8 @@ MonitorCoordinates GetMonitorCoordinatesFromPoint(POINT pt);
 // and showing one can throw the game out of exclusive mode (black flicker, mode switch, hangs).
 // UI thread only; the answer is cached briefly because candidate shows arrive once per keystroke.
 bool IsForegroundD3DExclusiveFullscreen();
+// True when hwnd covers its whole monitor (borderless or exclusive fullscreen).
+bool CheckFullscreen(HWND hwnd);
 
 MonitorCoordinates GetMonitorCoordinates();
 MonitorCoordinates GetMainMonitorCoordinates();

@@ -12,7 +12,7 @@
 #include "utils/common_utils.h"
 #include "utils/ime_utils.h"
 #include "utils/window_utils.h"
-#include "webview2/windows_webview2.h"
+#include "window/small_windows.h"
 #include "window/candidate_skin_palette.h"
 #include "window/candidate_wheel_paging.h"
 #include "window/ime_windows.h"

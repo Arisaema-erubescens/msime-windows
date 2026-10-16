@@ -57,7 +57,7 @@ bool g_english_input_mode = false;
 namespace
 {
 // Sticky UILess for the active Main-pipe client. When set, never raise the
-// WebView2 candidate HWND — hosts (games) draw via ITfUIElementSink instead.
+// candidate HWND — hosts (games) draw via ITfUIElementSink instead.
 bool g_activate_uiless = false;
 bool g_session_uiless = false;
 } // namespace
@@ -120,8 +120,8 @@ void ApplyUiLessFromPacket(const FanyImeNamedpipeData &pipe_data)
         g_candidate_translation_signature.clear();
         g_candidate_translation_glosses.clear();
         EnglishIme::ClearTranslations();
-        // A prior non-UILess session may have left the WebView2 candidate HWND
-        // visible; hide it immediately when the host takes over drawing.
+        // A prior non-UILess session may have left the candidate HWND visible;
+        // hide it immediately when the host takes over drawing.
         ::is_global_wnd_cand_shown = false;
         Global::SetCandidateWindowRenderedVisible(false);
         if (::global_hwnd && IsWindow(::global_hwnd))
@@ -194,8 +194,8 @@ void RequestShowCandidateWindow()
 // because there is nothing left to offer as candidates.
 void HideCandidateWindowAndDropItems()
 {
-    // Drop published candidates before any in-flight FineTuneWindow callback can
-    // re-inflate an empty-preedit + stale-candidate view.
+    // Drop published candidates before a queued show can re-render an
+    // empty-preedit + stale-candidate view.
     Global::CandidateString.clear();
     Global::ClearCandidatePageSnapshot();
     Global::candidate_ui.set_items({});

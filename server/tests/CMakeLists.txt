@@ -1,4 +1,4 @@
-﻿set(TEST_EXECUTABLE_NAME "MetasequoiaImeServerTests")
+set(TEST_EXECUTABLE_NAME "MetasequoiaImeServerTests")
 
 add_executable(test_voice_control_dispatch src/test_voice_control_dispatch.cpp
     ../src/ipc/voice_control_dispatch.cpp)
@@ -63,8 +63,6 @@ set(TEST_SOURCE_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/test_candidate_wheel_paging.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/test_candidate_view_model.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/test_candidate_text_policy.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/test_candidate_window_template.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/test_inline_protocol.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/test_settings_performance.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/test_candidate_size_estimator.cpp"
     "${CMAKE_SOURCE_DIR}/src/utils/candidate_size_estimator.cpp"
@@ -102,8 +100,6 @@ set(TEST_SOURCE_FILES
     "${CMAKE_SOURCE_DIR}/src/window/floating_toolbar_skin.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/test_system_font_family.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/test_dictionary_validation.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/test_skin_css_policy.cpp"
-    "${CMAKE_SOURCE_DIR}/src/webview2/skin_css_policy.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/test_stats_frame_decode.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/test_stats_aggregate.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/test_stats_overview.cpp"
@@ -134,8 +130,6 @@ set(TEST_SOURCE_FILES
     "${CMAKE_SOURCE_DIR}/src/utils/ime_paths.cpp"
     "${CMAKE_SOURCE_DIR}/src/utils/network_proxy.cpp"
     "${CMAKE_SOURCE_DIR}/src/settings/dictionary_validation.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/test_settings_mouse_input.cpp"
-    "${CMAKE_SOURCE_DIR}/src/settings/settings_mouse_input.cpp"
     # The catalog/download/delete behaviors under test live in collocation_model.cpp, so the
     # activation-fallback and id-guard cases link the real translation unit.
     "${CMAKE_SOURCE_DIR}/src/settings/collocation_model.cpp"
@@ -153,8 +147,6 @@ target_include_directories(${TEST_EXECUTABLE_NAME}
     "${CMAKE_SOURCE_DIR}/src"
     "${MSIME_VENDOR_DIR}"
     "${MSIME_ENGINE_DIR}/utfcpp/source"
-    # settings_mouse_input.h only needs the WebView2 enum declarations.
-    "${WEBVIEW2_VCPKG_ROOT}/include"
 )
 
 # test_default_config_credentials reads the config the installer actually ships, so the check is

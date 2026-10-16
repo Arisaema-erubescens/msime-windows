@@ -1,5 +1,4 @@
 #include "window/candidate_view_model.h"
-#include "window/ui_backend_policy.h"
 #include "tests/includes/test_framework.h"
 
 TEST_CASE(candidate_view_escapes_text_and_translation_without_turning_them_into_markup)
@@ -127,7 +126,7 @@ TEST_CASE(fixed_position_candidates_get_pin_badge_visible_in_both_backends)
     item.badge = " cloud";
     item.fixed_position = true;
     ApplyFixedPositionBadge(item, true, "paperclip");
-    // 追加而非覆盖：徽标并存时顺序稳定；WebView2 侧固定词条整体落在蓝色 span 内。
+    // 追加而非覆盖：徽标并存时顺序稳定；候选串里固定词条整体落在蓝色 span 内。
     REQUIRE_EQ(item.badge, std::string(" cloud \xF0\x9F\x93\x8E"));
     REQUIRE_EQ(CandidateViewHtml(item),
                std::string("<span style=\"color:#379AD3\">你好 cloud \xF0\x9F\x93\x8E</span>"));
@@ -203,22 +202,4 @@ TEST_CASE(ai_suggestion_badge_switches_between_robot_and_whale)
     both.badge = AiSuggestionBadge("whale");
     ApplyFixedPositionBadge(both, true, "paperclip");
     REQUIRE_EQ(both.badge, std::string(" \xF0\x9F\x90\xB3 \xF0\x9F\x93\x8E"));
-}
-
-TEST_CASE(ui_backend_policy_keeps_settings_web_and_small_windows_native_by_default)
-{
-    using namespace UiBackendPolicy;
-    for (auto surface : {Surface::Candidate, Surface::Toolbar, Surface::Menu})
-    {
-        REQUIRE(Resolve(surface, "") == Backend::Native);
-        REQUIRE(Resolve(surface, "sciter") == Backend::Native);
-        REQUIRE(Resolve(surface, "webview2") == Backend::WebView2);
-    }
-    REQUIRE(Resolve(Surface::Settings, "") == Backend::WebView2);
-    REQUIRE(Resolve(Surface::Settings, "webview2") == Backend::WebView2);
-    REQUIRE(Resolve(Surface::Settings, "sciter") == Backend::WebView2);
-    REQUIRE(Resolve(Surface::Settings, "d2d") == Backend::Native);
-    REQUIRE(!IsSupported("sciter"));
-    REQUIRE(!IsSupported("unknown"));
-    REQUIRE(IsSupported("d2d"));
 }

@@ -60,7 +60,7 @@ class CandidatePresenter
     float decorationTopDip_ = 0.0f;
     float decorationWidthDip_ = 0.0f;
     // 卡片最小宽度：默认 160，外部皮肤的 min_width_dip 与装饰图宽度可以把它撑大，
-    // 装饰图因此始终落在卡片宽度之内（与 WebView2 端的 min-width 规则一致）。
+    // 装饰图因此始终落在卡片宽度之内。
     float cardMinWidthDip_ = 160.0f;
     // 皮肤开了 fit_content：没有默认的 160，卡片宽度也不在同一输入里只增不减。
     bool fitContent_ = false;

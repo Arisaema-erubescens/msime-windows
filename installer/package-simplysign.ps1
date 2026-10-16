@@ -21,7 +21,7 @@ param(
     # so this local entry keeps them opt-in, like test-symbols.ps1.
     [switch]$IncludeSymbols,
 
-    # Hotfix package: only TSF, Server and HTML, like test-light.ps1. It carries no dictionaries,
+    # Hotfix package: only TSF, Server and the settings window assets, like test-light.ps1. It carries no dictionaries,
     # neural models or factory config template, so it is only valid on top of a full install whose
     # data files still match this build.
     [switch]$Light,
@@ -217,8 +217,7 @@ Write-Host "时间戳服务：$TimestampUrl"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $tsfCompile = Join-Path $repoRoot 'windows\scripts\lcompile-release-both.ps1'
 $serverCompile = Join-Path $repoRoot 'server\scripts\lcompile-release.ps1'
-$settingsDir = Join-Path $repoRoot 'ui-html\webview2\settings\ime-settings'
-foreach ($required in @($tsfCompile, $serverCompile, (Join-Path $settingsDir 'package.json'))) {
+foreach ($required in @($tsfCompile, $serverCompile)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "缺少组件构建入口：$required"
     }
@@ -249,13 +248,6 @@ try {
     Push-Location (Join-Path $repoRoot 'server')
     try { & $serverCompile -Reconfigure:$Reconfigure } finally { Pop-Location }
 
-    Push-Location $settingsDir
-    try {
-        pnpm run build
-        if ($LASTEXITCODE -ne 0) { throw "Settings page build failed ($LASTEXITCODE)" }
-    }
-    finally { Pop-Location }
-
     # 完整包的数据输入和 Invoke-LocalTest.ps1 一样准备：词库从本仓同级的 msime-dictionary 构建，
     # 不下载 Release；源数据提交和构建脚本都没变、工作区干净时直接跳过。不跑这一步，
     # Prepare-PackageFiles 只会原样拿 MetasequoiaImeDict\out\ 里上次留下的东西。
@@ -275,7 +267,6 @@ try {
         -RepoRoot $repoRoot `
         -TsfDirectory windows `
         -ServerDirectory server `
-        -UiHtmlDirectory ui-html `
         -NoticesDirectory . `
         -HelpCodeDirectory engine/helpcode
 

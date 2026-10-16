@@ -107,8 +107,8 @@ jobs:
   # races and null dereferences that the Debug build did not catch. Linux acted on that; this
   # repository had no sanitizer coverage at all.
   #
-  # Sanitizing the whole server would mean a sanitized Boost, curl, sqlite and WebView2 on a Windows
-  # runner. Instead the host-independent parsing and policy code builds as its own tiny target with
+  # Sanitizing the whole server would mean a sanitized Boost, curl and sqlite on a Windows runner.
+  # Instead the host-independent parsing and policy code builds as its own tiny target with
   # no dependencies, which runs under ASan and UBSan on Linux in seconds. It covers less than a full
   # sanitized build would; it covers it on every pull request.
   sanitizers:
@@ -294,59 +294,6 @@ jobs:
       - name: Test
         shell: pwsh
         run: ctest --no-tests=error --test-dir ui/build -C Release --verbose --timeout 60
-
-  pages:
-    name: Settings page
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      # The pages ship a copy of the engine's web contract. Before the consolidation the product
-      # lock kept that copy honest by pinning UiHtml and the engine together; now that the engine is
-      # a directory of this repository, the copy is checked against engine/contracts/webview
-      # directly and a plain checkout is enough to do it.
-      - name: Check the bundled contract against the engine
-        run: python3 ui-html/scripts/sync-contracts.py --check
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          version: 10
-
-      - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: ui-html/webview2/settings/ime-settings/pnpm-lock.yaml
-
-      - name: Install
-        working-directory: ui-html/webview2/settings/ime-settings
-        run: pnpm install --frozen-lockfile
-
-      - name: Test
-        working-directory: ui-html/webview2/settings/ime-settings
-        run: pnpm test
-
-      - name: Test candidate DOM rendering
-        run: node --test server/tests/test-candidate-dom-render.cjs
-
-      # Same command the release workflow runs. Until it was added here it was only ever exercised
-      # during a release, so a break surfaced while cutting a version.
-      - name: Build
-        working-directory: ui-html/webview2/settings/ime-settings
-        run: pnpm build
-
-      - name: Check the output the installer collects
-        working-directory: ui-html/webview2/settings/ime-settings
-        run: |
-          test -f dist/index.html
-          echo "dist contents:"
-          ls -la dist
 
   # External skins are plain data, so the checks are the manifest contract the Server catalog
   # enforces plus the example's installer; both run against the example and the skins/ collection.

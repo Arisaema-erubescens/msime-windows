@@ -545,11 +545,8 @@ VisualPtr BuildAppearancePage(PageContext &context)
         });
     }
 
-    // 界面渲染
+    // 输入法进程与设置窗口
     {
-        Dropdown::Options backend;
-        backend.minWidth = 120.0f;
-        backend.matchToggleWidth = true;
         Dropdown::Options linger;
         linger.minWidth = 150.0f;
         linger.matchToggleWidth = true;
@@ -568,13 +565,7 @@ VisualPtr BuildAppearancePage(PageContext &context)
             SetTimer(host->Hwnd(), 0x4E60, 3000, &RestoreRestartButton);
         });
         page.AddSection(MakeRows({
-            MakeRow(L"界面渲染", L"用于候选窗、悬浮工具栏和托盘菜单。更改后需重启输入法进程才会生效。",
-                    BindDropdown(context, "appearance.ui_backend",
-                                 Options({{"d2d", L"Direct2D"}, {"webview2", L"WebView2"}}), backend)),
-            MakeRow(L"设置窗口渲染", L"Direct2D 为实验性功能。切换后设置窗口会自动重新打开。",
-                    BindDropdown(context, "appearance.settings_ui_backend",
-                                 Options({{"webview2", L"WebView2"}, {"d2d", L"Direct2D（实验性）"}}), backend)),
-            MakeRow(L"重启输入法进程", L"立即重启输入法后台进程，使渲染方式等需要重启的设置生效。", restart),
+            MakeRow(L"重启输入法进程", L"立即重启输入法后台进程，使需要重启的设置生效。", restart),
             MakeRow(L"设置窗口后台驻留",
                     L"关闭设置窗口后在后台保留一段时间，期间重新打开无需等待加载；驻留越久占用内存越久。",
                     BindDropdown(context, "appearance.settings_window_linger",

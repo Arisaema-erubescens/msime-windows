@@ -11,7 +11,7 @@
 
 [CmdletBinding()]
 param(
-    # 默认走轻量包，和日常改 TSF / Server / HTML 的节奏一致；要连词库一起装就加 -Full。
+    # 默认走轻量包，和日常改 TSF / Server 的节奏一致；要连词库一起装就加 -Full。
     [switch]$Full,
     [switch]$Reconfigure
 )
