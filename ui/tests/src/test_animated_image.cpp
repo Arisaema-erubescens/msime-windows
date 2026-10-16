@@ -780,6 +780,28 @@ TEST_CASE(device_resources_shows_an_animation_over_budget_still)
     REQUIRE(bitmap == resources.GetBitmapFromFile(file.path));
 }
 
+TEST_CASE(device_resources_cached_bitmaps_do_not_keep_the_image_file_open)
+{
+    ComApartment com;
+    HiddenWindow window;
+    std::vector<uint8_t> png = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+    PutChunk(png, "IHDR", Ihdr(3, 2));
+    PutChunk(png, "IDAT", RgbaScanlines(3, 2, Fill(3, 2, kBlue)));
+    PutChunk(png, "IEND", {});
+    const TempFile file(png, L".png");
+    msimeui::DeviceResources resources;
+    REQUIRE(resources.EnsureForComposition(window.hwnd));
+    REQUIRE(resources.GetBitmapFromFile(file.path) != nullptr);
+    // Skin authors replace images while the IME runs, and upgrades rename skin folders: a cached
+    // bitmap must not hold the file. Opening for DELETE without FILE_SHARE_DELETE peers fails then.
+    const HANDLE handle = CreateFileW(file.path.c_str(), DELETE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                      nullptr, OPEN_EXISTING, 0, nullptr);
+    REQUIRE(handle != INVALID_HANDLE_VALUE);
+    CloseHandle(handle);
+    // Still cached: the bitmap lives on without the file.
+    REQUIRE(resources.GetBitmapFromFile(file.path) != nullptr);
+}
+
 TEST_CASE(nine_slice_follows_css_border_image)
 {
     ComApartment com;

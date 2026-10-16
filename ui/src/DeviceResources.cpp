@@ -780,9 +780,17 @@ ID2D1Bitmap *DeviceResources::GetBitmapFromFile(const std::wstring &filePath, D2
         return nullptr;
     }
 
+    // 先把像素解进内存里的 WIC 位图再建 D2D 位图：直接拿解码器建的 D2D 位图会一直引用解码器，
+    // 缓存期间文件句柄不放，皮肤图删不掉也覆盖不了。
+    Microsoft::WRL::ComPtr<IWICBitmap> pixels;
+    if (FAILED(wicFactory_->CreateBitmapFromSource(converter.Get(), WICBitmapCacheOnLoad, pixels.GetAddressOf())))
+    {
+        return nullptr;
+    }
+
     BitmapCacheEntry entry;
     entry.filePath = filePath;
-    if (FAILED(target->CreateBitmapFromWicBitmap(converter.Get(), nullptr, entry.bitmap.GetAddressOf())))
+    if (FAILED(target->CreateBitmapFromWicBitmap(pixels.Get(), nullptr, entry.bitmap.GetAddressOf())))
     {
         return nullptr;
     }

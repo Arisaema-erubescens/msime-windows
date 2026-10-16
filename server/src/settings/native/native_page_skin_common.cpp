@@ -842,6 +842,8 @@ ID2D1Bitmap *CachedBitmap(msimeui::DeviceResources &dr, const std::wstring &path
         ComPtr<IWICBitmapDecoder> decoder;
         ComPtr<IWICBitmapFrameDecode> frame;
         ComPtr<IWICFormatConverter> converter;
+        // 经内存里的 WIC 位图中转：直接用解码器建的 D2D 位图会一直占着皮肤图文件。
+        ComPtr<IWICBitmap> pixels;
         if (!wic ||
             FAILED(wic->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnLoad,
                                                   decoder.GetAddressOf())) ||
@@ -849,7 +851,8 @@ ID2D1Bitmap *CachedBitmap(msimeui::DeviceResources &dr, const std::wstring &path
             FAILED(wic->CreateFormatConverter(converter.GetAddressOf())) ||
             FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr,
                                          0.0, WICBitmapPaletteTypeMedianCut)) ||
-            FAILED(target->CreateBitmapFromWicBitmap(converter.Get(), nullptr, entry.bitmap.GetAddressOf())))
+            FAILED(wic->CreateBitmapFromSource(converter.Get(), WICBitmapCacheOnLoad, pixels.GetAddressOf())) ||
+            FAILED(target->CreateBitmapFromWicBitmap(pixels.Get(), nullptr, entry.bitmap.GetAddressOf())))
             entry.failed = true;
     }
     if (!entry.bitmap)
