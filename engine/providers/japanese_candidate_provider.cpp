@@ -157,8 +157,18 @@ std::vector<WordItem> JapaneseCandidateProvider::query(const QueryRequest &reque
         }
         for (; next_sentence < sentences.size(); ++next_sentence)
         {
-            AppendUnique(candidates, seen, request.raw_input_with_cases, sentences[next_sentence].text,
-                         900000 - sentences[next_sentence].cost, CandidateSource::Database);
+            const auto &sentence = sentences[next_sentence];
+            size_t input_length = request.raw_input_with_cases.size();
+            if (sentence.reading_length != 0)
+            {
+                const auto length = conversion.InputLengthForHiragana(sentence.reading_length);
+                // きゃ 等一次输入的假名组合不能从中间切开，否则会丢失后半个假名。
+                if (!length)
+                    continue;
+                input_length = *length;
+            }
+            AppendUnique(candidates, seen, request.raw_input_with_cases.substr(0, input_length), sentence.text,
+                         900000 - sentence.cost, CandidateSource::Database);
         }
     }
 
@@ -185,10 +195,12 @@ std::vector<WordItem> JapaneseCandidateProvider::query(const QueryRequest &reque
 
     if (!conversion.hiragana.empty() && !kana_first)
     {
-        AppendUnique(candidates, seen, request.raw_input_with_cases, conversion.hiragana, 1000000,
+        // 和整句候选用同一份按键边界，hiragana 非空时 segments 一定有末段。
+        const std::string converted_input =
+            request.raw_input_with_cases.substr(0, conversion.segments.back().input_end);
+        AppendUnique(candidates, seen, converted_input, conversion.hiragana, 1000000, CandidateSource::Generated);
+        AppendUnique(candidates, seen, converted_input, japanese::HiraganaToKatakana(conversion.hiragana), 999999,
                      CandidateSource::Generated);
-        AppendUnique(candidates, seen, request.raw_input_with_cases, japanese::HiraganaToKatakana(conversion.hiragana),
-                     999999, CandidateSource::Generated);
     }
 
     const auto dynamic = dynamic_candidates_.get(request.raw_input);

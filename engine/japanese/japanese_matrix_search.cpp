@@ -37,12 +37,12 @@ void KeepBest(std::vector<MatrixNode> &row, size_t limit)
 }
 
 void AppendUnique(std::vector<japanese::SentenceCandidate> &out, std::unordered_set<std::string> &seen,
-                  std::string text, std::int64_t cost, size_t limit)
+                  std::string text, std::int64_t cost, size_t limit, size_t reading_length = 0)
 {
     if (text.empty() || out.size() >= limit)
         return;
     if (seen.insert(text).second)
-        out.push_back({std::move(text), cost});
+        out.push_back({std::move(text), cost, reading_length});
 }
 } // namespace
 
@@ -127,7 +127,7 @@ std::vector<SentenceCandidate> JapaneseMatrixSearch::SearchReading(const std::st
         node.cost += decoder_.ConnectionCost(node.right_id, 0);
     std::sort(finals.begin(), finals.end(), [](const MatrixNode &a, const MatrixNode &b) { return a.cost < b.cost; });
     if (!finals.empty())
-        AppendUnique(result, seen, finals.front().text, finals.front().cost, limit);
+        AppendUnique(result, seen, finals.front().text, finals.front().cost, limit, reading.size());
 
     if (!pending.empty())
     {
@@ -141,7 +141,7 @@ std::vector<SentenceCandidate> JapaneseMatrixSearch::SearchReading(const std::st
     }
 
     for (size_t index = 1; index < finals.size(); ++index)
-        AppendUnique(result, seen, std::move(finals[index].text), finals[index].cost, limit);
+        AppendUnique(result, seen, std::move(finals[index].text), finals[index].cost, limit, reading.size());
 
     size_t lemma_mora = mora_count;
     while (lemma_mora > 0 && result.size() < limit)
@@ -149,7 +149,7 @@ std::vector<SentenceCandidate> JapaneseMatrixSearch::SearchReading(const std::st
         const std::string key = reading.substr(0, boundaries[lemma_mora]);
         for (const auto &lemma : decoder_.ExactLemmas(key, 16))
         {
-            AppendUnique(result, seen, lemma.surface, lemma.word_cost, limit);
+            AppendUnique(result, seen, lemma.surface, lemma.word_cost, limit, key.size());
             if (result.size() == limit)
                 break;
         }

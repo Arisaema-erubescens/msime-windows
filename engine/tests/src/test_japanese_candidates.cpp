@@ -1,4 +1,5 @@
 #include "../../core/data_path.h"
+#include "../../core/input_session.h"
 #include "../../japanese/japanese_sentence_decoder.h"
 #include "../../providers/japanese_candidate_provider.h"
 #include "../../schemes/japanese_romaji_scheme.h"
@@ -30,10 +31,21 @@ void make_model(const std::filesystem::path &path)
         std::string surface;
         std::uint32_t cost;
     };
-    std::vector<Lemma> lemmas = {{"か", "蚊", 100},          {"かわ", "川", 7000},           {"かわいい", "可愛い", 5},
-                                 {"しんよう", "信用", 4000}, {"しんようそ", "新要素", 1},    {"は", "は", 100},
-                                 {"はし", "橋", 4500},       {"はし", "箸", 5000},           {"はしる", "走る", 1},
-                                 {"わたし", "私", 2000},     {"わたしはしる", "私は走る", 1}};
+    std::vector<Lemma> lemmas = {{"か", "蚊", 100},
+                                 {"かわ", "川", 7000},
+                                 {"かわいい", "可愛い", 5},
+                                 {"しんよう", "信用", 4000},
+                                 {"しんようそ", "新要素", 1},
+                                 {"は", "は", 100},
+                                 {"はし", "橋", 4500},
+                                 {"はし", "箸", 5000},
+                                 {"はしる", "走る", 1},
+                                 {"わたし", "私", 2000},
+                                 {"わたしはしる", "私は走る", 1},
+                                 {"し", "詩", 100},
+                                 {"き", "木", 100},
+                                 {"ん", "ン", 100},
+                                 {"っ", "ッ", 100}};
     std::stable_sort(lemmas.begin(), lemmas.end(),
                      [](const Lemma &a, const Lemma &b) { return a.reading < b.reading; });
     std::string strings;
@@ -154,6 +166,73 @@ void run_test(const std::filesystem::path &root)
     const auto found = without_model.find_candidate(SchemeType::JapaneseRomaji, "nihongo", "日本語");
     require(found.has_value() && found->scheme == SchemeType::JapaneseRomaji,
             "find_candidate returned a Japanese candidate without its scheme.");
+
+    // 候选保留实际输入的前缀，不能把后续音节也算进选中项。
+    require(kawai[position(kawai, "川")].pinyin == "kawa" && kawai[position(kawai, "蚊")].pinyin == "ka",
+            "A prefix candidate consumed the entire Japanese reading.");
+    const auto contracted = query(provider, "kyaha");
+    require(std::none_of(contracted.begin(), contracted.end(), [](const WordItem &item) { return item.word == "木"; }),
+            "A prefix candidate split the middle of a contracted kana.");
+
+    const metasequoia::RuntimePaths paths{root, root, root / "cache", root};
+    const auto type = [](metasequoia::InputSession &session, const std::string &input) {
+        for (const char ch : input)
+            require(session.handle_character(ch).handled, "Japanese input was rejected.");
+    };
+    const auto check_selection = [&](const std::string &input, const std::string &word, const std::string &rest) {
+        metasequoia::InputSession session(SchemeType::JapaneseRomaji, 0, true, true, false, paths);
+        type(session, input);
+        const auto selected = session.select_candidate(word);
+        require(selected.commit == word && session.preedit() == rest && session.has_composition(),
+                "Selecting a Japanese prefix lost or changed the remaining input.");
+    };
+    check_selection("kawai", "川", "i");
+    check_selection("watashiha", "私", "ha");
+    check_selection("shiha", "詩", "ha");
+    check_selection("siha", "詩", "ha");
+    check_selection("n'ha", "ン", "ha");
+    check_selection("nnha", "ン", "ha");
+    check_selection("kka", "ッ", "ka");
+    check_selection("kaw", "か", "w");
+    check_selection("kaw", "カ", "w");
+    check_selection("ka'ta", "か", "ta");
+
+    // 固定候选位打开时 candidates() 走混排列表，分段选词后要按剩余输入重建。
+    metasequoia::InputSession pinned(SchemeType::JapaneseRomaji, 0, true, true, false, paths);
+    pinned.enable_fixed_positions();
+    type(pinned, "kawai");
+    require(pinned.select_candidate("川").commit == "川" && pinned.preedit() == "i",
+            "Pinned selection lost the suffix.");
+    require(!pinned.candidates().empty() && std::all_of(pinned.candidates().begin(), pinned.candidates().end(),
+                                                        [](const WordItem &item) { return item.pinyin == "i"; }),
+            "Pinned candidates still belonged to the input before the selection.");
+
+    // Windows 分段选词直接调用 transition；公开会话接口还要正确结束整词和补全候选。
+    metasequoia::InputSession segmented(SchemeType::JapaneseRomaji, 0, true, true, false, paths);
+    segmented.set_pinyin_sequence_with_cases("WatashiHA");
+    segmented.recompute_candidates();
+    const auto item = segmented.candidates()[position(segmented.candidates(), "私")];
+    const auto transition =
+        segmented.advance_composition_after_selection(item.pinyin, item.word, item.canonical_pinyin, item.scheme);
+    const auto progress = segmented.update_creating_word_progress("", "", item.word, transition);
+    require(transition.continues_composition && transition.consumed_raw_input_with_cases == "Watashi" &&
+                segmented.preedit() == "HA" && progress.preedit == "私HA" && !progress.completed,
+            "The Windows selection transition did not preserve the Japanese suffix.");
+    require(segmented.select_candidate("は").commit == "は" && !segmented.has_composition(),
+            "The final Japanese segment did not finish composition.");
+    type(segmented, "kaw");
+    require(segmented.select_candidate("可愛い").commit == "可愛い" && !segmented.has_composition(),
+            "A prediction left input behind after committing the complete candidate.");
+
+    metasequoia::InputSession temporary(SchemeType::Quanpin, 0, true, true, false, paths);
+    require(temporary.handle_character('R', true).handled, "Temporary Japanese did not start.");
+    type(temporary, "kawai");
+    require(temporary.select_candidate("川").commit == "川" && temporary.preedit() == "Ri" &&
+                temporary.local_input_mode() == metasequoia::LocalInputMode::TemporaryJapanese,
+            "Partial selection exited temporary Japanese before the suffix was selected.");
+    require(temporary.select_candidate("い").commit == "い" && !temporary.has_composition() &&
+                temporary.scheme() == SchemeType::Quanpin,
+            "Completing temporary Japanese did not restore the original scheme.");
 }
 } // namespace
 

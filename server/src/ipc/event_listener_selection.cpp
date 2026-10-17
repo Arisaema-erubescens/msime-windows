@@ -286,10 +286,11 @@ void ProcessSelectionKey(UINT keycode, uint64_t client_id, uint64_t activation_e
         Global::candidate_ui.selected_text = Global::candidate_ui.page_words[index];
         std::string curWord = curWordItem.word;
         std::string curWordPinyin = curWordItem.pinyin;
+        // 日语假名可能只覆盖已完成的音节，和词典候选一起推进，保留尚未转换的后缀。
         if (curWordItem.source == CandidateSource::EnglishDictionary ||
             curWordItem.source == CandidateSource::QuickPhrase || curWordItem.source == CandidateSource::Emoji ||
             curWordItem.source == CandidateSource::Kaomoji || curWordItem.source == CandidateSource::DateTime ||
-            curWordItem.source == CandidateSource::Generated)
+            (curWordItem.source == CandidateSource::Generated && !japanese_candidate))
         {
             Global::candidate_ui.selected_text =
                 string_to_wstring(CandidateTextForOutput(GlobalIme::composition.creating_word.word + curWord));
@@ -492,7 +493,7 @@ void ProcessSelectionKey(UINT keycode, uint64_t client_id, uint64_t activation_e
         // 但它和词格整句一样是猜出来的：词库里没有它那一行，下面 isNeedUpdateWeight 要改的
         // 行根本不存在。所以它独立上屏时也要落库。接在造词前缀后面的那种由上面的造词收尾
         // 负责（creating_word_progress.can_store），这里不重复存。
-        if (!isNeedCreateWord && !was_creating_word &&
+        if (!japanese_candidate && !isNeedCreateWord && !was_creating_word &&
             FanyImeIpc::ShouldStoreStandaloneSentence(curWordItem.source, curWordItem.canonical_pinyin))
         {
             EnqueueStoreUserPhraseTask(curWordItem.canonical_pinyin, curWord, /*pinyin_is_canonical=*/true);

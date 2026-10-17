@@ -60,29 +60,31 @@ RomajiConversion ConvertRomaji(std::string_view input)
     RomajiConversion result;
     const auto &table = RomajiTable();
     size_t index = 0;
+    const auto append = [&](const std::string &kana, size_t input_length) {
+        result.hiragana += kana;
+        index += input_length;
+        result.segments.push_back({index, result.hiragana.size()});
+    };
     while (index < normalized.size())
     {
         if (normalized[index] == 'n')
         {
             if (index + 1 == normalized.size())
             {
-                result.hiragana += "ん";
-                ++index;
+                append("ん", 1);
                 continue;
             }
             const char next = normalized[index + 1];
             // Both spellings complete one nasal; the next key starts a new syllable.
             if (next == '\'' || next == 'n')
             {
-                result.hiragana += "ん";
-                index += 2;
+                append("ん", 2);
                 continue;
             }
             // 长音符 '-' 不是元音，和辅音一样让前面的 n 收成 ん。
             if (next == '-' || (IsConsonant(next) && next != 'y'))
             {
-                result.hiragana += "ん";
-                ++index;
+                append("ん", 1);
                 continue;
             }
         }
@@ -90,8 +92,7 @@ RomajiConversion ConvertRomaji(std::string_view input)
         if (index + 1 < normalized.size() && normalized[index] == normalized[index + 1] &&
             IsConsonant(normalized[index]) && normalized[index] != 'n')
         {
-            result.hiragana += "っ";
-            ++index;
+            append("っ", 1);
             continue;
         }
 
@@ -104,8 +105,7 @@ RomajiConversion ConvertRomaji(std::string_view input)
             {
                 continue;
             }
-            result.hiragana += found->second;
-            index += length;
+            append(found->second, length);
             matched = true;
             break;
         }
@@ -117,6 +117,14 @@ RomajiConversion ConvertRomaji(std::string_view input)
     }
     result.complete = !result.hiragana.empty() && result.pending.empty();
     return result;
+}
+
+std::optional<size_t> RomajiConversion::InputLengthForHiragana(size_t length) const
+{
+    for (const auto &segment : segments)
+        if (segment.hiragana_end == length)
+            return segment.input_end;
+    return std::nullopt;
 }
 
 std::string HiraganaToKatakana(std::string_view hiragana)

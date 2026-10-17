@@ -886,6 +886,31 @@ InputSession::SelectionTransition InputSession::advance_composition_after_select
     if (is_japanese())
     {
         transition.full_pure_pinyin = request().raw_input;
+        const std::string typed = request().raw_input_with_cases;
+        const size_t consumed = selected_pinyin.size();
+        std::string rest_raw_input;
+        std::string rest_raw_input_with_cases;
+        if (consumed > 0 && consumed < typed.size() && typed.compare(0, consumed, selected_pinyin) == 0)
+        {
+            rest_raw_input = request().raw_input.substr(consumed);
+            rest_raw_input_with_cases = typed.substr(consumed);
+            // ka'ta 选「か」剩下 'ta：开头的分隔符转不出假名，留着会让剩余输入一个候选都没有。
+            remove_consumed_leading_separators(rest_raw_input, rest_raw_input_with_cases);
+        }
+        transition.continues_composition = !rest_raw_input_with_cases.empty();
+        transition.consumed_raw_input_with_cases = typed.substr(0, typed.size() - rest_raw_input_with_cases.size());
+        if (transition.continues_composition)
+        {
+            engine_.replace_japanese_raw_input(rest_raw_input, rest_raw_input_with_cases);
+            online_requests_.invalidate();
+            // 固定候选位打开时 candidates() 返回的是混排列表，不重建就还是选词前整串的那份。
+            update_mixed_candidates();
+            if (local_input_mode_ == LocalInputMode::TemporaryJapanese)
+            {
+                local_preedit_ = "R" + engine_.get_preedit();
+                local_candidates_ = engine_.get_candidates();
+            }
+        }
         transition.current_segmentation = request().segmentation;
         transition.current_segmentation_with_cases = request().raw_input_with_cases;
         return transition;

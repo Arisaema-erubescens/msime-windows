@@ -2,15 +2,24 @@
 
 #include <string>
 #include <string_view>
+#include <optional>
 #include <vector>
 
 namespace japanese
 {
 struct RomajiConversion
 {
+    struct Segment
+    {
+        size_t input_end;
+        size_t hiragana_end;
+    };
     std::string hiragana;
     std::string pending;
     bool complete = false;
+    // 保存实际按键边界，避免把 shi/si、nn/n' 等写法反向转换成另一种罗马音。
+    std::vector<Segment> segments;
+    std::optional<size_t> InputLengthForHiragana(size_t length) const;
 };
 
 RomajiConversion ConvertRomaji(std::string_view input);

@@ -838,6 +838,13 @@ KeyResult InputSession::commit(std::size_t index)
         text = preedit();
     }
     std::optional<std::string> diagnostic = learn_candidate(index);
+    if (selected && is_japanese())
+    {
+        const auto transition = advance_composition_after_selection(selected->pinyin, selected->word,
+                                                                    selected->canonical_pinyin, selected->scheme);
+        if (transition.continues_composition)
+            return {true, std::move(text), std::move(diagnostic)};
+    }
     if (selected && local_input_mode_ == LocalInputMode::None && !dedicated_english_mode_ && !is_japanese() &&
         !is_wubi_native_candidate(*selected) &&
         (selected->source == CandidateSource::Database || selected->source == CandidateSource::UserDatabase))

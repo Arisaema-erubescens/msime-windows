@@ -13,6 +13,8 @@ struct SentenceCandidate
 {
     std::string text;
     std::int64_t cost = 0;
+    // 已转换读音的 UTF-8 字节数；0 表示补全候选，消耗全部已输入的罗马音。
+    size_t reading_length = 0;
 };
 
 struct JapaneseLemma
