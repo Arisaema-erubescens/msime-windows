@@ -2,6 +2,7 @@
 
 #include "utils/common_utils.h"
 
+#include "msimeui/AnimatedImage.h"
 #include "msimeui/DeviceResources.h"
 #include "msimeui/Fonts.h"
 #include "msimeui/Window.h"
@@ -308,6 +309,39 @@ RectF FitImage(const SizeF &image, const RectF &box, const std::string &fit)
     const float w = image.width * scale;
     const float h = image.height * scale;
     return {box.x + (box.width - w) * 0.5f, box.y + (box.height - h) * 0.5f, w, h};
+}
+
+// v2 free decorations around the frame `box`, placed like CandidateSkinOverlay: the anchor picks
+// a corner, edge or the center of the frame, the offset moves from there, and the image is
+// fitted (contain) and centered in its width x height box.
+void DrawDecorations(msimeui::DeviceResources &dr, const std::vector<CandidateLook::Decoration> &layer,
+                     const RectF &box, bool animated)
+{
+    for (const auto &dec : layer)
+    {
+        D2D1_SIZE_F source{};
+        ID2D1Bitmap *bitmap = PreviewFrame(dr, dec.image, animated, &source);
+        if (!bitmap || source.width <= 0.0f || source.height <= 0.0f)
+            continue;
+        const float w = dec.width > 0.0f ? dec.width : source.width;
+        const float h = dec.height > 0.0f ? dec.height : source.height;
+        const float right = box.x + box.width, bottom = box.y + box.height;
+        const std::string &a = dec.anchor;
+        // Horizontal: left edge, centered, or the right edge ("right" and anything unknown).
+        float x = right - w;
+        if (a == "top-left" || a == "bottom-left" || a == "left")
+            x = box.x;
+        else if (a == "top" || a == "bottom" || a == "center")
+            x = box.x + (box.width - w) * 0.5f;
+        // Vertical: top edge, bottom edge, or centered.
+        float y = box.y + (box.height - h) * 0.5f;
+        if (a == "top-left" || a == "top-right" || a == "top")
+            y = box.y;
+        else if (a == "bottom-left" || a == "bottom-right" || a == "bottom")
+            y = bottom - h;
+        DrawImage(dr, bitmap,
+                  FitImage({source.width, source.height}, {x + dec.offsetX, y + dec.offsetY, w, h}, "contain"));
+    }
 }
 
 const wchar_t *kSampleWords[] = {L"你们", L"你", L"尼", L"妮", L"泥", L"逆", L"拟", L"腻", L"拧"};
@@ -746,6 +780,33 @@ CandidateLook ResolveCandidateLook(const SettingsModel &model, const std::string
                 k.radius = 0.0f;
                 k.shadowAlpha1 = k.shadowAlpha2 = 0.0f;
             }
+            k.animated = true;
+            k.outer = edges(canvas, "outer");
+            // line_gap_dip is the whole distance from the preedit row to the candidates; the
+            // first candidate's own top margin is part of it.
+            if (canvas->contains("lineGap") && (*canvas)["lineGap"].is_number())
+                k.pinyinMarginBottom = (*canvas)["lineGap"].get<float>() - k.candMarginTop;
+            const auto decorations = [&](const char *key) {
+                std::vector<CandidateLook::Decoration> result;
+                const Json *layer = canvas->contains(key) ? &(*canvas)[key] : nullptr;
+                if (!layer || !layer->is_array())
+                    return result;
+                for (const auto &item : *layer)
+                {
+                    const std::string image = StringOr(&item, "image");
+                    if (image.empty())
+                        continue;
+                    const auto number = [&item](const char *name) {
+                        const auto it = item.find(name);
+                        return it != item.end() && it->is_number() ? it->get<float>() : 0.0f;
+                    };
+                    result.push_back({SkinResourcePath(model, skinId, image), StringOr(&item, "anchor"),
+                                      number("offsetX"), number("offsetY"), number("width"), number("height")});
+                }
+                return result;
+            };
+            k.decorationsBelow = decorations("decorationsBelow");
+            k.decorationsAbove = decorations("decorationsAbove");
         }
     }
     return k;
@@ -866,6 +927,24 @@ ID2D1Bitmap *CachedBitmap(msimeui::DeviceResources &dr, const std::wstring &path
         *size = D2D1::SizeF(static_cast<float>(w), static_cast<float>(h));
     }
     return entry.bitmap.Get();
+}
+
+ID2D1Bitmap *PreviewFrame(msimeui::DeviceResources &dr, const std::wstring &path, bool animated, D2D1_SIZE_F *size)
+{
+    // Only containers that can hold frames go through msimeui (which keeps just a few still
+    // bitmaps); everything else, and every image with animations off, stays in our cache.
+    static std::map<std::wstring, bool> mayAnimate;
+    if (!animated || path.empty() || !dr.AreAnimationsEnabled())
+        return CachedBitmap(dr, path, size);
+    auto it = mayAnimate.find(path);
+    if (it == mayAnimate.end())
+    {
+        ComPtr<IWICImagingFactory> wic = WicFactory();
+        it = mayAnimate.emplace(path, wic && msimeui::AnimatedImage::MayBeAnimated(wic.Get(), path)).first;
+    }
+    if (!it->second)
+        return CachedBitmap(dr, path, size);
+    return dr.GetImageFrame(path, size);
 }
 
 SizeF ImageFileSize(const std::wstring &path)
@@ -1217,9 +1296,11 @@ void CandidatePreview::Set(const CandidateLook &look, const CandidateFont &font,
 SizeF CandidatePreview::Measure(const SizeF &availableSize)
 {
     impl_->Build();
-    impl_->Layout(availableSize.width);
+    const Thickness &outer = impl_->look.outer;
+    impl_->Layout(std::max(availableSize.width - outer.left - outer.right, 0.0f));
     const float decoration = impl_->look.decorationTop;
-    return {std::min(impl_->geometry.width, availableSize.width), impl_->geometry.height + decoration};
+    return {std::min(impl_->geometry.width + outer.left + outer.right, availableSize.width),
+            impl_->geometry.height + decoration + outer.top + outer.bottom};
 }
 
 void CandidatePreview::Arrange(const RectF &finalRect)
@@ -1231,16 +1312,16 @@ void CandidatePreview::Render(msimeui::DeviceResources &dr)
 {
     Impl &m = *impl_;
     m.Build();
-    m.Layout(m.laidOutFor >= 0.0f ? m.laidOutFor : bounds_.width);
-    const auto &g = m.geometry;
     const CandidateLook &k = m.look;
+    m.Layout(m.laidOutFor >= 0.0f ? m.laidOutFor : std::max(bounds_.width - k.outer.left - k.outer.right, 0.0f));
+    const auto &g = m.geometry;
     const float f = m.font.size;
     ID2D1RenderTarget *target = dr.GetRenderTarget();
     if (!target)
         return;
 
-    const float x0 = bounds_.x;
-    const float y0 = bounds_.y + k.decorationTop;
+    const float x0 = bounds_.x + k.outer.left;
+    const float y0 = bounds_.y + k.outer.top + k.decorationTop;
     m.origin = {x0, y0};
     const RectF box = {x0, y0, g.width, g.height};
 
@@ -1248,7 +1329,7 @@ void CandidatePreview::Render(msimeui::DeviceResources &dr)
     if (!k.decorationImage.empty())
     {
         D2D1_SIZE_F size{};
-        if (ID2D1Bitmap *bitmap = CachedBitmap(dr, k.decorationImage, &size))
+        if (ID2D1Bitmap *bitmap = PreviewFrame(dr, k.decorationImage, k.animated, &size))
         {
             const float w = k.decorationWidth;
             float dx = x0 + g.width - w;
@@ -1256,10 +1337,14 @@ void CandidatePreview::Render(msimeui::DeviceResources &dr)
                 dx = x0;
             else if (k.decorationAlign == "center")
                 dx = x0 + (g.width - w) * 0.5f;
-            const RectF slot = {dx, bounds_.y, w, k.decorationTop};
+            const RectF slot = {dx, y0 - k.decorationTop, w, k.decorationTop};
             DrawImage(dr, bitmap, FitImage({size.width, size.height}, slot, "contain"));
         }
     }
+
+    // v2 decorations under the panel come before the frame and its shadow, like the candidate
+    // window's back overlay.
+    DrawDecorations(dr, k.decorationsBelow, box, k.animated);
 
     if (k.shadowAlpha1 > 0.0f)
     {
@@ -1271,13 +1356,13 @@ void CandidatePreview::Render(msimeui::DeviceResources &dr)
     FillRounded(dr, box, k.radius, k.bg);
     if (!k.panelImage.empty())
     {
-        if (ID2D1Bitmap *bitmap = CachedBitmap(dr, k.panelImage, nullptr))
+        if (ID2D1Bitmap *bitmap = PreviewFrame(dr, k.panelImage, k.animated))
             msimeui::DrawNineSlice(target, bitmap, box, msimeui::NineSlice{k.panelSlice, k.panelWidth, k.panelFill});
     }
     else if (!k.backgroundImage.empty())
     {
         D2D1_SIZE_F size{};
-        if (ID2D1Bitmap *bitmap = CachedBitmap(dr, k.backgroundImage, &size))
+        if (ID2D1Bitmap *bitmap = PreviewFrame(dr, k.backgroundImage, k.animated, &size))
         {
             if (PushRoundedClip(dr, box, k.radius))
             {
@@ -1415,6 +1500,7 @@ void CandidatePreview::Render(msimeui::DeviceResources &dr)
         target->PopLayer();
     if (Has(k.border) && k.borderWidth > 0.0f)
         StrokeRounded(dr, box, k.radius, k.border, k.borderWidth);
+    DrawDecorations(dr, k.decorationsAbove, box, k.animated);
 }
 
 bool CandidatePreview::OnMouseMove(const POINT &point, WPARAM)

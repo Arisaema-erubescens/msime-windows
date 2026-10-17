@@ -99,6 +99,21 @@ struct CandidateLook
     std::wstring panelImage;
     Thickness panelSlice = {}, panelWidth = {};
     bool panelFill = true;
+    // A schema 2 skin plays its APNG / GIF images (panel and decorations); v1 skins stay still,
+    // as in the candidate window.
+    bool animated = false;
+    // outer_insets_dip: room around the frame for decorations that hang outside it.
+    Thickness outer = {};
+    // Free decorations of a schema 2 skin, anchored to the frame. `below` is drawn under the
+    // panel, `above` over the panel and the text, each in its array order.
+    struct Decoration
+    {
+        std::wstring image;
+        std::string anchor;
+        float offsetX = 0.0f, offsetY = 0.0f;
+        float width = 0.0f, height = 0.0f; // 0 takes the image's own size
+    };
+    std::vector<Decoration> decorationsBelow, decorationsAbove;
 };
 
 CandidateLook ResolveCandidateLook(const SettingsModel &model, const std::string &skinId, bool light, bool horizontal,
@@ -122,6 +137,10 @@ ToolbarLook ResolveToolbarLook(const SettingsModel &model, const std::string &sk
 // Bitmap of an image file, cached per render target (msimeui's cache holds only a
 // few, and a page of skins shows many).
 ID2D1Bitmap *CachedBitmap(msimeui::DeviceResources &dr, const std::wstring &path, D2D1_SIZE_F *size = nullptr);
+// The current frame of an APNG / GIF when `animated` is set (msimeui's animation clock; the
+// window repaints when the next one is due), otherwise CachedBitmap's still image.
+ID2D1Bitmap *PreviewFrame(msimeui::DeviceResources &dr, const std::wstring &path, bool animated,
+                          D2D1_SIZE_F *size = nullptr);
 SizeF ImageFileSize(const std::wstring &path);
 
 // `.candidate.wnd-v` / `.wnd-h` with the sample candidates of partials/candidate.

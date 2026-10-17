@@ -185,7 +185,7 @@ nlohmann::json CandidateColorsToJson(const CandidateSkinCatalog::CandidateColors
     return json;
 }
 
-// canvas（v2）皮肤给设置页预览的面板几何，与候选窗同一套换算；四边按「上右下左」。不是 v2 时为 null。
+// canvas（v2）皮肤给设置页预览的面板几何与挂件，与候选窗同一套换算；四边按「上右下左」。不是 v2 时为 null。
 nlohmann::json CanvasSkinPreviewJson(const CandidateSkinCatalog::Package &skin)
 {
     if (skin.schemaVersion < 2)
@@ -195,7 +195,9 @@ nlohmann::json CanvasSkinPreviewJson(const CandidateSkinCatalog::Package &skin)
     };
     // 5 DIP 是候选窗 canvas 基底自己的内边距（CandidatePresenter 的 containerPad）。
     nlohmann::json json = {{"padding", edges(CandidateSkinLayers::ResolveContentPadding(skin, 5.0))},
-                           {"panel", nullptr}};
+                           {"panel", nullptr},
+                           {"lineGap", skin.lineGapDip ? nlohmann::json(*skin.lineGapDip) : nlohmann::json()},
+                           {"outer", nullptr}};
     if (skin.borderImage && !skin.borderImage->source.empty())
     {
         const CandidateSkinLayers::NineSlice nine = CandidateSkinLayers::ResolveNineSlice(*skin.borderImage);
@@ -204,6 +206,28 @@ nlohmann::json CanvasSkinPreviewJson(const CandidateSkinCatalog::Package &skin)
                          {"width", edges(nine.width)},
                          {"fill", nine.fill}};
     }
+    if (skin.outerInsetsDip)
+    {
+        const CandidateSkinCatalog::InsetsDip &outer = *skin.outerInsetsDip;
+        json["outer"] = nlohmann::json::array({outer.top, outer.right, outer.bottom, outer.left});
+    }
+    // 挂件已按候选窗的规则排好序、分成面板下层与上层，预览按数组顺序绘制即可。
+    const auto decorations = [](const std::vector<CandidateSkinCatalog::FreeDecoration> &layer) {
+        nlohmann::json array = nlohmann::json::array();
+        for (const auto &dec : layer)
+        {
+            array.push_back({{"image", dec.image},
+                             {"anchor", dec.anchor},
+                             {"offsetX", dec.offsetXDip},
+                             {"offsetY", dec.offsetYDip},
+                             {"width", dec.widthDip},
+                             {"height", dec.heightDip}});
+        }
+        return array;
+    };
+    const CandidateSkinLayers::Layers layers = CandidateSkinLayers::SplitDecorations(skin.freeDecorations);
+    json["decorationsBelow"] = decorations(layers.below);
+    json["decorationsAbove"] = decorations(layers.above);
     return json;
 }
 

@@ -98,7 +98,8 @@ struct PageInfo
     PageFactory build;
 };
 
-// Sidebar order, as in partials/sidebar.html.
+// Sidebar order, as in partials/sidebar.html except that 输入 now comes before 外观. The
+// first entry is the page the window opens on.
 const std::vector<PageInfo> &Pages();
 
 VisualPtr BuildAppearancePage(PageContext &context);

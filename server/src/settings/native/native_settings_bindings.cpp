@@ -189,8 +189,9 @@ std::string Narrow(const std::wstring &text)
 const std::vector<PageInfo> &Pages()
 {
     static const std::vector<PageInfo> pages = {
-        {"appearance", L"外观", L"sidebar/appearance.svg", &BuildAppearancePage},
+        // 输入在外观之前、也是默认打开的页面：冷启动不用排版候选窗预览、解码皮肤图片。
         {"input", L"输入", L"sidebar/input.svg", &BuildInputPage},
+        {"appearance", L"外观", L"sidebar/appearance.svg", &BuildAppearancePage},
         {"helpcode", L"辅助码", L"sidebar/helpcode.svg", &BuildHelpcodePage},
         {"shortcut", L"快捷键", L"sidebar/shortcut.svg", &BuildShortcutPage},
         {"dict", L"词库", L"sidebar/dictionary.svg", &BuildDictionaryPage},

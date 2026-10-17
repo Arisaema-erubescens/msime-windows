@@ -17,6 +17,7 @@
 #include <windowsx.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <map>
 #include <memory>
@@ -33,6 +34,18 @@ constexpr float kWindowButtonWidth = 42.0f; // .window-button
 constexpr float kWindowButtonGap = 2.0f;    // .window-controls { gap: 2px }
 constexpr UINT_PTR kToolTipTimer = 0x4E53;
 constexpr UINT_PTR kToastTimer = 0x4E54;
+// Next frame of an animated skin image (APNG / GIF) in a preview. msimeui::Window does not
+// time an adopted HWND's frames, so the window does it from the same deadline.
+constexpr UINT_PTR kImageFrameTimer = 0x4E55;
+
+// 系统「显示动画」关闭时预览里的动图只显示首帧，与候选窗同一个开关；读不到时按开启处理。
+bool SystemAnimationsEnabled()
+{
+    BOOL enabled = TRUE;
+    if (!SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0))
+        return true;
+    return enabled != FALSE;
+}
 
 msimeui::ScrollViewer::Appearance WebKitScrollbar(float reserved)
 {
@@ -1081,6 +1094,7 @@ class SettingsWindowImpl : public HostServices
         SetLayoutScale(static_cast<float>(GetDpiForWindow(hwnd_)) / 96.0f);
         window_->SetBackgroundColor(CurrentPalette().chromeBg);
         window_->StartCaretTimer();
+        window_->GetDeviceResources().SetAnimationsEnabled(SystemAnimationsEnabled());
 
         titleBar_ = std::make_shared<TitleBar>();
         sidebar_ = std::make_shared<Sidebar>();
@@ -1106,13 +1120,14 @@ class SettingsWindowImpl : public HostServices
         SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
                      SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         model_.Post("configRequest");
-        ShowPage(initialPage.empty() ? std::string("appearance") : initialPage);
+        ShowPage(initialPage.empty() ? std::string("input") : initialPage);
     }
 
     ~SettingsWindowImpl() override
     {
         KillTimer(hwnd_, kToolTipTimer);
         KillTimer(hwnd_, kToastTimer);
+        KillTimer(hwnd_, kImageFrameTimer);
     }
 
     // HostServices
@@ -1320,6 +1335,13 @@ class SettingsWindowImpl : public HostServices
                 result = 0;
                 return true;
             }
+            if (wParam == kImageFrameTimer)
+            {
+                KillTimer(hwnd_, kImageFrameTimer);
+                window_->Invalidate();
+                result = 0;
+                return true;
+            }
             if (wParam == 1)
             {
                 result = window_->DispatchImportedMessage(message, wParam, lParam);
@@ -1354,7 +1376,15 @@ class SettingsWindowImpl : public HostServices
         case WM_PAINT:
             result = window_->DispatchImportedMessage(message, wParam, lParam);
             painted_ = true;
+            ScheduleImageFrame();
             return true;
+        case WM_SETTINGCHANGE:
+            if (wParam == SPI_SETCLIENTAREAANIMATION)
+            {
+                window_->GetDeviceResources().SetAnimationsEnabled(SystemAnimationsEnabled());
+                window_->Invalidate();
+            }
+            return false;
         case WM_LBUTTONDOWN:
         case WM_LBUTTONUP:
         case WM_LBUTTONDBLCLK:
@@ -1387,6 +1417,22 @@ class SettingsWindowImpl : public HostServices
         LRESULT pressed = HTNOWHERE;
         bool tracking = false;
     };
+
+    // The frame just drawn asked for the next frame of an animated image: repaint then. An
+    // animation off screen (another page, a hidden or minimized window) is not drawn and
+    // so asks for nothing, which stops the timer by itself.
+    void ScheduleImageFrame()
+    {
+        const auto deadline = window_->GetDeviceResources().GetNextAnimationDeadline();
+        if (!deadline)
+        {
+            KillTimer(hwnd_, kImageFrameTimer);
+            return;
+        }
+        const auto wait =
+            std::chrono::ceil<std::chrono::milliseconds>(*deadline - msimeui::DeviceResources::AnimationClock::now());
+        SetTimer(hwnd_, kImageFrameTimer, static_cast<UINT>((std::max)(wait.count(), 1LL)), nullptr);
+    }
 
     void SetCaptionButtonState(LRESULT hot, LRESULT pressed)
     {
