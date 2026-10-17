@@ -1,6 +1,7 @@
 #include "translation_gloss.h"
 
 #include <utf8.h>
+#include <algorithm>
 #include <cstdint>
 #include <cctype>
 
@@ -9,6 +10,8 @@ namespace CloudTranslation
 namespace
 {
 constexpr size_t kMaxPersistChars = 32;
+constexpr auto kFirstRetryDelay = std::chrono::seconds(15);
+constexpr auto kMaxRetryDelay = std::chrono::minutes(8);
 
 bool IsAsciiSpace(unsigned char ch)
 {
@@ -66,6 +69,16 @@ bool IsEmojiOrPictograph(uint32_t cp)
     return false;
 }
 } // namespace
+
+std::chrono::seconds FailureRetryDelay(unsigned failures)
+{
+    if (failures == 0)
+        return std::chrono::seconds(0);
+    // 15s << 5 正好是 8 分钟，再往上移位只会被封顶，也避免大次数移位溢出。
+    const unsigned shift = (std::min)(failures - 1, 5u);
+    return (std::min)(std::chrono::seconds(kFirstRetryDelay * (1u << shift)),
+                      std::chrono::duration_cast<std::chrono::seconds>(kMaxRetryDelay));
+}
 
 size_t Utf8Length(const std::string &text)
 {

@@ -20,7 +20,6 @@ namespace
 {
 // Wait until the candidate window has been idle for 500ms before a TMT request.
 constexpr auto kIdleDelay = std::chrono::milliseconds(500);
-constexpr auto kNegativeTtl = std::chrono::minutes(8);
 constexpr size_t kMaxSourceChars = 40;
 constexpr size_t kMaxCacheEntries = 4096;
 
@@ -36,7 +35,15 @@ std::string g_db_path;
 CloudTranslation::ApplyCallback g_callback;
 
 std::unordered_map<std::string, std::string> g_cache;
-std::unordered_map<std::string, std::chrono::steady_clock::time_point> g_negative;
+
+// 提供方对超时、限流、凭据错误和「没有译文」都只回空串，分不清哪次值得马上重试，所以失败项
+// 按次数退避：网络恢复后很快能补上，持续失败的词也不会每次刷新候选都被重发、挤占批次预算。
+struct FailureBackoff
+{
+    unsigned failures = 0;
+    std::chrono::steady_clock::time_point retry_at;
+};
+std::unordered_map<std::string, FailureBackoff> g_failures;
 
 std::string TargetLanguage(const TranslationConfig &config)
 {
@@ -98,28 +105,22 @@ void RememberPositive(const std::string &identity, std::string gloss)
     if (g_cache.size() >= kMaxCacheEntries)
         g_cache.clear();
     g_cache[identity] = std::move(gloss);
-    g_negative.erase(identity);
+    g_failures.erase(identity);
 }
 
-bool IsNegative(const std::string &identity)
+bool IsBackingOff(const std::string &identity)
 {
-    const auto found = g_negative.find(identity);
-    if (found == g_negative.end())
-        return false;
-    if (found->second <= std::chrono::steady_clock::now())
-    {
-        g_negative.erase(found);
-        return false;
-    }
-    return true;
+    const auto found = g_failures.find(identity);
+    return found != g_failures.end() && std::chrono::steady_clock::now() < found->second.retry_at;
 }
 
-void RememberNegative(const std::string &identity)
+void RememberFailure(const std::string &identity)
 {
     std::lock_guard lock(g_mutex);
-    if (g_negative.size() >= kMaxCacheEntries)
-        g_negative.clear();
-    g_negative[identity] = std::chrono::steady_clock::now() + kNegativeTtl;
+    if (g_failures.size() >= kMaxCacheEntries && g_failures.find(identity) == g_failures.end())
+        g_failures.clear();
+    auto &entry = g_failures[identity];
+    entry.retry_at = std::chrono::steady_clock::now() + CloudTranslation::FailureRetryDelay(++entry.failures);
 }
 
 TencentTmt::Credentials ResolveCredentials(const TencentTmtConfig &config)
@@ -200,12 +201,14 @@ void ApplyTranslatedGroup(const std::vector<EnglishIme::TranslationQuery> &group
 {
     for (size_t i = 0; i < group.size(); ++i)
     {
+        // 结果数组比请求短，说明提供方的批次预算先用完了，后面的词根本没有发出，不算失败。
+        if (i >= translated.size())
+            break;
         const std::string identity = Identity(group[i], target_language, provider_scope);
-        const std::string raw = i < translated.size() ? translated[i] : std::string{};
-        const std::string gloss = CloudTranslation::FormatGloss(raw);
+        const std::string gloss = CloudTranslation::FormatGloss(translated[i]);
         if (gloss.empty())
         {
-            RememberNegative(identity);
+            RememberFailure(identity);
             continue;
         }
         RememberPositive(identity, gloss);
@@ -301,7 +304,7 @@ void WorkerLoop()
                     results.push_back({query.key, query.direction, cached->second});
                     continue;
                 }
-                if (IsNegative(identity))
+                if (IsBackingOff(identity))
                     continue;
                 if (query.direction == EnglishIme::TranslationDirection::EnglishToChinese &&
                     CloudTranslation::IsCloudTranslatableEnglish(query.key))

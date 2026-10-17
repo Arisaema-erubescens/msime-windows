@@ -26,6 +26,18 @@ TEST_CASE(CloudTranslationPersistPolicyRejectsUselessGloss)
     REQUIRE_EQ(CloudTranslation::TrimSecret(" AKIDabc \r\n"), std::string("AKIDabc"));
 }
 
+TEST_CASE(CloudTranslationFailureRetryDelayDoublesUpToEightMinutes)
+{
+    using std::chrono::seconds;
+    REQUIRE(CloudTranslation::FailureRetryDelay(0) == seconds(0));
+    REQUIRE(CloudTranslation::FailureRetryDelay(1) == seconds(15));
+    REQUIRE(CloudTranslation::FailureRetryDelay(2) == seconds(30));
+    REQUIRE(CloudTranslation::FailureRetryDelay(5) == seconds(240));
+    REQUIRE(CloudTranslation::FailureRetryDelay(6) == seconds(480));
+    REQUIRE(CloudTranslation::FailureRetryDelay(7) == seconds(480));
+    REQUIRE(CloudTranslation::FailureRetryDelay(4000000000u) == seconds(480));
+}
+
 TEST_CASE(CloudTranslationOnlySendsChineseWithoutEmoji)
 {
     REQUIRE(CloudTranslation::IsCloudTranslatableChinese("水杉"));

@@ -136,7 +136,10 @@ std::vector<std::string> TextTranslateBatch(const Config &config, const std::vec
     for (size_t i = 0; i < texts.size(); ++i)
     {
         if (std::chrono::steady_clock::now() - started >= kBatchBudget)
+        {
+            results.resize(i);
             break;
+        }
         const nlohmann::json body = {
             {"text", texts[i]}, {"source_lang", UppercaseLanguage(source)}, {"target_lang", UppercaseLanguage(target)}};
         const std::string payload = body.dump();

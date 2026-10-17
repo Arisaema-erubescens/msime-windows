@@ -147,7 +147,10 @@ std::vector<std::string> TextTranslateBatch(const Config &config, const std::vec
     for (size_t i = 0; i < texts.size(); ++i)
     {
         if (std::chrono::steady_clock::now() - started >= kBatchBudget)
+        {
+            results.resize(i);
             break;
+        }
         const std::string timestamp = MillisecondTimestamp();
         // authStr is computed over the raw (unencoded) parameter values; the POST
         // body sends the same values url-encoded.

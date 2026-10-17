@@ -24,7 +24,8 @@ std::string BuildAuthString(const Config &config, const std::string &from, const
 std::string ParseTranslationResponse(const std::string &response);
 
 // Calls the NiuTrans /v2/text/translate endpoint once per source string. Empty
-// entries mean that item failed.
+// entries mean that item failed. When the batch time budget runs out the result
+// is shorter than texts: the missing tail was never sent.
 std::vector<std::string> TextTranslateBatch(const Config &config, const std::vector<std::string> &texts,
                                             const std::string &source, const std::string &target);
 } // namespace NiuTransTranslation
