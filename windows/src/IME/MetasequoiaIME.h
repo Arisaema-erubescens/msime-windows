@@ -450,6 +450,36 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     // resend it) and discard what DeferredKeyFailurePolicy.h says the reason
     // costs.
     void _FailDeferredKey(uint64_t replayToken, DeferredKeyFailureReason reason);
+    // Hands a committing key whose reply has not arrived back to
+    // _PollCommitReply, resuming the window the request already started so
+    // TIMER_COMMIT_REPLY_POLL picks it up again. Called from the edit session
+    // itself, because that is the only place that runs both when the session is
+    // granted synchronously and when it is granted asynchronously. A request
+    // that cannot be kept alive is dropped as unanswered, the same cost the
+    // poll's own end-of-window failure takes.
+    // Public, unlike the rest of the reply-poll internals: one of its callers,
+    // CPunctuationCommitEditSession, is defined in an anonymous namespace in
+    // MetasequoiaIME_AsyncRequests.cpp, so a friend declaration here could not
+    // name it.
+    void _HandOffUnreadyCommitReply(uint64_t requestId, uint64_t deferredReplayToken, UINT message,
+                                    ULONGLONG commitReplyDeadlineTick, UINT code, WCHAR wch,
+                                    KEYSTROKE_FUNCTION keystrokeFunction, const std::wstring &prefetchedText,
+                                    uint64_t focusToken, uint64_t compositionEpoch);
+    // The committing sessions record, for the length of their key handler, which
+    // poll message owns the request they apply (0 when none does), so the reply
+    // read inside the handler knows whether a not-ready reply can be handed back.
+    // Returns the previous value for the caller to restore.
+    UINT _ExchangeSessionCommitReplyMessage(UINT commitReplyMessage)
+    {
+        const UINT previous = _sessionCommitReplyMessage;
+        _sessionCommitReplyMessage = commitReplyMessage;
+        return previous;
+    }
+    // How long the running session's own commit-reply read may block: 0 when its
+    // request can be handed back to _PollCommitReply, otherwise the bounded
+    // single-shot wait (FANY_IME_COMMIT_REPLY_SESSION_WAIT_MS) a session with
+    // nothing to hand back to has always had.
+    DWORD _SessionCommitReplyWaitMs() const;
 
     // comless helpers
     static HRESULT CMetasequoiaIME::CreateInstance(REFCLSID rclsid, REFIID riid, _Outptr_result_maybenull_ LPVOID *ppv,
@@ -484,15 +514,24 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
         uint64_t focusToken = 0;
         uint64_t compositionEpoch = 0;
         uint64_t deferredReplayToken = 0;
+        // Which key function the edit session must run. WM_AsyncFinalizeCandidate
+        // carries the two finalize variants as well as the bare convert it was
+        // built for, so the classification travels with the request instead of
+        // being re-derived from the key.
+        KEYSTROKE_FUNCTION keystrokeFunction = FUNCTION_FINALIZE_CANDIDATELIST;
         std::wstring prefetchedText;
         // End of the cooperative commit-reply window (GetTickCount64 domain),
         // 0 until the first slice starts it. Kept on the request so a re-posted
         // slice resumes the same window instead of restarting it.
         ULONGLONG commitReplyDeadlineTick = 0;
     };
+    // Bound on _pendingAsyncKeyMessages. Every path that takes a fresh slot,
+    // posting a key or a session handing its request back, checks it.
+    static constexpr size_t kMaxPendingAsyncKeys = 64;
     bool _PostAsyncKeyRequest(UINT message, UINT code, WCHAR wch, uint64_t requestId, std::wstring prefetchedText = {},
                               uint64_t expectedFocusToken = 0, uint64_t expectedCompositionEpoch = 0,
-                              uint64_t deferredReplayToken = 0);
+                              uint64_t deferredReplayToken = 0,
+                              KEYSTROKE_FUNCTION keystrokeFunction = FUNCTION_FINALIZE_CANDIDATELIST);
     bool _TakeAsyncKeyRequest(UINT message, UINT token, _Out_ AsyncKeyRequest &request);
     // One slice of a committing key's reply wait. The wait runs on the host UI
     // thread, so instead of blocking for the whole window this polls without
@@ -503,6 +542,9 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     // TransportUnavailable frame.
     bool _PollCommitReply(UINT message, UINT token, _Inout_ AsyncKeyRequest &request,
                           _Outptr_result_maybenull_ FanyImeNamedpipeDataToTsf **receivedData);
+    // Puts a request back in the table and wakes the poll timer.
+    // token == 0 means the caller never held a slot of its own (an edit session
+    // handing a request back): a free slot is taken instead.
     bool _RequeueAsyncKeyRequest(UINT token, UINT message, AsyncKeyRequest request);
     // Runs on TIMER_COMMIT_REPLY_POLL: re-dispatches, oldest request first, the
     // requests that yielded waiting for their committing reply, and stops the
@@ -670,15 +712,26 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
 
     HRESULT _RemoveDummyCompositionForComposing(TfEditCookie ec, _In_ ITfComposition *pComposition);
 
-    // Invoke key handler edit session
+    // Invoke key handler edit session. commitReplyMessage / commitReplyDeadline
+    // travel down to the session so that, when the committing reply has not
+    // arrived, it can hand its request back to the cooperative poll itself: the
+    // TSF manager may grant the session asynchronously, and then no caller ever
+    // sees the session's result.
     HRESULT _InvokeKeyHandler(_In_ ITfContext *pContext, UINT code, WCHAR wch, DWORD flags, _KEYSTROKE_STATE keyState,
                               uint64_t requestId, std::wstring prefetchedText = {}, UINT localResetToken = 0,
                               uint64_t expectedCompositionEpoch = 0, uint64_t expectedFocusToken = 0,
-                              uint64_t deferredReplayToken = 0);
+                              uint64_t deferredReplayToken = 0, UINT commitReplyMessage = 0,
+                              ULONGLONG commitReplyDeadlineTick = 0);
+    // commitReplyMessage is the asynchronous key request whose reply this session
+    // consumes, and commitReplyDeadlineTick the end of the cooperative window it
+    // must keep using when it has to hand that request back. 0 means no such
+    // request (a session started off the key path, which cannot hand off; see
+    // _HandOffUnreadyCommitReply).
     HRESULT _RequestDirectPunctuationEditSession(_In_ ITfContext *pContext, UINT code, WCHAR wch, uint64_t requestId,
                                                  std::wstring prefetchedText, uint64_t expectedFocusToken = 0,
                                                  uint64_t expectedCompositionEpoch = 0,
-                                                 uint64_t deferredReplayToken = 0);
+                                                 uint64_t deferredReplayToken = 0, UINT commitReplyMessage = 0,
+                                                 ULONGLONG commitReplyDeadlineTick = 0);
 
     // function for the language property
     BOOL _SetCompositionLanguage(TfEditCookie ec, _In_ ITfContext *pContext);
@@ -867,6 +920,8 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     std::map<UINT, WorkerCandidateCommit> _pendingServerCommitMessages;
     std::map<UINT, WorkerCompartmentSwitch> _pendingWorkerSwitchMessages;
     std::map<UINT, AsyncKeyRequest> _pendingAsyncKeyMessages;
+    // See _ExchangeSessionCommitReplyMessage. UI thread only, like the sessions.
+    UINT _sessionCommitReplyMessage = 0;
     std::atomic<bool> _workerCommitReady;
     std::atomic<uint64_t> _expectedWorkerFocusToken;
     std::atomic<uint64_t> _acknowledgedWorkerFocusToken;

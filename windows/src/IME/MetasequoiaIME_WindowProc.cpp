@@ -679,9 +679,16 @@ LRESULT CALLBACK CMetasequoiaIME_WindowProc(HWND hWnd, UINT message, WPARAM wPar
             {
                 _KEYSTROKE_STATE KeystrokeState;
                 KeystrokeState.Category = CATEGORY_CANDIDATE;
-                KeystrokeState.Function = FUNCTION_FINALIZE_CANDIDATELIST;
+                KeystrokeState.Function = request.keystrokeFunction;
+                // A session that finds its committing reply missing hands the
+                // request back to _PollCommitReply from its own completion hook,
+                // which is also the only code that runs when the TSF manager
+                // grants the session asynchronously (this call then cannot see
+                // the session's result at all). Either way the key is neither
+                // applied nor dropped here.
                 pIME->_InvokeKeyHandler(pContext, request.code, request.wch, 0, KeystrokeState, request.requestId, {},
-                                        0, request.compositionEpoch, request.focusToken, request.deferredReplayToken);
+                                        0, request.compositionEpoch, request.focusToken, request.deferredReplayToken,
+                                        request.message, request.commitReplyDeadlineTick);
                 handedOffReplay = true;
                 pContext->Release();
             }
@@ -735,7 +742,8 @@ LRESULT CALLBACK CMetasequoiaIME_WindowProc(HWND hWnd, UINT message, WPARAM wPar
                 {
                     pIME->_RequestDirectPunctuationEditSession(pContext, code, wch, request.requestId,
                                                                std::move(request.prefetchedText), request.focusToken,
-                                                               request.compositionEpoch, request.deferredReplayToken);
+                                                               request.compositionEpoch, request.deferredReplayToken,
+                                                               request.message, request.commitReplyDeadlineTick);
                     handedOffReplay = true;
                 }
                 else
@@ -743,9 +751,17 @@ LRESULT CALLBACK CMetasequoiaIME_WindowProc(HWND hWnd, UINT message, WPARAM wPar
                     _KEYSTROKE_STATE KeystrokeState;
                     KeystrokeState.Category = CATEGORY_COMPOSING;
                     KeystrokeState.Function = FUNCTION_PUNCTUATION;
+                    // No prefetched text and a highlighted candidate is exactly
+                    // the condition under which the session reads the commit
+                    // reply itself, so this is also the only case where it can
+                    // come back not-ready. Its copy of the (empty) prefetched
+                    // text moving away leaves the request itself intact.
+                    const UINT commitReplyMessage = request.message;
+                    const ULONGLONG commitReplyDeadlineTick = request.commitReplyDeadlineTick;
                     pIME->_InvokeKeyHandler(pContext, code, wch, 0, KeystrokeState, request.requestId,
                                             std::move(request.prefetchedText), 0, request.compositionEpoch,
-                                            request.focusToken, request.deferredReplayToken);
+                                            request.focusToken, request.deferredReplayToken, commitReplyMessage,
+                                            commitReplyDeadlineTick);
                     handedOffReplay = true;
                 }
                 pContext->Release();
@@ -954,8 +970,12 @@ LRESULT CALLBACK CMetasequoiaIME_WindowProc(HWND hWnd, UINT message, WPARAM wPar
                 _KEYSTROKE_STATE KeystrokeState;
                 KeystrokeState.Category = CATEGORY_CANDIDATE;
                 KeystrokeState.Function = FUNCTION_SELECT_BY_NUMBER;
+                // Same as the other committing keys: a reply that has not
+                // arrived is handed back to _PollCommitReply by the session's own
+                // completion hook, so nothing is applied or dropped here.
                 pIME->_InvokeKeyHandler(pContext, request.code, request.wch, 0, KeystrokeState, request.requestId, {},
-                                        0, request.compositionEpoch, request.focusToken, request.deferredReplayToken);
+                                        0, request.compositionEpoch, request.focusToken, request.deferredReplayToken,
+                                        request.message, request.commitReplyDeadlineTick);
                 handedOffReplay = true;
                 pContext->Release();
             }

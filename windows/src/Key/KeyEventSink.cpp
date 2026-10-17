@@ -1433,14 +1433,24 @@ CMetasequoiaIME::KeyDownDispatchResult CMetasequoiaIME::_DispatchKeyDown(
                                             : KeyDownDispatchResult::Complete;
         }
 
-        if (code == VK_SPACE && KeystrokeState.Function == FUNCTION_CONVERT)
+        // Every key whose edit session applies a committing candidate reply goes
+        // through the message window first: its handler fetches the reply where
+        // the host message pump can be yielded (_PollCommitReply) and the session
+        // then consumes it at once. A session that ran on the key path itself
+        // would have to read the reply synchronously, so a key handler busy
+        // longer than its budget would drop a commit the Server is about to
+        // apply. Space and the two candidate-mode finalize functions all end in
+        // _HandleCandidateFinalize.
+        const bool finalizeKey = KeystrokeState.Category == CATEGORY_CANDIDATE &&
+                                 (KeystrokeState.Function == FUNCTION_FINALIZE_CANDIDATELIST ||
+                                  KeystrokeState.Function == FUNCTION_FINALIZE_CANDIDATELIST_AND_INPUT);
+        const bool convertKey = code == VK_SPACE && KeystrokeState.Function == FUNCTION_CONVERT;
+        if ((finalizeKey || convertKey) && _msgWndHandle)
         {
-            if (_msgWndHandle)
-            {
-                _PostAsyncKeyRequest(WM_AsyncFinalizeCandidate, code, wch, requestId, {}, 0, 0, deferredReplayToken);
-                return deferredReplayToken != 0 ? KeyDownDispatchResult::AwaitingCompletion
-                                                : KeyDownDispatchResult::Complete;
-            }
+            _PostAsyncKeyRequest(WM_AsyncFinalizeCandidate, code, wch, requestId, {}, 0, 0, deferredReplayToken,
+                                 finalizeKey ? KeystrokeState.Function : FUNCTION_FINALIZE_CANDIDATELIST);
+            return deferredReplayToken != 0 ? KeyDownDispatchResult::AwaitingCompletion
+                                            : KeyDownDispatchResult::Complete;
         }
 
         if (KeystrokeState.Function == FUNCTION_PUNCTUATION && _msgWndHandle)

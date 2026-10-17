@@ -103,3 +103,29 @@ if(WIN32)
     target_compile_features(test_temporary_japanese_input PRIVATE cxx_std_17)
     add_test(NAME temporary_japanese_input COMMAND test_temporary_japanese_input)
 endif()
+
+# Exercise the session-side commit-reply contract without loading a TIP into a host. The paths
+# that decide what an unready committing reply costs are compiled from the production sources
+# (see generate_commit_reply_fixture.py); only the pipe probe, the message window and the clock
+# are doubles. Regenerate whenever one of those paths changes, so a removed step cannot hide
+# behind a copy in the test.
+set(commit_reply_ipc_header "${CMAKE_CURRENT_SOURCE_DIR}/../src/IPC/Ipc.h")
+set(commit_reply_ipc_source "${CMAKE_CURRENT_SOURCE_DIR}/../src/IPC/Ipc.cpp")
+set(commit_reply_ime_header "${CMAKE_CURRENT_SOURCE_DIR}/../src/IME/MetasequoiaIME.h")
+set(commit_reply_async_source "${CMAKE_CURRENT_SOURCE_DIR}/../src/IME/MetasequoiaIME_AsyncRequests.cpp")
+set(commit_reply_session_source "${CMAKE_CURRENT_SOURCE_DIR}/../src/Key/KeyHandlerEditSession.cpp")
+set(commit_reply_fixture_generator "${CMAKE_CURRENT_SOURCE_DIR}/generate_commit_reply_fixture.py")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${commit_reply_ipc_header}" "${commit_reply_ipc_source}" "${commit_reply_ime_header}"
+    "${commit_reply_async_source}" "${commit_reply_session_source}" "${commit_reply_fixture_generator}")
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${commit_reply_fixture_generator}"
+        "${commit_reply_ipc_header}" "${commit_reply_ipc_source}" "${commit_reply_ime_header}"
+        "${commit_reply_async_source}" "${commit_reply_session_source}"
+        "${CMAKE_CURRENT_BINARY_DIR}/commit_reply_types_source.h"
+        "${CMAKE_CURRENT_BINARY_DIR}/commit_reply_source.h"
+    COMMAND_ERROR_IS_FATAL ANY)
+add_executable(test_commit_reply_not_ready commit_reply_not_ready.cpp)
+target_include_directories(test_commit_reply_not_ready PRIVATE ../src "${CMAKE_CURRENT_BINARY_DIR}")
+target_compile_features(test_commit_reply_not_ready PRIVATE cxx_std_17)
+add_test(NAME commit_reply_not_ready COMMAND test_commit_reply_not_ready)

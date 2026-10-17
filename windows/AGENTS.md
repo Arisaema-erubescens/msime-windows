@@ -102,10 +102,19 @@
 队列；其余候选键可能上屏，保留「歧义即丢键 + 传输重置」。提交回复的总窗口是
 `FANY_IME_COMMIT_REPLY_TIMEOUT_MS`（1500 ms），但等待跑在宿主 UI 线程上，不能一次阻塞读完：
 消息处理函数用 `_PollCommitReply` 做不阻塞的轮询，没到就把请求放回表里、由
-`TIMER_COMMIT_REPLY_POLL` 唤醒再试，并按请求 id 顺序结算。会进 edit session 的提交路径（确定、
-数字选词、标点顶高亮候选）在处理函数里先取回复、按请求 id 缓存，session 直接消费；session 自己的
-单次等待只剩 `FANY_IME_COMMIT_REPLY_SESSION_WAIT_MS`（300 ms）兜底。新增会上屏的异步路径要接入
-同一套轮询，不要在 session 里阻塞等回复。
+`TIMER_COMMIT_REPLY_POLL` 唤醒再试，并按请求 id 顺序结算。**会进 edit session 的提交路径
+（确定、数字选词、标点顶高亮候选、空格顶首选）一律先经消息处理函数取回复**、按请求 id 缓存，
+session 直接消费；session 自己那次读（`TryReadCommitReplyFromServerPipe`）只剩「缓存被清掉」
+的竞态，它不阻塞、也不再把超时当传输失败——读不到就返回 `FANY_S_COMMIT_REPLY_NOT_READY`，
+并由 **session 自己在完成钩子里**把请求交回 `_PollCommitReply`（窗口仍是同一个 1500 ms，
+`_HandOffUnreadyCommitReply`）。没有轮询可交回的 session（消息窗口不可用、按键直接走同步
+`_InvokeKeyHandler` 的路径）不能让出，仍保留 `FANY_IME_COMMIT_REPLY_SESSION_WAIT_MS`（300 ms）的
+单次有界等待，超时按传输失败处理；由 `_SessionCommitReplyWaitMs` 按 session 记录的轮询消息判定。
+交回必须发生在 session 侧：`RequestEditSession` 用的是
+`TF_ES_ASYNCDONTCARE`，TSF 可能把 session 排到之后执行，那时消息处理函数早已返回、根本看不到
+这个结果，只有 session 自己的钩子在两种情形下都会跑。新增会上屏的异步路径必须接入同一套轮询，
+不要在 session 里阻塞等回复，不要把「结果要靠调用方从 `_InvokeKeyHandler` 的返回值里读」
+当作契约，也不要让 session 的超时触发会话重置。
 
 ## 焦点、候选与离线回退
 

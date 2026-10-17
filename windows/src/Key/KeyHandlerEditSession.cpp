@@ -35,6 +35,9 @@ STDAPI CKeyHandlerEditSession::DoEditSession(TfEditCookie ec)
         bool deliveryAmbiguous = false;
         bool transportBroken = false;
         bool projectionInvalidated = false;
+        // The committing reply had not arrived: the session applied nothing and
+        // hands the request (and this token) back to the poll below.
+        bool commitReplyNotReady = false;
         ~DeferredReplayCompletion()
         {
             if (textService && token != 0)
@@ -43,7 +46,7 @@ STDAPI CKeyHandlerEditSession::DoEditSession(TfEditCookie ec)
                 {
                     textService->_CompleteDeferredKeyReplay(token);
                 }
-                else
+                else if (!commitReplyNotReady)
                 {
                     textService->_FailDeferredKey(token,
                                                   ClassifyEditSessionFailure(superseded, deliveryAmbiguous,
@@ -102,11 +105,14 @@ STDAPI CKeyHandlerEditSession::DoEditSession(TfEditCookie ec)
     {
         KeyHandlerEditSessionDTO keyHandlerEditSessioDTO(ec, _pContext, _uCode, _wch, _KeyState.Function, _requestId,
                                                          _prefetchedText);
+        const UINT outerCommitReplyMessage = _pTextService->_ExchangeSessionCommitReplyMessage(_commitReplyMessage);
         hResult = pKeyStateCategory->KeyStateHandler(_KeyState.Function, keyHandlerEditSessioDTO);
+        _pTextService->_ExchangeSessionCommitReplyMessage(outerCommitReplyMessage);
         deferredReplayCompletion.applied = hResult == S_OK;
         deferredReplayCompletion.deliveryAmbiguous = hResult == FANY_E_COMMIT_REPLY_AMBIGUOUS;
         deferredReplayCompletion.transportBroken = hResult == HRESULT_FROM_WIN32(ERROR_BROKEN_PIPE);
         deferredReplayCompletion.projectionInvalidated = hResult == FANY_S_PROJECTION_INVALIDATED;
+        deferredReplayCompletion.commitReplyNotReady = hResult == FANY_S_COMMIT_REPLY_NOT_READY;
 
         pKeyStateCategory->Release();
     }
@@ -118,6 +124,19 @@ STDAPI CKeyHandlerEditSession::DoEditSession(TfEditCookie ec)
     if (isLocalReset)
     {
         _pTextService->_CompleteLocalSessionReset(_localResetToken);
+    }
+    if (hResult == FANY_S_COMMIT_REPLY_NOT_READY)
+    {
+        // The commit applied nothing because its authoritative reply had not
+        // arrived. This session is the only place that always sees that result:
+        // with TF_ES_ASYNCDONTCARE the TSF manager may grant the session
+        // asynchronously, and then the caller has returned long before
+        // DoEditSession runs. Hand the request back to the cooperative poll
+        // here, so the same window keeps running and this session is re-run once
+        // the reply is in. The deferred token stays in flight until then.
+        _pTextService->_HandOffUnreadyCommitReply(_requestId, _deferredReplayToken, _commitReplyMessage,
+                                                  _commitReplyDeadlineTick, _uCode, _wch, _KeyState.Function,
+                                                  _prefetchedText, _focusToken, _expectedCompositionEpoch);
     }
     DebugTsfKeyLatency(L"edit-session-body", _requestId, doEditSessionTimer.ElapsedMs(), hResult);
     DebugTsfIssue47(L"edit-session-complete", _requestId, _uCode, _wch, _KeyState.Category, _KeyState.Function, 1,

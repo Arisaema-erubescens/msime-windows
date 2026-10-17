@@ -1372,12 +1372,6 @@ struct FanyImeNamedpipeDataToTsf *TryReadDataFromServerPipeWithTimeout(uint64_t 
     return TryReadDataFromServerPipeWithDeadline(expectedRequestId, abortTransportOnTimeout, 50, nullptr);
 }
 
-struct FanyImeNamedpipeDataToTsf *TryReadCommitReplyFromServerPipe(uint64_t expectedRequestId)
-{
-    return TryReadDataFromServerPipeWithDeadline(expectedRequestId, true, FANY_IME_COMMIT_REPLY_SESSION_WAIT_MS,
-                                                 nullptr);
-}
-
 // True when a slice has something to consume right now: a cached reply, a
 // frame waiting in the pipe, or a state only the read path can report (no
 // request id, no pipe, a dead pipe). False means the read would only block.
@@ -1392,6 +1386,50 @@ static bool HasCommitReplyToRead(uint64_t expectedRequestId)
     // same nonblocking probe TryOpenClientPipe uses.
     DWORD bytesAvailable = 0;
     return !PeekNamedPipe(hFromServerPipe, nullptr, 0, nullptr, &bytesAvailable, nullptr) || bytesAvailable != 0;
+}
+
+CommitReplyWaitStatus TryReadCommitReplyFromServerPipe(uint64_t expectedRequestId, DWORD blockingWaitMs,
+                                                       _Out_ struct FanyImeNamedpipeDataToTsf **reply)
+{
+    *reply = nullptr;
+
+    if (blockingWaitMs != 0)
+    {
+        // Nothing can re-run this session, so it waits the bounded single shot.
+        // Without a notReady out-parameter the read path always yields a frame:
+        // the reply, or TransportUnavailable for a timeout or a real failure.
+        struct FanyImeNamedpipeDataToTsf *fetched = TryReadDataFromServerPipeWithDeadline(
+            expectedRequestId, /*abortTransportOnTimeout=*/true, blockingWaitMs, nullptr);
+        *reply = fetched;
+        return fetched->msg_type == Global::DataFromServerMsgType::TransportUnavailable
+                   ? CommitReplyWaitStatus::Transport
+                   : CommitReplyWaitStatus::Ready;
+    }
+
+    // Same nonblocking probe a slice uses: only read when there is something to
+    // consume, or a state only the read path can report (a request id that can
+    // never be paired, a missing or dead pipe). A healthy pipe with nothing in
+    // it is NotReady — a session must not wait on the host UI thread.
+    if (!HasCommitReplyToRead(expectedRequestId))
+    {
+        return CommitReplyWaitStatus::NotReady;
+    }
+
+    bool notReady = true;
+    struct FanyImeNamedpipeDataToTsf *fetched =
+        TryReadDataFromServerPipeWithDeadline(expectedRequestId, /*abortTransportOnTimeout=*/true, 0, &notReady);
+    // With notReady set, the read path returns null only at its cooperative
+    // boundaries (nothing readable, or only other requests' frames consumed
+    // before the zero-length deadline). Every real failure still comes back as a
+    // TransportUnavailable frame, so a broken pipe keeps its full reset.
+    if (fetched == nullptr)
+    {
+        return CommitReplyWaitStatus::NotReady;
+    }
+
+    *reply = fetched;
+    return fetched->msg_type == Global::DataFromServerMsgType::TransportUnavailable ? CommitReplyWaitStatus::Transport
+                                                                                    : CommitReplyWaitStatus::Ready;
 }
 
 CommitReplyWaitStatus TryReadCommitReplySlice(uint64_t expectedRequestId, ULONGLONG deadlineTick,

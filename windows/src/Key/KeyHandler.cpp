@@ -1494,7 +1494,17 @@ HRESULT CMetasequoiaIME::_HandleCompositionPunctuation(TfEditCookie ec, _In_ ITf
         //
         if (Global::CommitWithHighlightedCandPunc.count(wch) > 0)
         {
-            struct FanyImeNamedpipeDataToTsf *receivedData = TryReadCommitReplyFromServerPipe(requestId);
+            struct FanyImeNamedpipeDataToTsf *receivedData = nullptr;
+            const CommitReplyWaitStatus replyStatus =
+                TryReadCommitReplyFromServerPipe(requestId, _SessionCommitReplyWaitMs(), &receivedData);
+            if (replyStatus == CommitReplyWaitStatus::NotReady)
+            {
+                // Healthy transport, reply not here yet: apply nothing; the edit
+                // session's completion hook hands this request back to the
+                // cooperative poll. A destructive timeout here would drop a
+                // commit the Server may still be answering.
+                return FANY_S_COMMIT_REPLY_NOT_READY;
+            }
 
             if (receivedData->msg_type == Global::DataFromServerMsgType::TransportUnavailable)
             {
@@ -1706,7 +1716,8 @@ HRESULT CMetasequoiaIME::_HandleCompositionDoubleSingleByte(TfEditCookie ec, _In
 HRESULT CMetasequoiaIME::_InvokeKeyHandler(_In_ ITfContext *pContext, UINT code, WCHAR wch, DWORD flags,
                                            _KEYSTROKE_STATE keyState, uint64_t requestId, std::wstring prefetchedText,
                                            UINT localResetToken, uint64_t expectedCompositionEpoch,
-                                           uint64_t expectedFocusToken, uint64_t deferredReplayToken)
+                                           uint64_t expectedFocusToken, uint64_t deferredReplayToken,
+                                           UINT commitReplyMessage, ULONGLONG commitReplyDeadlineTick)
 {
     flags;
 
@@ -1719,7 +1730,7 @@ HRESULT CMetasequoiaIME::_InvokeKeyHandler(_In_ ITfContext *pContext, UINT code,
     pEditSession = new (std::nothrow) CKeyHandlerEditSession(
         this, pContext, code, wch, keyState, requestId, requestStartQpc, std::move(prefetchedText),
         localResetToken == 0 ? (expectedFocusToken != 0 ? expectedFocusToken : _CaptureFocusSessionToken()) : 0,
-        localResetToken, expectedCompositionEpoch, deferredReplayToken);
+        localResetToken, expectedCompositionEpoch, deferredReplayToken, commitReplyMessage, commitReplyDeadlineTick);
     if (pEditSession == nullptr)
     {
         if (deferredReplayToken != 0)
@@ -1732,7 +1743,12 @@ HRESULT CMetasequoiaIME::_InvokeKeyHandler(_In_ ITfContext *pContext, UINT code,
     //
     // Call CKeyHandlerEditSession::DoEditSession().
     //
-    // Do not specify TF_ES_SYNC so edit session is not invoked on WinWord
+    // Do not specify TF_ES_SYNC so edit session is not invoked on WinWord.
+    // That also means the manager may grant this session asynchronously, so
+    // editSessionHr carries the session's own result only in the synchronous
+    // case: a session that did not apply its key settles that itself, from
+    // inside DoEditSession (the commit-reply hand-off and the deferred-key
+    // completion hook). Never move such bookkeeping to this return value.
     //
     HRESULT editSessionHr = E_FAIL;
     HRESULT requestHr =

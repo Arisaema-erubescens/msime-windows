@@ -175,6 +175,16 @@ if(BUILD_TESTING)
     target_link_libraries(test_segmentation_contract PRIVATE MetasequoiaIme::Engine)
     add_test(NAME segmentation_contract COMMAND test_segmentation_contract)
 
+    # 候选结果的对照测试（R6 护栏）：同一（输入序列 + 前文 + 配置）在新建会话 / 重打 /
+    # 清缓存 / 插过别的输入之后必须给出逐字相同的候选集合、顺序与预编辑。词库由用例自建，
+    # 不依赖 product-lock 或本机安装的数据目录，也不依赖 sc.lm / .gram 是否存在。
+    add_executable(test_candidate_consistency tests/src/test_candidate_consistency.cpp)
+    if(MSVC)
+        target_compile_options(test_candidate_consistency PRIVATE /utf-8)
+    endif()
+    target_link_libraries(test_candidate_consistency PRIVATE MetasequoiaIme::Engine)
+    add_test(NAME candidate_consistency COMMAND test_candidate_consistency)
+
     add_executable(test_windows_ipc_contract contracts/tests/windows_ipc_contract.cpp)
     if(MSVC)
         target_compile_options(test_windows_ipc_contract PRIVATE /utf-8)
@@ -301,6 +311,14 @@ if(BUILD_TESTING)
     # Per-keystroke latency against the real dictionaries; run by hand, not by ctest.
     add_executable(bench_input_session tests/src/bench_input_session.cpp)
     target_link_libraries(bench_input_session PRIVATE MetasequoiaIme::Engine)
+
+    # Per-key latency with CPU / page-fault / disk-read attribution and the pressure modes that
+    # reproduce a paging spike; run by hand, not by ctest. Win32-only: it reads the process's
+    # page-fault and IO counters. The block above is otherwise portable, so it stays guarded.
+    if(WIN32)
+        add_executable(bench_key_latency_diag tests/src/bench_key_latency_diag.cpp)
+        target_link_libraries(bench_key_latency_diag PRIVATE MetasequoiaIme::Engine)
+    endif()
 
     # Sentence-level segmentation evaluation (tests/data/quanpin_sentence_cases.tsv); run by hand, not by ctest.
     add_executable(eval_quanpin_sentence tests/src/eval_quanpin_sentence.cpp)
