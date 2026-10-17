@@ -33,6 +33,9 @@ class SettingsWindow
     // A host message (configSnapshot, dictionaryResponse, ...), JSON.
     void OnHostMessage(const std::wstring &message);
     void SetLightTheme(bool light);
+    // appearance.settings_launch_animation, read before the first frame. Off, the page
+    // is covered by a brief plain fill instead, without the gear and the fade.
+    void SetLaunchAnimation(bool enabled);
     void ShowPage(const std::string &pageId);
     // Drops hover and pressed states before the window is hidden, so the frame kept
     // for the next show does not flash a highlighted caption button.

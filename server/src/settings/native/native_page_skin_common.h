@@ -134,8 +134,13 @@ struct ToolbarLook
 };
 ToolbarLook ResolveToolbarLook(const SettingsModel &model, const std::string &skinId, bool light);
 
+// Window that repaints when an image decoded in the background is ready. Without one,
+// images decode on the spot.
+void SetImageLoadWindow(HWND hwnd);
+// Starts decoding an image for CachedBitmap ahead of its first frame.
+void PrefetchImage(const std::wstring &path);
 // Bitmap of an image file, cached per render target (msimeui's cache holds only a
-// few, and a page of skins shows many).
+// few, and a page of skins shows many). Null until its pixels are decoded.
 ID2D1Bitmap *CachedBitmap(msimeui::DeviceResources &dr, const std::wstring &path, D2D1_SIZE_F *size = nullptr);
 // The current frame of an APNG / GIF when `animated` is set (msimeui's animation clock; the
 // window repaints when the next one is due), otherwise CachedBitmap's still image.

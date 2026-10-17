@@ -468,6 +468,9 @@ VisualPtr BuildAboutPage(PageContext &context)
     auto linksSection = std::make_shared<PaddedSection>(links, Thickness{24.0f, 0.0f, 24.0f, 0.0f});
     page.AddRaw(linksSection);
 
+    page.AddSection(MakeRow(L"启动动画",
+                            L"打开设置窗口时先在窗口中央显示齿轮图标，再淡入主界面。关闭后只短暂显示纯色背景。",
+                            BindToggle(context, "appearance.settings_launch_animation")));
     page.AddSection(
         MakeRow(L"Server 端日志",
                 L"排查 Server "

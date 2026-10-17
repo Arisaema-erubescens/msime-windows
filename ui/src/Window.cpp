@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <d2d1.h>
 #include <dwmapi.h>
 #include <windowsx.h>
@@ -150,6 +151,39 @@ void Window::RequestAnimationFrame()
 double Window::GetFrameTime() const
 {
     return painting_ ? frameTimeMs_ : NowMs();
+}
+
+double Window::NextFrameTimeMs() const
+{
+    const double now = NowMs();
+    if (!composition_)
+    {
+        return now;
+    }
+    // A composition swap chain shows the frame at the next vertical blank. Animating to
+    // that time instead of to when painting happened to start keeps the steps between
+    // frames even: the paint start wobbles by a few milliseconds after each DwmFlush,
+    // and at scrolling speed that is several pixels of judder.
+    DWM_TIMING_INFO timing = {};
+    timing.cbSize = sizeof(timing);
+    static const double frequency = [] {
+        LARGE_INTEGER value = {};
+        QueryPerformanceFrequency(&value);
+        return static_cast<double>(value.QuadPart);
+    }();
+    if (FAILED(DwmGetCompositionTimingInfo(nullptr, &timing)) || timing.qpcRefreshPeriod == 0 || frequency <= 0.0)
+    {
+        return now;
+    }
+    const double period = static_cast<double>(timing.qpcRefreshPeriod) * 1000.0 / frequency;
+    const double vblank = static_cast<double>(timing.qpcVBlank) * 1000.0 / frequency;
+    // qpcVBlank is the vertical blank the compositor is working towards, which may lie a
+    // period or two ahead; only its place on the refresh grid matters here.
+    if (period < 2.0 || period > 100.0 || std::fabs(vblank - now) > 1000.0)
+    {
+        return now;
+    }
+    return vblank + std::ceil((now - vblank) / period) * period;
 }
 
 void Window::RefreshHover()
@@ -657,7 +691,7 @@ void Window::OnPaint()
 
     painting_ = true;
     animationRequested_ = false;
-    frameTimeMs_ = NowMs();
+    frameTimeMs_ = NextFrameTimeMs();
     if (composition_ ? deviceResources_.EnsureForComposition(hwnd_) : deviceResources_.EnsureForWindow(hwnd_))
     {
         ID2D1RenderTarget *target = deviceResources_.GetRenderTarget();

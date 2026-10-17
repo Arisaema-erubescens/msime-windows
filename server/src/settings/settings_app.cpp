@@ -595,6 +595,7 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
             {"show_punctuation", GetConfiguredLanguageBarShowPunctuation()}}},
           {"appearance",
            {{"settings_window_linger", GetConfiguredSettingsWindowLinger()},
+            {"settings_launch_animation", GetConfiguredSettingsLaunchAnimation()},
             {"candidate_window_layout", GetConfiguredCandidateWindowLayout()},
             {"candidate_window_follow_cursor", GetConfiguredCandidateWindowFollowCursor()},
             {"candidate_window_fit_content", GetConfiguredCandidateWindowFitContent()},
@@ -830,6 +831,8 @@ bool ApplyConfigUpdate(const json::object &data)
         return SetConfiguredTsfPreeditShuangpinQuanpin(json::value_to<bool>(data.at("value")));
     if (path == "appearance.settings_window_linger")
         return SetConfiguredSettingsWindowLinger(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.settings_launch_animation")
+        return SetConfiguredSettingsLaunchAnimation(json::value_to<bool>(data.at("value")));
     if (path == "appearance.candidate_window_layout")
         return SetConfiguredCandidateWindowLayout(json::value_to<std::string>(data.at("value")));
     if (path == "appearance.candidate_window_follow_cursor")
@@ -2028,11 +2031,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line, int show_
     });
     // 配置加载通常只要几毫秒，先等它拿到主题再画窗口，免得浅色主题先闪一下深色。
     // 等不到就按深色先亮出来，之后由 ConfigCompletion 切换。
+    bool launch_animation = true;
     if (initial_light.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready)
     {
         try
         {
             g_settings_light = initial_light.get();
+            // 拿到主题时 worker 上的 InitImeConfig 已经跑完，这里读配置全局量是安全的。
+            launch_animation = GetConfiguredSettingsLaunchAnimation();
         }
         catch (...)
         {
@@ -2059,6 +2065,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line, int show_
     g_native = std::make_unique<native_settings::SettingsWindow>(hwnd, std::move(callbacks),
                                                                  g_open_about_on_ready ? "about-settings" : "");
     g_native->SetLightTheme(g_settings_light);
+    g_native->SetLaunchAnimation(launch_animation);
     TraceStartup("ui: native window built");
     g_open_about_on_ready = false;
     // Cloaked until the first frame is drawn, so the compositor never shows the

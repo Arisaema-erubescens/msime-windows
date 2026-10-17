@@ -1253,24 +1253,12 @@ void ScrollViewer::Render(DeviceResources &deviceResources)
 
     if (scrollAnimating_ && window_)
     {
-        // Exponential approach towards the target, advanced by the real frame time. Unlike
-        // a fixed-duration curve restarted on every notch, the speed never drops back to
-        // zero when the next notch arrives, so a run of notches reads as one motion.
+        // The offset is a function of the frame time, not stepped per frame, so a late
+        // frame catches up instead of slowing the whole glide down.
         const double now = window_->GetFrameTime();
-        const double dt = std::clamp(now - scrollStartMs_, 0.0, 50.0);
-        scrollStartMs_ = now;
-        const double tau = std::max(appearance_.smoothScrollMs / 3.0, 1.0);
-        const float k = static_cast<float>(1.0 - std::exp(-dt / tau));
-        const float maxOffset = GetMaxScrollOffset();
-        scrollTarget_ = std::clamp(scrollTarget_, 0.0f, maxOffset);
-        float offset = scrollOffsetY_ + (scrollTarget_ - scrollOffsetY_) * k;
-        const float pixel = 96.0f / std::max(static_cast<float>(window_->GetDpi()), 1.0f);
-        const bool done = std::fabs(scrollTarget_ - offset) < pixel * 0.5f;
-        if (done)
-        {
-            offset = scrollTarget_;
-        }
-        offset = std::clamp(offset, 0.0f, maxOffset);
+        scrollFrameMs_ = now;
+        const bool done = now >= scrollStartMs_ + scrollDurationMs_;
+        const float offset = std::clamp(done ? scrollTarget_ : GlideOffsetAt(now), 0.0f, GetMaxScrollOffset());
         if (offset != scrollOffsetY_)
         {
             scrollOffsetY_ = offset;
@@ -1478,29 +1466,67 @@ bool ScrollViewer::OnMouseWheel(const POINT &point, short delta, WPARAM keyState
         return false;
     }
 
-    const float step = (static_cast<float>(delta) / static_cast<float>(WHEEL_DELTA)) * appearance_.wheelStep;
+    // Control Panel's "lines to scroll at a time"; the step is the distance at its default 3.
+    UINT lines = 3;
+    SystemParametersInfoW(SPI_GETWHEELSCROLLLINES, 0, &lines, 0);
+    if (lines == 0)
+    {
+        return true;
+    }
+    const float notch = lines == WHEEL_PAGESCROLL ? std::max(bounds_.height * 0.875f, appearance_.wheelStep)
+                                                  : appearance_.wheelStep * static_cast<float>(lines) / 3.0f;
+    const float step = (static_cast<float>(delta) / static_cast<float>(WHEEL_DELTA)) * notch;
     if (appearance_.smoothScrollMs <= 0.0)
     {
         ApplyScrollOffset(scrollOffsetY_ - step);
         return true;
     }
 
-    // Successive notches extend the glide from where it is heading, not from where it is.
+    // Successive notches extend the glide from where it is heading, and the new glide
+    // starts from where the last frame showed it.
+    const double now = scrollAnimating_ ? std::max(NowMs(), scrollFrameMs_) : NowMs();
+    const float from = scrollAnimating_ ? GlideOffsetAt(now) : scrollOffsetY_;
+    const float velocity = scrollAnimating_ ? GlideVelocityAt(now) : 0.0f;
     const float base = scrollAnimating_ ? scrollTarget_ : scrollOffsetY_;
     const float target = std::clamp(base - step, 0.0f, maxOffset);
     if (target == base && !scrollAnimating_)
     {
         return true;
     }
-    scrollTarget_ = target;
-    if (!scrollAnimating_)
+
+    // Each glide eases out (cubic), so it starts at its fastest, like a browser's wheel
+    // scroll, and comes to rest without a crawl at the end. A notch that arrives while
+    // the content moves faster than the new glide would start shortens the glide so the
+    // speed carries on without a jolt.
+    const float distance = target - from;
+    double duration = appearance_.smoothScrollMs;
+    if (velocity * distance > 0.0f && std::fabs(velocity) * duration > 3.0 * std::fabs(distance))
     {
-        // Frame clock of the glide; the first frame advances from now.
-        scrollStartMs_ = NowMs();
-        scrollAnimating_ = true;
+        duration = std::max(3.0 * std::fabs(distance) / std::fabs(velocity), 1.0);
     }
+    scrollFrom_ = from;
+    scrollTarget_ = target;
+    scrollStartMs_ = now;
+    scrollDurationMs_ = duration;
+    scrollFrameMs_ = now;
+    scrollAnimating_ = true;
     window_->RequestAnimationFrame();
     return true;
+}
+
+float ScrollViewer::GlideOffsetAt(double now) const
+{
+    const double s = std::clamp((now - scrollStartMs_) / std::max(scrollDurationMs_, 1.0), 0.0, 1.0);
+    const double rest = 1.0 - s;
+    return scrollFrom_ + (scrollTarget_ - scrollFrom_) * static_cast<float>(1.0 - rest * rest * rest);
+}
+
+float ScrollViewer::GlideVelocityAt(double now) const
+{
+    const double duration = std::max(scrollDurationMs_, 1.0);
+    const double s = std::clamp((now - scrollStartMs_) / duration, 0.0, 1.0);
+    const double rest = 1.0 - s;
+    return static_cast<float>(3.0 * (scrollTarget_ - scrollFrom_) * rest * rest / duration);
 }
 
 HCURSOR ScrollViewer::GetCursor() const
@@ -1528,6 +1554,7 @@ void ScrollViewer::ClampScrollOffset()
     scrollOffsetY_ = std::clamp(scrollOffsetY_, 0.0f, maxOffset);
     if (scrollAnimating_)
     {
+        scrollFrom_ = std::clamp(scrollFrom_, 0.0f, maxOffset);
         scrollTarget_ = std::clamp(scrollTarget_, 0.0f, maxOffset);
     }
 }

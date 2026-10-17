@@ -1,5 +1,6 @@
 #include "settings/native/native_page_skin_common.h"
 
+#include "settings/native/native_page_help_widgets.h"
 #include "utils/common_utils.h"
 
 #include "msimeui/AnimatedImage.h"
@@ -13,6 +14,8 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <memory>
+#include <vector>
 
 using Microsoft::WRL::ComPtr;
 
@@ -882,39 +885,141 @@ ToolbarLook ResolveToolbarLook(const SettingsModel &model, const std::string &sk
     return t;
 }
 
+namespace
+{
+// Premultiplied BGRA pixels of an image file, decoded off the window thread.
+struct DecodedImage
+{
+    UINT width = 0, height = 0;
+    std::vector<BYTE> pixels;
+};
+
+std::shared_ptr<DecodedImage> DecodeImageFile(IWICImagingFactory *wic, const std::wstring &path)
+{
+    ComPtr<IWICBitmapDecoder> decoder;
+    ComPtr<IWICBitmapFrameDecode> frame;
+    ComPtr<IWICFormatConverter> converter;
+    auto image = std::make_shared<DecodedImage>();
+    // 读进内存再交给 D2D：直接用解码器建的 D2D 位图会一直占着皮肤图文件。
+    if (!wic ||
+        FAILED(wic->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnLoad,
+                                              decoder.GetAddressOf())) ||
+        FAILED(decoder->GetFrame(0, frame.GetAddressOf())) ||
+        FAILED(wic->CreateFormatConverter(converter.GetAddressOf())) ||
+        FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0.0,
+                                     WICBitmapPaletteTypeMedianCut)) ||
+        FAILED(converter->GetSize(&image->width, &image->height)) || image->width == 0 || image->height == 0 ||
+        image->width > 16384 || image->height > 16384)
+        return nullptr;
+    image->pixels.resize(static_cast<size_t>(image->width) * image->height * 4);
+    if (FAILED(converter->CopyPixels(nullptr, image->width * 4, static_cast<UINT>(image->pixels.size()),
+                                     image->pixels.data())))
+        return nullptr;
+    return image;
+}
+
+struct BitmapEntry
+{
+    ID2D1RenderTarget *target = nullptr;
+    ComPtr<ID2D1Bitmap> bitmap;
+    // Pixels a worker decoded, waiting to become a bitmap on the next frame.
+    std::shared_ptr<DecodedImage> decoded;
+    bool pending = false;
+    bool failed = false;
+};
+
+std::map<std::wstring, BitmapEntry> &BitmapCache()
+{
+    static std::map<std::wstring, BitmapEntry> cache;
+    return cache;
+}
+
+HWND &ImageLoadWindow()
+{
+    static HWND hwnd = nullptr;
+    return hwnd;
+}
+
+// Decodes on a worker and repaints the window when the pixels are in. A large or unusual
+// image (Niya Demo's 1280x720 WebP background takes 100-200 ms the first time the codec
+// loads) would otherwise freeze the page for that long when it scrolls into view.
+void RequestDecode(const std::wstring &path, BitmapEntry &entry)
+{
+    if (entry.pending || entry.failed || entry.decoded)
+        return;
+    const HWND hwnd = ImageLoadWindow();
+    if (!hwnd)
+    {
+        entry.decoded = DecodeImageFile(WicFactory().Get(), path);
+        entry.failed = !entry.decoded;
+        return;
+    }
+    entry.pending = true;
+    auto result = std::make_shared<std::shared_ptr<DecodedImage>>();
+    RunInBackground(
+        hwnd,
+        [path, result]() {
+            const HRESULT init = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+            {
+                ComPtr<IWICImagingFactory> wic;
+                CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                                 IID_PPV_ARGS(wic.GetAddressOf()));
+                *result = DecodeImageFile(wic.Get(), path);
+            }
+            if (SUCCEEDED(init))
+                CoUninitialize();
+            return std::string();
+        },
+        [path, result, hwnd](const std::string &) {
+            BitmapEntry &done = BitmapCache()[path];
+            done.pending = false;
+            done.decoded = *result;
+            done.failed = !done.decoded;
+            if (done.decoded && IsWindow(hwnd))
+                InvalidateRect(hwnd, nullptr, FALSE);
+        });
+}
+} // namespace
+
+void SetImageLoadWindow(HWND hwnd)
+{
+    ImageLoadWindow() = hwnd;
+}
+
+void PrefetchImage(const std::wstring &path)
+{
+    if (path.empty())
+        return;
+    BitmapEntry &entry = BitmapCache()[path];
+    if (!entry.bitmap)
+        RequestDecode(path, entry);
+}
+
 ID2D1Bitmap *CachedBitmap(msimeui::DeviceResources &dr, const std::wstring &path, D2D1_SIZE_F *size)
 {
-    struct Entry
-    {
-        ID2D1RenderTarget *target = nullptr;
-        ComPtr<ID2D1Bitmap> bitmap;
-        bool failed = false;
-    };
-    static std::map<std::wstring, Entry> cache;
     ID2D1RenderTarget *target = dr.GetRenderTarget();
     if (!target || path.empty())
         return nullptr;
-    Entry &entry = cache[path];
+    BitmapEntry &entry = BitmapCache()[path];
     if (entry.target != target)
     {
-        entry = Entry{};
+        // A new render target reads the file again, and retries one that failed.
         entry.target = target;
-        ComPtr<IWICImagingFactory> wic = WicFactory();
-        ComPtr<IWICBitmapDecoder> decoder;
-        ComPtr<IWICBitmapFrameDecode> frame;
-        ComPtr<IWICFormatConverter> converter;
-        // 经内存里的 WIC 位图中转：直接用解码器建的 D2D 位图会一直占着皮肤图文件。
-        ComPtr<IWICBitmap> pixels;
-        if (!wic ||
-            FAILED(wic->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnLoad,
-                                                  decoder.GetAddressOf())) ||
-            FAILED(decoder->GetFrame(0, frame.GetAddressOf())) ||
-            FAILED(wic->CreateFormatConverter(converter.GetAddressOf())) ||
-            FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr,
-                                         0.0, WICBitmapPaletteTypeMedianCut)) ||
-            FAILED(wic->CreateBitmapFromSource(converter.Get(), WICBitmapCacheOnLoad, pixels.GetAddressOf())) ||
-            FAILED(target->CreateBitmapFromWicBitmap(pixels.Get(), nullptr, entry.bitmap.GetAddressOf())))
+        entry.bitmap.Reset();
+        entry.failed = false;
+    }
+    if (!entry.bitmap)
+    {
+        RequestDecode(path, entry);
+        if (!entry.decoded)
+            return nullptr;
+        const DecodedImage &image = *entry.decoded;
+        const D2D1_BITMAP_PROPERTIES properties =
+            D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+        if (FAILED(target->CreateBitmap(D2D1::SizeU(image.width, image.height), image.pixels.data(), image.width * 4,
+                                        properties, entry.bitmap.GetAddressOf())))
             entry.failed = true;
+        entry.decoded.reset();
     }
     if (!entry.bitmap)
         return nullptr;
@@ -1289,6 +1394,12 @@ void CandidatePreview::Set(const CandidateLook &look, const CandidateFont &font,
     impl_->font = font;
     impl_->options = options;
     impl_->built = false;
+    // Start decoding the still images now, before the preview scrolls into view.
+    if (!look.animated)
+    {
+        PrefetchImage(look.backgroundImage);
+        PrefetchImage(look.decorationImage);
+    }
     InvalidateMeasure();
     InvalidateVisual();
 }

@@ -252,6 +252,8 @@ class ScrollViewer : public Visual
         // Thumb turns to the hover color only while the pointer is over the thumb
         // itself (WebKit) rather than anywhere over the track.
         bool hoverThumbOnly = false;
+        // Distance of one notch at the system's default of 3 lines per notch; other
+        // "lines to scroll" settings scale it, "one screen" scrolls a page.
         float wheelStep = 72.0f;
         // Wheel scrolling glides there over this time; 0 jumps.
         double smoothScrollMs = 0.0;
@@ -290,15 +292,22 @@ class ScrollViewer : public Visual
     RectF GetScrollbarThumbRect() const;
     bool HasVerticalScrollbar() const;
     void UpdateContentLayout();
+    float GlideOffsetAt(double now) const;
+    float GlideVelocityAt(double now) const;
 
     std::shared_ptr<Visual> content_;
     Appearance appearance_{};
     SizeF measuredContent_ = {};
     float scrollOffsetY_ = 0.0f;
-    // Smooth wheel scrolling: the offset glides towards `scrollTarget_`; `scrollStartMs_`
-    // is the time of the last glide step.
+    // Smooth wheel scrolling: the offset glides from `scrollFrom_` to `scrollTarget_`
+    // between `scrollStartMs_` and `scrollStartMs_ + scrollDurationMs_`; each notch starts
+    // a new glide from where the last one is. `scrollFrameMs_` is the time of the last
+    // frame drawn.
+    float scrollFrom_ = 0.0f;
     float scrollTarget_ = 0.0f;
     double scrollStartMs_ = 0.0;
+    double scrollDurationMs_ = 0.0;
+    double scrollFrameMs_ = 0.0;
     bool scrollAnimating_ = false;
     bool scrollbarHovered_ = false;
     bool thumbHovered_ = false;

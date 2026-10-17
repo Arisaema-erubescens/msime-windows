@@ -208,6 +208,7 @@ bool g_candidate_fixed_badge = true;
 std::string g_candidate_fixed_badge_style = "paperclip";
 std::string g_candidate_ai_badge_style = "robot";
 std::string g_settings_window_linger = "off";
+bool g_settings_launch_animation = true;
 std::string g_theme_mode = "system";
 std::string g_theme_settings = "follow";
 std::string g_theme_cand = "follow";
@@ -753,6 +754,7 @@ bool LoadImeConfig()
             const std::string linger = tbl["appearance"]["settings_window_linger"].value_or(std::string("off"));
             g_settings_window_linger = IsValidSettingsWindowLinger(linger) ? linger : "off";
         }
+        g_settings_launch_animation = tbl["appearance"]["settings_launch_animation"].value_or(true);
         {
             const std::string theme_mode = tbl["appearance"]["theme_mode"].value_or(std::string("system"));
             if (theme_mode == "light" || theme_mode == "system" || theme_mode == "auto")

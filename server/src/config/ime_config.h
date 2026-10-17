@@ -616,6 +616,9 @@ bool SetConfiguredCandidateAiBadgeStyle(const std::string &style);
 // "off" | "1m" | "5m" | "10m" | "30m" | "60m" | "forever"，默认 "10m"。
 const std::string &GetConfiguredSettingsWindowLinger();
 bool SetConfiguredSettingsWindowLinger(const std::string &linger);
+// 设置窗口的齿轮启动画面，出厂开启。
+bool GetConfiguredSettingsLaunchAnimation();
+bool SetConfiguredSettingsLaunchAnimation(bool enabled);
 // "fluent" | "wechat" | "graphite" | "willow_green" | "autumn_osmanthus" | "microsoft"
 // — candidate-window and floating-toolbar skin.
 const std::string &GetConfiguredCandidateSkin();

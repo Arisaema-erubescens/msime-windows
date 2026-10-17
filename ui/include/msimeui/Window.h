@@ -70,8 +70,9 @@ class Window
     // Render while they are still moving, so frames keep coming at the display rate
     // and stop on their own when everything has settled.
     void RequestAnimationFrame();
-    // Timestamp of the frame being rendered (NowMs() outside of painting). Every
-    // animation sampled in one frame sees the same time.
+    // Timestamp of the frame being rendered (NowMs() outside of painting): when it will
+    // reach the screen, as far as the compositor tells. Every animation sampled in one
+    // frame sees the same time.
     double GetFrameTime() const;
     // Re-evaluates which visual is under the cursor, e.g. after content scrolled or
     // was replaced without the mouse moving.
@@ -86,6 +87,7 @@ class Window
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
     LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
     void OnPaint();
+    double NextFrameTimeMs() const;
     void OnSize();
     bool OnMouseWheel(WPARAM wParam, LPARAM lParam);
     LRESULT OnLeftButtonDown(WPARAM wParam, LPARAM lParam);

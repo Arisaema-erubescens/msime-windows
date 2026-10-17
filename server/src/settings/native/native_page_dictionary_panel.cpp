@@ -89,8 +89,8 @@ msimeui::ScrollViewer::Appearance TableScrollbar()
     appearance.thumbColor = p.scrollbarThumb;
     appearance.thumbHoverColor = p.scrollbarThumbHover;
     appearance.hoverThumbOnly = true;
-    appearance.wheelStep = 60.0f;
-    appearance.smoothScrollMs = 160.0;
+    appearance.wheelStep = 100.0f;
+    appearance.smoothScrollMs = 260.0;
     return appearance;
 }
 

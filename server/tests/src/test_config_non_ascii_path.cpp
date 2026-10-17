@@ -1361,6 +1361,50 @@ TEST_CASE(settings_window_linger_defaults_off_and_round_trips)
     fs::remove_all(unique_root, ec);
 }
 
+// 设置窗口启动动画：出厂模板必须带这个键（否则升级合并时用户的选择会被丢弃），
+// 缺键时默认开启，关闭后能落盘并在重读后保持。
+TEST_CASE(settings_launch_animation_defaults_on_and_round_trips)
+{
+    {
+        std::ifstream input(MSIME_DEFAULT_CONFIG_PATH, std::ios::binary);
+        REQUIRE(static_cast<bool>(input));
+        const std::string installed((std::istreambuf_iterator<char>(input)), {});
+        const auto parsed = toml::parse(installed);
+        REQUIRE(parsed["appearance"]["settings_launch_animation"].value_or(false));
+    }
+
+    namespace fs = std::filesystem;
+    const fs::path unique_root = MakeProfileRoot();
+    const fs::path local_app_data = unique_root / L"本地";
+    const fs::path data_dir = local_app_data / L"metasequoiaime";
+
+    std::error_code ec;
+    fs::remove_all(unique_root, ec);
+    SeedTemplate(data_dir);
+
+    {
+        ScopedConfigLocation local_app_data_env(local_app_data);
+
+        InitImeConfig();
+        REQUIRE(GetConfiguredSettingsLaunchAnimation());
+
+        WriteText(data_dir / L"config.toml", "[appearance]\ntheme_mode = \"dark\"\n");
+        InitImeConfig();
+        REQUIRE(GetConfiguredSettingsLaunchAnimation());
+
+        REQUIRE(SetConfiguredSettingsLaunchAnimation(false));
+        REQUIRE(!GetConfiguredSettingsLaunchAnimation());
+        InitImeConfig();
+        REQUIRE(!GetConfiguredSettingsLaunchAnimation());
+
+        REQUIRE(SetConfiguredSettingsLaunchAnimation(true));
+        InitImeConfig();
+        REQUIRE(GetConfiguredSettingsLaunchAnimation());
+    }
+
+    fs::remove_all(unique_root, ec);
+}
+
 // 悬浮工具栏自动隐藏：两个模板都必须带键（否则升级合并会丢掉用户的选择），
 // 默认关闭、延时 5 秒；延时越界的读值回退到 5，越界的写入被拒且不落盘。
 TEST_CASE(floating_toolbar_auto_hide_defaults_and_round_trips)

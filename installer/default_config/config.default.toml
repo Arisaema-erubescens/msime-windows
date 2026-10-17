@@ -177,6 +177,8 @@ theme_mode = "system"
 # 设置窗口关闭后在后台驻留多久再退出，驻留期间重新打开无需冷启动
 # 可选："off"（立即退出）, "1m", "5m", "10m", "30m", "60m", "forever"（一直驻留）
 settings_window_linger = "off"
+# 打开设置窗口时先显示居中的齿轮启动画面，再淡入主界面
+settings_launch_animation = true
 # 分表面主题，可选："follow", "dark", "light"（follow = 跟随 theme_mode）
 theme_settings = "follow"
 theme_cand = "follow"

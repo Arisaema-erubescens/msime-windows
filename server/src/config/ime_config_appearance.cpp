@@ -345,3 +345,18 @@ bool SetConfiguredSettingsWindowLinger(const std::string &linger)
     g_settings_window_linger = linger;
     return true;
 }
+
+bool GetConfiguredSettingsLaunchAnimation()
+{
+    return g_settings_launch_animation;
+}
+
+bool SetConfiguredSettingsLaunchAnimation(bool enabled)
+{
+    if (!WriteConfiguredValue("appearance", "settings_launch_animation", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_settings_launch_animation = enabled;
+    return true;
+}
