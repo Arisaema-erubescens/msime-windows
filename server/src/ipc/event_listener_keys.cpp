@@ -34,8 +34,8 @@ namespace
 bool IsShiftLetterSpecialModeTriggered()
 {
     return g_quick_phrase_triggered || g_radical_mode_triggered || g_date_time_mode_triggered ||
-           g_emoji_mode_triggered || g_kaomoji_mode_triggered || g_jianpin_mode_triggered || g_y_mode_triggered ||
-           g_r_mode_triggered;
+           g_emoji_mode_triggered || g_kaomoji_mode_triggered || g_symbol_mode_triggered || g_jianpin_mode_triggered ||
+           g_y_mode_triggered || g_r_mode_triggered;
 }
 
 // 字母键写进 raw 的那个字母：键产生了字母就照收（保留大小写），否则取键位本身的小写字母。
@@ -1056,7 +1056,7 @@ void HandleImeKey(uint64_t client_id, uint64_t activation_epoch, uint64_t reques
     const std::optional<SchemeType> scheme =
         g_inputSession ? std::optional<SchemeType>(g_inputSession->current_scheme_type()) : std::nullopt;
     const bool chinese_scheme = scheme == SchemeType::Quanpin || scheme == SchemeType::Shuangpin;
-    // T 模式对五笔同样开放，但五笔不能并进 chinese_scheme：那个变量还给 K/U/E/M/J/Y/R 触发与
+    // T 模式对五笔同样开放，但五笔不能并进 chinese_scheme：那个变量还给 K/U/E/M/S/J/Y/R 触发与
     // ShouldLearnEnteredEnglishWord 用，并进去会让五笔连带打开其它本地模式（R7）。
     const bool date_time_scheme = chinese_scheme || scheme == SchemeType::Wubi;
     const bool pinyin_commit =
@@ -1101,6 +1101,9 @@ void HandleImeKey(uint64_t client_id, uint64_t activation_epoch, uint64_t reques
     if (chinese_scheme && !g_english_input_mode && GetConfiguredKaomojiModeEnabled() && input_before_key.empty() &&
         Global::Keycode == 'M' && Global::Wch == L'M' && shift_only)
         g_kaomoji_mode_triggered = true;
+    if (chinese_scheme && !g_english_input_mode && GetConfiguredSymbolModeEnabled() && input_before_key.empty() &&
+        Global::Keycode == 'S' && Global::Wch == L'S' && shift_only)
+        g_symbol_mode_triggered = true;
     if (chinese_scheme && !g_english_input_mode && GetConfiguredJianpinModeEnabled() && input_before_key.empty() &&
         Global::Keycode == 'J' && Global::Wch == L'J' && shift_only)
         g_jianpin_mode_triggered = true;
@@ -1316,6 +1319,11 @@ void HandleImeKey(uint64_t client_id, uint64_t activation_epoch, uint64_t reques
     if (!g_english_input_mode && IsKaomojiCompositionActive(GlobalIme::composition.raw_input_with_cases))
     {
         // Keep preedit identical to the typed M-prefixed code.
+        GlobalIme::composition.segmented_pinyin = GlobalIme::composition.raw_input_with_cases;
+    }
+    if (!g_english_input_mode && IsSymbolCompositionActive(GlobalIme::composition.raw_input_with_cases))
+    {
+        // Keep preedit identical to the typed S-prefixed code.
         GlobalIme::composition.segmented_pinyin = GlobalIme::composition.raw_input_with_cases;
     }
     if (!g_english_input_mode && IsJianpinCompositionActive(GlobalIme::composition.raw_input_with_cases))

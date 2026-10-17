@@ -12,7 +12,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import english_db, inputs, japanese_model, others_db, pinyin_db, textutil
+from . import english_db, inputs, japanese_model, others_db, pinyin_db, symbols_db, textutil
 
 ROOT = Path(__file__).resolve().parents[2]
 DICT_ROOT = ROOT / "MetasequoiaImeDict"
@@ -155,10 +155,14 @@ def build_others(source: inputs.Inputs, path: Path, stage: Stages) -> None:
         stage("kaomoji", kaomoji)
 
         def symbols():
-            categories = others_db.parse_piliapp(textutil.read(source.resource("symbols/piliapp_symbols.txt")))
-            rows = others_db.symbol_rows(pinyin, categories)
-            others_db.build_symbols(connection, rows)
-            return f"{len(rows)} symbols"
+            groups = symbols_db.parse_wanxiang(textutil.read(source.source(symbols_db.WANXIANG)))
+            codex = symbols_db.parse_codex(textutil.read(source.source(symbols_db.CODEX)))
+            excluded = symbols_db.parse_unrenderable(textutil.read(source.source(symbols_db.UNRENDERABLE)))
+            catalog = symbols_db.catalog_rows(pinyin, groups, codex, excluded)
+            codes = symbols_db.code_rows(groups, codex, excluded, pinyin.syllables())
+            symbols_db.build(connection, catalog, codes)
+            return (f"{len(catalog)} panel symbols, {len(codes)} code rows from {len(groups)} groups and "
+                    f"{len(codex)} codex names, {len(excluded)} unrenderable left out")
 
         stage("symbols", symbols)
     finally:

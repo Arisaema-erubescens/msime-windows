@@ -40,6 +40,7 @@ extern bool g_radical_mode_triggered;
 extern bool g_date_time_mode_triggered;
 extern bool g_emoji_mode_triggered;
 extern bool g_kaomoji_mode_triggered;
+extern bool g_symbol_mode_triggered;
 extern bool g_jianpin_mode_triggered;
 extern bool g_y_mode_triggered;
 extern bool g_r_mode_triggered;
@@ -88,6 +89,8 @@ bool IsRadicalCompositionActive(const std::string &raw);
 bool IsDateTimeCompositionActive(const std::string &raw);
 bool IsEmojiCompositionActive(const std::string &raw);
 bool IsKaomojiCompositionActive(const std::string &raw);
+// S 模式（符号快捷输入）：唤醒键 S 之后是一串字母编码。
+bool IsSymbolCompositionActive(const std::string &raw);
 bool IsJianpinCompositionActive(const std::string &raw);
 bool IsYModeCompositionActive(const std::string &raw);
 bool IsYModeInput(const std::string &raw);

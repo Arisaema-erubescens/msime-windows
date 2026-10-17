@@ -1,13 +1,11 @@
-"""others.db：表情面板与 E/M 模式读的 emoji、颜文字和符号目录。
+"""others.db：表情面板与 E/M 模式读的 emoji 和颜文字（符号在 symbols_db.py）。
 
-对应 Rust 构建器 others.rs / pinyin.rs 的 emoji / kaomoji / symbols 阶段。关键词的拼音逐字取：
+对应 Rust 构建器 others.rs / pinyin.rs 的 emoji / kaomoji 阶段。关键词的拼音逐字取：
 Rust 用 pinyin crate，这里用 pypinyin 的单字表（同出 pinyin-data），多音字短语读音由 pinyin-overrides.txt 指定。
 """
 
 from __future__ import annotations
 
-import html
-import re
 import sqlite3
 
 from . import textutil
@@ -65,6 +63,11 @@ class Pinyin:
         if other:
             items.append(other)
         return items
+
+    def syllables(self) -> set[str]:
+        """单字表里出现过的全部无声调音节（ü 写成 v）。"""
+        return {self._plain(reading).replace("ü", "v") for readings in self._readings.values()
+                for reading in readings.split(",")}
 
     def full_and_initials(self, keyword: str) -> tuple[str, str]:
         items = self.lazy(keyword)
@@ -246,94 +249,3 @@ def build_kaomoji(connection: sqlite3.Connection, pinyin: Pinyin, mapping: dict[
                                [(kaomoji, order, " ".join(keywords)) for order, (kaomoji, keywords) in enumerate(mapping.items())])
         textutil.analyze(connection, optimize=False)
     return rows, len(mapping)
-
-
-# ---- 符号 ----
-
-_CATEGORY_LINE = re.compile(r"^# \[piliapp/symbol/([^/\]]+)/\]\s*(.+)\s*$")
-
-# 父标签按导航顺序；每个 PiliApp 分类 slug 及其英文小标题，按小标题顺序。
-PARENT_TABS = (
-    ("Stars and shapes", (("star", "Stars"), ("asterisk", "Asterisks"), ("circle", "Circles"), ("triangle", "Triangles"),
-                          ("square", "Squares"), ("other-shapes", "Other shapes"), ("bullet-point", "Bullet points"))),
-    ("Arrows and lines", (("arrow", "Arrows"), ("line", "Lines"), ("random-lines", "Random lines"))),
-    ("Punctuation", (("punctuation", "Punctuation"), ("brackets", "Brackets"), ("quotation-mark", "Quotation marks"),
-                     ("pilcrow", "Pilcrow"), ("tick", "Check marks"), ("x-mark", "X marks"))),
-    ("Math", (("math", "Math"), ("number", "Numbers"), ("fraction", "Fractions"), ("pi", "Pi"),
-              ("subscript-superscript", "Super/subscripts"))),
-    ("Currency", (("currency", "Currency"), ("business", "Business"), ("unit", "Units"))),
-    ("Hearts", (("heart", "Hearts"), ("eye", "Eyes"), ("monochrome", "Monochrome"))),
-    ("Letters", (("latin", "Latin letters"), ("latin-extended", "Latin extended"), ("greek", "Greek letters"),
-                 ("kana", "Japanese kana"), ("braille", "Braille"), ("korean", "Korean"))),
-    ("Games", (("card-suit", "Card suits"), ("chess", "Chess"), ("dice", "Dice"))),
-    ("Culture", (("culture", "Religion and culture"), ("cross", "Crosses"), ("zodiac", "Zodiac"), ("gender", "Gender"),
-                 ("totem", "Totems"))),
-    ("Animals and nature", (("animals", "Animals"), ("flower", "Flowers"), ("weather", "Weather"))),
-    ("People and activity", (("activity", "People and activity"),)),
-    ("More", (("music", "Music"), ("tech", "Technical"), ("menu", "Menu"), ("misc", "Miscellaneous"),
-              ("confidential", "Block elements"), ("mashup", "Mashup"))),
-)
-
-
-def parse_piliapp(text: str) -> dict[str, tuple[str, list[str]]]:
-    """slug -> (中文标题, 符号)。解码 &dollar; 这类 HTML 实体；同一分类里重复的符号只留一个。"""
-    categories: dict[str, tuple[str, list[str]]] = {}
-    current = None
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        match = _CATEGORY_LINE.match(line)
-        if match:
-            if current:
-                categories[current[0]] = (current[1], current[2])
-            current = (match.group(1).strip(), match.group(2).strip(), [], set())
-            continue
-        if line.startswith("#") or current is None:
-            continue
-        symbol = html.unescape(line).strip()
-        if symbol and symbol not in current[3]:
-            current[3].add(symbol)
-            current[2].append(symbol)
-    if current:
-        categories[current[0]] = (current[1], current[2])
-    return categories
-
-
-def symbol_rows(pinyin: Pinyin, categories: dict[str, tuple[str, list[str]]]) -> list[tuple]:
-    rows = []
-    used = set()
-    for parent, slugs in PARENT_TABS:
-        for slug, category in slugs:
-            used.add(slug)
-            chinese, symbols = categories.get(slug, ("", []))
-            if not symbols:
-                continue
-            parts = [category, chinese, slug.replace("-", " "), parent]
-            if _is_cjk(chinese):
-                full, initials = pinyin.full_and_initials(chinese)
-                full, initials = full.lower(), initials.lower()
-                if full:
-                    parts.append(full)
-                if initials and initials != full:
-                    parts.append(initials)
-            keywords = " ".join(part for part in parts if part)
-            for symbol in symbols:
-                rows.append((symbol, category, parent, len(rows), keywords))
-    leftovers = [slug for slug, (_, symbols) in categories.items() if slug not in used and symbols]
-    if leftovers:
-        raise ValueError(f"unmapped PiliApp categories: {leftovers}")
-    return rows
-
-
-def build_symbols(connection: sqlite3.Connection, rows: list[tuple]) -> None:
-    with connection:
-        connection.execute("DROP TABLE IF EXISTS symbol_catalog")
-        connection.execute("\n            CREATE TABLE symbol_catalog (\n                symbol TEXT NOT NULL,\n"
-                           "                category TEXT NOT NULL,\n                parent_category TEXT NOT NULL,\n"
-                           "                sort_order INTEGER NOT NULL,\n                keywords TEXT NOT NULL,\n"
-                           "                PRIMARY KEY (symbol, category)\n            ) WITHOUT ROWID\n            ")
-        connection.execute("CREATE INDEX idx_symbol_catalog_parent_order ON symbol_catalog(parent_category, sort_order)")
-        connection.executemany("INSERT INTO symbol_catalog (symbol, category, parent_category, sort_order, keywords) "
-                               "VALUES (?, ?, ?, ?, ?)", rows)
-        textutil.analyze(connection, optimize=False)

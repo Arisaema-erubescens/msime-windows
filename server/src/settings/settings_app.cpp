@@ -518,6 +518,7 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
             {"cn_en_mixed_input_first_page_count", GetConfiguredEnglishMixedInputFirstPageCount()},
             {"emoji_mixed_input", GetConfiguredEmojiMixedInputEnabled()},
             {"kaomoji_mixed_input", GetConfiguredKaomojiMixedInputEnabled()},
+            {"symbol_mixed_input", GetConfiguredSymbolMixedInputEnabled()},
             {"cloud_candidates", GetConfiguredCloudCandidatesEnabled()},
             {"paging_minus_equal", GetConfiguredPagingMinusEqualEnabled()},
             {"paging_comma_period", GetConfiguredPagingCommaPeriodEnabled()},
@@ -583,6 +584,7 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
             {"date_time_mode", GetConfiguredDateTimeModeEnabled()},
             {"emoji_mode", GetConfiguredEmojiModeEnabled()},
             {"kaomoji_mode", GetConfiguredKaomojiModeEnabled()},
+            {"symbol_mode", GetConfiguredSymbolModeEnabled()},
             {"jianpin_mode", GetConfiguredJianpinModeEnabled()},
             {"y_mode", GetConfiguredYModeEnabled()},
             {"r_mode", GetConfiguredRModeEnabled()},
@@ -933,6 +935,8 @@ bool ApplyConfigUpdate(const json::object &data)
         return SetConfiguredEmojiMixedInputEnabled(json::value_to<bool>(data.at("value")));
     if (path == "general.kaomoji_mixed_input")
         return SetConfiguredKaomojiMixedInputEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "general.symbol_mixed_input")
+        return SetConfiguredSymbolMixedInputEnabled(json::value_to<bool>(data.at("value")));
     if (path == "general.cloud_candidates")
         return SetConfiguredCloudCandidatesEnabled(json::value_to<bool>(data.at("value")));
     if (path == "association.sentence_wordlattice")
@@ -971,6 +975,8 @@ bool ApplyConfigUpdate(const json::object &data)
         return SetConfiguredEmojiModeEnabled(json::value_to<bool>(data.at("value")));
     if (path == "utility.kaomoji_mode")
         return SetConfiguredKaomojiModeEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "utility.symbol_mode")
+        return SetConfiguredSymbolModeEnabled(json::value_to<bool>(data.at("value")));
     if (path == "utility.jianpin_mode")
         return SetConfiguredJianpinModeEnabled(json::value_to<bool>(data.at("value")));
     if (path == "utility.y_mode")

@@ -6,6 +6,7 @@
 #include "engine/local_modes/date_time_query.h"
 #include "engine/local_modes/emoji_query.h"
 #include "engine/local_modes/kaomoji_query.h"
+#include "engine/local_modes/symbol_query.h"
 #include "engine/shuangpin/shuangpin_profile.h"
 #include "config/ime_config.h"
 #include <algorithm>
@@ -18,7 +19,7 @@
 namespace
 {
 constexpr std::size_t kEnglishCandidateLimit = 5;
-// emoji 和颜文字从第二个字母起才查，单独一个首字母匹配面太大，会把候选刷满。
+// emoji、颜文字和符号从第二个字母起才查，单独一个首字母匹配面太大，会把候选刷满。
 constexpr std::size_t kExpressiveMinimumPrefixLength = 2;
 constexpr int kExpressiveCandidateLimit = 3;
 constexpr std::size_t kDateTimeCandidateLimit = 3;
@@ -118,6 +119,19 @@ void WorkerLoop()
                                  request.input, request.scheme, others_db_path, kExpressiveCandidateLimit,
                                  GetShuangpinProfile(GetConfiguredShuangpinSchema()))
                                  .candidates;
+            if (IsStale(observed_generation))
+                continue;
+        }
+        if (expressive_prefix)
+        {
+            for (const std::string &code : request.symbol_codes)
+            {
+                result.symbol =
+                    metasequoia::local_modes::query_mixed_symbols(code, others_db_path, kExpressiveCandidateLimit)
+                        .candidates;
+                if (!result.symbol.empty())
+                    break;
+            }
         }
 
         // 什么都没查到就不回调：任务线程组页时已经是不带混输候选的列表，没有可以合并的。

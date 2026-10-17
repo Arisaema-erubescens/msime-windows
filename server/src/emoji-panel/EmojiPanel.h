@@ -151,6 +151,8 @@ class EmojiPanel final : public Visual
     const SymbolTab *ActiveSymbolTab() const;
     std::vector<const Item *> CollectPreviewItems(const std::vector<Group> &groups, size_t limit) const;
     std::vector<const Item *> CollectDiversePreviewItems(const std::vector<Group> &groups, size_t limit) const;
+    // 关键词里有一整个词等于搜索词的符号（alpha → α、pi → π、xl → 希腊字母），按目录顺序、不重复。
+    std::vector<const Item *> CollectBestSymbolMatches(const std::wstring &query, size_t limit) const;
 
     std::vector<Group> emojiGroups_;
     std::vector<Group> kaomojiGroups_;

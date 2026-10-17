@@ -587,6 +587,42 @@ TEST_CASE(KaomojiMixedCandidatesFollowEmojiAtTheEnd)
     REQUIRE_EQ(items[5].source, CandidateSource::Kaomoji);
 }
 
+TEST_CASE(FirstSymbolMixedCandidateFollowsTheFirstCandidate)
+{
+    const auto local = [](std::string word) { return WordItem("yi", std::move(word), 100); };
+    const auto emoji = [] { return WordItem("yi", "\xF0\x9F\x98\x80", 1, CandidateSource::Emoji); };
+    const auto kaomoji = [] { return WordItem("yi", "(^_^)", 1, CandidateSource::Kaomoji); };
+    const auto symbol = [](std::string word) { return WordItem("yi", std::move(word), 1, CandidateSource::Symbol); };
+    const auto cloud = [] { return WordItem("yi", "云候选", 1, CandidateSource::CloudSuggestion); };
+    FanyImeIpc::EnglishPlacement placement;
+    placement.page_size = 5;
+
+    // 首个符号紧跟首个中文候选，其余符号排在最后。
+    std::vector<WordItem> items = {local("一"), symbol("①"), symbol("⑴"), local("以"),
+                                   local("已"), local("意"), local("义"), local("亿")};
+    FanyImeIpc::NormalizeMixedCandidateOrder(items, 1, placement);
+    REQUIRE_EQ(items.size(), size_t{8});
+    REQUIRE_EQ(items[0].word, std::string("一"));
+    REQUIRE_EQ(items[1].word, std::string("①"));
+    REQUIRE_EQ(items[2].word, std::string("以"));
+    REQUIRE_EQ(items.back().word, std::string("⑴"));
+
+    // 有 emoji 和云候选时：符号仍在第二位、云候选之前；首页末位归 emoji；其余符号排在颜文字之后。
+    items = {local("一"), symbol("①"), symbol("⑴"), kaomoji(), emoji(), cloud(), local("以"), local("已"), local("意")};
+    FanyImeIpc::NormalizeMixedCandidateOrder(items, 1, placement);
+    REQUIRE_EQ(items[1].word, std::string("①"));
+    REQUIRE_EQ(items[2].source, CandidateSource::CloudSuggestion);
+    REQUIRE_EQ(items[4].source, CandidateSource::Emoji);
+    REQUIRE_EQ(items[items.size() - 2].source, CandidateSource::Kaomoji);
+    REQUIRE_EQ(items.back().word, std::string("⑴"));
+
+    // 再归一化一次位置不变（异步结果回来、翻页扩展都会重排）。
+    const auto before = items;
+    FanyImeIpc::NormalizeMixedCandidateOrder(items, 1, placement);
+    for (size_t index = 0; index < items.size(); ++index)
+        REQUIRE_EQ(items[index].word, before[index].word);
+}
+
 TEST_CASE(DateTimeMixedCandidateLeadsAsyncCandidates)
 {
     const auto local = [](std::string word) { return WordItem("rq", std::move(word), 100); };

@@ -165,6 +165,21 @@ bool SetConfiguredKaomojiMixedInputEnabled(bool enabled)
     return true;
 }
 
+bool GetConfiguredSymbolMixedInputEnabled()
+{
+    return g_symbol_mixed_input_enabled;
+}
+
+bool SetConfiguredSymbolMixedInputEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("general", "symbol_mixed_input", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_symbol_mixed_input_enabled = enabled;
+    return true;
+}
+
 bool GetConfiguredCloudCandidatesEnabled()
 {
     return g_cloud_candidates_enabled;
@@ -483,6 +498,21 @@ bool SetConfiguredKaomojiModeEnabled(bool enabled)
         return false;
     }
     g_kaomoji_mode_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredSymbolModeEnabled()
+{
+    return g_symbol_mode_enabled;
+}
+
+bool SetConfiguredSymbolModeEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("utility", "symbol_mode", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_symbol_mode_enabled = enabled;
     return true;
 }
 

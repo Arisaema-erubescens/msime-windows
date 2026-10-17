@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <limits>
 #include <string>
+#include <unordered_set>
 
 namespace msimeui
 {
@@ -231,6 +232,26 @@ std::wstring Lower(std::wstring value)
 {
     std::transform(value.begin(), value.end(), value.begin(), [](wchar_t ch) { return std::towlower(ch); });
     return value;
+}
+
+// 关键词以空格分隔。整词等于搜索词才算：搜 pi 时 π 的关键词里有 pi，而「偏旁 pianpang」只是含有 pi。
+bool HasKeyword(const std::wstring &keywordsLower, const std::wstring &query)
+{
+    size_t start = 0;
+    while (true)
+    {
+        const size_t end = keywordsLower.find(L' ', start);
+        const size_t length = (end == std::wstring::npos ? keywordsLower.size() : end) - start;
+        if (length == query.size() && keywordsLower.compare(start, length, query) == 0)
+        {
+            return true;
+        }
+        if (end == std::wstring::npos)
+        {
+            return false;
+        }
+        start = end + 1;
+    }
 }
 
 bool CopyToClipboard(HWND hwnd, const std::wstring &text)
@@ -1222,6 +1243,29 @@ std::vector<const EmojiPanel::Item *> EmojiPanel::CollectDiversePreviewItems(con
     return items;
 }
 
+std::vector<const EmojiPanel::Item *> EmojiPanel::CollectBestSymbolMatches(const std::wstring &query,
+                                                                           size_t limit) const
+{
+    // 同一个符号可能在几个小标题下各有一份（拉丁扩展与拼音都收了 ā），最佳匹配里只列一次。
+    std::vector<const Item *> items;
+    std::unordered_set<std::wstring> seen;
+    for (const auto &group : symbolGroups_)
+    {
+        for (const auto &item : group.items)
+        {
+            if (HasKeyword(item.keywordsLower, query) && seen.insert(item.text).second)
+            {
+                items.push_back(&item);
+                if (items.size() >= limit)
+                {
+                    return items;
+                }
+            }
+        }
+    }
+    return items;
+}
+
 size_t EmojiPanel::HitMainTab(const PointF &point) const
 {
     if (InDetailPage())
@@ -1482,13 +1526,20 @@ void EmojiPanel::EnsureDisplayLayout() const
         auto symbolPreview = CollectDiversePreviewItems(symbolGroups_, kPreviewLimit);
         if (searching)
         {
-            symbolPreview.clear();
+            // 整词命中的排前面，不够一页再补子串命中的。
+            symbolPreview = CollectBestSymbolMatches(query, kPreviewLimit);
             for (const auto &group : symbolGroups_)
             {
+                if (symbolPreview.size() >= kPreviewLimit)
+                {
+                    break;
+                }
                 for (const auto &item : group.items)
                 {
-                    if (item.keywordsLower.find(query) != std::wstring::npos ||
-                        item.text.find(searchText_) != std::wstring::npos)
+                    if ((item.keywordsLower.find(query) != std::wstring::npos ||
+                         item.text.find(searchText_) != std::wstring::npos) &&
+                        std::none_of(symbolPreview.begin(), symbolPreview.end(),
+                                     [&item](const Item *shown) { return shown->text == item.text; }))
                     {
                         symbolPreview.push_back(&item);
                         if (symbolPreview.size() >= kPreviewLimit)
@@ -1535,6 +1586,15 @@ void EmojiPanel::EnsureDisplayLayout() const
     {
         if (searching || symbolTabs_.empty())
         {
+            // 关键词子串命中面很宽（搜 pi 会带上「偏旁 pianpang」整组），整词命中的单独列在最前。
+            if (searching)
+            {
+                auto best = CollectBestSymbolMatches(query, kColumns * 10);
+                if (!best.empty())
+                {
+                    appendGroup(L"最佳匹配", std::move(best), Page::Home, false);
+                }
+            }
             for (const auto &group : symbolGroups_)
             {
                 auto items = filterItems(group.items);

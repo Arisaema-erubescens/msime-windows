@@ -91,9 +91,10 @@ void LearnEnglishSlot(const WordItem &selected, size_t absolute_index, uint64_t 
                                                    activation_epoch);
         return;
     }
-    // emoji、颜文字按自己的位置排（最匹配的 emoji 就在首页末位），选它们不是嫌英文排得太前，不让英文后退。
+    // emoji、颜文字、符号按自己的位置排（最匹配的 emoji 就在首页末位），选它们不是嫌英文排得太前，不让英文后退。
     if (absolute_index > *english_index && selected.source != CandidateSource::EnglishDictionary &&
-        selected.source != CandidateSource::Emoji && selected.source != CandidateSource::Kaomoji)
+        selected.source != CandidateSource::Emoji && selected.source != CandidateSource::Kaomoji &&
+        selected.source != CandidateSource::Symbol)
     {
         FanyNamedPipe::EnqueueLearnEnglishSlotTask(code, static_cast<int>(*english_index),
                                                    static_cast<int>(absolute_index), client_id, activation_epoch);
@@ -289,7 +290,8 @@ void ProcessSelectionKey(UINT keycode, uint64_t client_id, uint64_t activation_e
         // 日语假名可能只覆盖已完成的音节，和词典候选一起推进，保留尚未转换的后缀。
         if (curWordItem.source == CandidateSource::EnglishDictionary ||
             curWordItem.source == CandidateSource::QuickPhrase || curWordItem.source == CandidateSource::Emoji ||
-            curWordItem.source == CandidateSource::Kaomoji || curWordItem.source == CandidateSource::DateTime ||
+            curWordItem.source == CandidateSource::Kaomoji || curWordItem.source == CandidateSource::Symbol ||
+            curWordItem.source == CandidateSource::DateTime ||
             (curWordItem.source == CandidateSource::Generated && !japanese_candidate))
         {
             Global::candidate_ui.selected_text =

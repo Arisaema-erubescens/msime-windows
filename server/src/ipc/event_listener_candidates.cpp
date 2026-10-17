@@ -28,6 +28,7 @@
 #include "engine/local_modes/date_time_query.h"
 #include "engine/local_modes/emoji_query.h"
 #include "engine/local_modes/kaomoji_query.h"
+#include "engine/local_modes/symbol_query.h"
 #include "engine/local_modes/jianpin_query.h"
 #include "engine/local_modes/v_mode_query.h"
 #include "engine/shuangpin/shuangpin_profile.h"
@@ -60,7 +61,7 @@ bool BuildTranslationQuery(const WordItem &item, EnglishIme::TranslationQuery &q
     if (visible.empty())
         return false;
     if (item.source == CandidateSource::Emoji || item.source == CandidateSource::Kaomoji ||
-        item.source == CandidateSource::DateTime)
+        item.source == CandidateSource::Symbol || item.source == CandidateSource::DateTime)
         return false;
     if (item.source == CandidateSource::EnglishDictionary && !item.pinyin.empty())
     {
@@ -160,6 +161,26 @@ std::string DateTimeMixedKeyword(const std::string &current_input, SchemeType sc
     return metasequoia::local_modes::is_date_time_keyword(quanpin) ? quanpin : std::string{};
 }
 
+// 符号混输按整串编码查。双拼的按键串是音节码，用户要的是它读出来的全拼（小鹤 sj 是 san → ③），
+// 所以先查换算出的全拼；全拼查不到再查原始按键，alpha 这类不是音节的编码在双拼下照样能混。
+std::vector<std::string> SymbolMixedCodes(const std::string &current_input, SchemeType scheme)
+{
+    if (current_input.empty() || !std::all_of(current_input.begin(), current_input.end(),
+                                              [](unsigned char ch) { return ch >= 'a' && ch <= 'z'; }))
+        return {};
+    std::vector<std::string> codes;
+    if (scheme == SchemeType::Shuangpin)
+    {
+        std::string quanpin = g_inputSession->get_quanpin();
+        quanpin.erase(std::remove_if(quanpin.begin(), quanpin.end(), [](char ch) { return ch == '\'' || ch == ' '; }),
+                      quanpin.end());
+        if (!quanpin.empty() && quanpin != current_input)
+            codes.push_back(std::move(quanpin));
+    }
+    codes.push_back(current_input);
+    return codes;
+}
+
 // U 模式（部件拆字反查）：唤醒键 U 之后已经输入了至少一个部件字母才算一次可查询的输入。
 bool IsRadicalInput(const std::string &raw)
 {
@@ -181,6 +202,11 @@ bool IsEmojiInput(const std::string &raw)
 bool IsKaomojiInput(const std::string &raw)
 {
     return IsKaomojiCompositionActive(raw) && raw.size() > 1;
+}
+
+bool IsSymbolInput(const std::string &raw)
+{
+    return IsSymbolCompositionActive(raw) && raw.size() > 1;
 }
 
 bool IsJianpinInput(const std::string &raw)
@@ -306,8 +332,8 @@ std::string BuildCurrentCandidatePage()
         }
         if (show_helpcodes && item.source != CandidateSource::EnglishDictionary &&
             item.source != CandidateSource::QuickPhrase && item.source != CandidateSource::Emoji &&
-            item.source != CandidateSource::Kaomoji && item.source != CandidateSource::DateTime &&
-            item.source != CandidateSource::Generated)
+            item.source != CandidateSource::Kaomoji && item.source != CandidateSource::Symbol &&
+            item.source != CandidateSource::DateTime && item.source != CandidateSource::Generated)
             view.annotation = g_inputSession->get_helpcode_annotation(item.word, uppercase_all_helpcodes);
         if (!IsCandidateSubPageActive() && item.word == JevSelectionWord() && Jev::IsPoolSource(item) &&
             item.fixed_position == 0)
@@ -704,6 +730,11 @@ void PrepareCandidateList(uint64_t client_id, uint64_t activation_epoch)
                                                         10, ConfiguredShuangpinProfile())
                     .candidates;
     }
+    else if (IsSymbolInput(current_input))
+    {
+        // 一个分组可以有上百个符号（jt 箭头 148 个），整组都放进列表，靠翻页看全。
+        items = metasequoia::local_modes::query_symbols(current_input.substr(1)).candidates;
+    }
     else if (IsJianpinInput(current_input))
     {
         const int limit = current_input.size() == 2 ? 24 : 100;
@@ -730,8 +761,8 @@ void PrepareCandidateList(uint64_t client_id, uint64_t activation_epoch)
     }
     else if (IsSpecialModeCompositionActive(current_input))
     {
-        // A K/U/T/E/M/J/Y special-mode prefix that is not yet a complete input (e.g.
-        // "K", "U", "U+", "Tw", "Txin", "E", "M", "J", "Y"): do not translate it into
+        // A K/U/T/E/M/S/J/Y special-mode prefix that is not yet a complete input (e.g.
+        // "K", "U", "U+", "Tw", "Txin", "E", "M", "S", "J", "Y"): do not translate it into
         // normal pinyin candidates. Leave items empty so only the raw typed text
         // shows as the fallback.
     }
@@ -798,9 +829,13 @@ void PrepareCandidateList(uint64_t client_id, uint64_t activation_epoch)
         mixed.english_first_page_count = static_cast<size_t>(GetConfiguredEnglishMixedInputFirstPageCount());
         mixed.emoji = GetConfiguredEmojiMixedInputEnabled();
         mixed.kaomoji = GetConfiguredKaomojiMixedInputEnabled();
+        // 符号按整串编码精确匹配，光标前缀截断时整串不是用户要的编码。
+        if (GetConfiguredSymbolMixedInputEnabled() && g_inputSession->prefix_end() == current_input.size())
+            mixed.symbol_codes = SymbolMixedCodes(current_input, scheme);
         if (GetConfiguredDateTimeCandidatesEnabled() && g_inputSession->prefix_end() == current_input.size())
             mixed.date_time_keyword = DateTimeMixedKeyword(current_input, scheme);
-        if (mixed.english || mixed.emoji || mixed.kaomoji || !mixed.date_time_keyword.empty())
+        if (mixed.english || mixed.emoji || mixed.kaomoji || !mixed.symbol_codes.empty() ||
+            !mixed.date_time_keyword.empty())
         {
             mixed.input = current_input;
             mixed.scheme = scheme;

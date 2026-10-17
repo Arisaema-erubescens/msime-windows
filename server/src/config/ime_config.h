@@ -478,6 +478,9 @@ bool GetConfiguredEmojiMixedInputEnabled();
 bool SetConfiguredEmojiMixedInputEnabled(bool enabled);
 bool GetConfiguredKaomojiMixedInputEnabled();
 bool SetConfiguredKaomojiMixedInputEnabled(bool enabled);
+// 全拼/双拼里输入恰好等于某个符号编码（alpha、szq、xl）时，把符号混进候选。
+bool GetConfiguredSymbolMixedInputEnabled();
+bool SetConfiguredSymbolMixedInputEnabled(bool enabled);
 bool GetConfiguredCloudCandidatesEnabled();
 bool SetConfiguredCloudCandidatesEnabled(bool enabled);
 // 整句候选来源与去重补位开关（[association] 段），默认全关。
@@ -533,6 +536,9 @@ bool GetConfiguredEmojiModeEnabled();
 bool SetConfiguredEmojiModeEnabled(bool enabled);
 bool GetConfiguredKaomojiModeEnabled();
 bool SetConfiguredKaomojiModeEnabled(bool enabled);
+// Shift+S 符号快捷输入模式。
+bool GetConfiguredSymbolModeEnabled();
+bool SetConfiguredSymbolModeEnabled(bool enabled);
 bool GetConfiguredJianpinModeEnabled();
 bool SetConfiguredJianpinModeEnabled(bool enabled);
 bool GetConfiguredYModeEnabled();

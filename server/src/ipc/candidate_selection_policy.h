@@ -141,14 +141,15 @@ inline std::optional<size_t> SlottedEnglishIndex(const std::vector<WordItem> &it
 // (promoted ahead of AI unless a cloud result forces it behind cloud+AI), and
 // emoji/kaomoji are placed at the end of the candidate list so they do not
 // displace normal Chinese candidates:
-//   no cloud:         Chinese..., English, AI, ..., emoji, kaomoji
-//   cloud:            Chinese..., cloud, AI, English, ..., emoji, kaomoji
-//   cloud only:       Chinese..., cloud, English, ..., emoji, kaomoji
-//   base:             Chinese..., English, ..., emoji, kaomoji
+//   no cloud:         Chinese..., English, AI, ..., emoji, kaomoji, symbols
+//   cloud:            Chinese..., cloud, AI, English, ..., emoji, kaomoji, symbols
+//   cloud only:       Chinese..., cloud, English, ..., emoji, kaomoji, symbols
+//   base:             Chinese..., English, ..., emoji, kaomoji, symbols
 // 知道每页候选数（page_size）时，最匹配的那个 emoji 单独放在首页末位，其余 emoji 仍在末尾；
 // 补全词的默认位置和学到的英文槽位相应让到首页倒数第二位，两者都留在首页。
 // 日期时间只在 rq / sj / xq 这类唤醒词上出现，用户打它就是要日期，所以它排在所有异步候选前面，
 // 紧跟首个中文候选，展开全部格式的入口紧跟在它后面：Chinese, date/time, 📅日期, cloud, ...
+// 符号同理（只在整串等于编码时出现），首个符号排在日期时间之后、云候选之前，其余在末尾。
 // The learned English slot (EnglishPlacement) moves the English candidate away
 // from that default afterwards, and explicit English ranking choices are
 // reapplied last.
@@ -160,6 +161,7 @@ inline void NormalizeMixedCandidateOrder(std::vector<WordItem> &items, size_t lo
     std::vector<WordItem> fixed_english_candidates;
     std::vector<WordItem> emoji_candidates;
     std::vector<WordItem> kaomoji_candidates;
+    std::vector<WordItem> symbol_candidates;
     std::vector<WordItem> date_time_candidates;
     std::optional<WordItem> date_time_menu;
     std::optional<WordItem> cloud_candidate;
@@ -192,6 +194,9 @@ inline void NormalizeMixedCandidateOrder(std::vector<WordItem> &items, size_t lo
             break;
         case CandidateSource::Kaomoji:
             kaomoji_candidates.push_back(std::move(item));
+            break;
+        case CandidateSource::Symbol:
+            symbol_candidates.push_back(std::move(item));
             break;
         case CandidateSource::DateTime:
             if (!metasequoia::local_modes::is_date_time_menu_item(item))
@@ -233,6 +238,13 @@ inline void NormalizeMixedCandidateOrder(std::vector<WordItem> &items, size_t lo
         date_time_candidates.erase(date_time_candidates.begin());
         if (date_time_menu)
             insert_at(slot++, std::move(*date_time_menu));
+    }
+    // 符号只在整串等于某个编码时混进来（alpha、szq、yi），用户打的就是它：首个紧跟首个中文候选
+    // （和日期时间一样），其余排在颜文字之后。
+    if (!symbol_candidates.empty())
+    {
+        insert_at(slot++, std::move(symbol_candidates.front()));
+        symbol_candidates.erase(symbol_candidates.begin());
     }
     if (cloud_candidate)
     {
@@ -304,6 +316,8 @@ inline void NormalizeMixedCandidateOrder(std::vector<WordItem> &items, size_t lo
     for (auto &candidate : emoji_candidates)
         items.push_back(std::move(candidate));
     for (auto &candidate : kaomoji_candidates)
+        items.push_back(std::move(candidate));
+    for (auto &candidate : symbol_candidates)
         items.push_back(std::move(candidate));
     for (auto &candidate : date_time_candidates)
         items.push_back(std::move(candidate));

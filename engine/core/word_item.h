@@ -29,6 +29,9 @@ enum class CandidateSource
     // 万象语法模型（octagram .gram）在词格 n-best 上重排挑中的那一句。句子仍是词格
     // 解出来的，搭配强度表只负责挑；落库/学习判定与 NeuralDesktop/NeuralKeyboard 同类。
     Collocation,
+    // Shift+S 符号模式与符号混输查出的符号（others.db 的 symbol_code）。与 emoji 一样直接上屏，
+    // 不进词库、不调频。
+    Symbol,
 };
 
 struct WordItem

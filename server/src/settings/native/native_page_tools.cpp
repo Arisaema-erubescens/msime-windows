@@ -141,6 +141,7 @@ VisualPtr BuildToolsPage(PageContext &context)
         auto zhEn = BindToggle(context, "general.cn_en_mixed_input");
         auto emoji = BindToggle(context, "general.emoji_mixed_input");
         auto kaomoji = BindToggle(context, "general.kaomoji_mixed_input");
+        auto symbol = BindToggle(context, "general.symbol_mixed_input");
         auto quickCandidates = BindToggle(context, "utility.quick_phrase_candidates");
         auto quickFrequency = BindToggle(context, "utility.quick_phrase_frequency");
         auto dateTime = BindToggle(context, "utility.date_time_candidates");
@@ -149,7 +150,7 @@ VisualPtr BuildToolsPage(PageContext &context)
         frequency.minWidth = 110.0f;
         auto trigger = BindDropdown(context, "general.cn_en_mixed_input_min_chars", NumberOptions(1, 8), frequency,
                                     ValueKind::Integer);
-        std::vector<std::shared_ptr<ToggleSwitch>> subs = {zhEn,           emoji,    kaomoji, quickCandidates,
+        std::vector<std::shared_ptr<ToggleSwitch>> subs = {zhEn,           emoji,    kaomoji, symbol, quickCandidates,
                                                            quickFrequency, dateTime, dateMenu};
         std::shared_ptr<Hideable> hint;
         ToggleSection section = MakeToggleSection(
@@ -180,6 +181,10 @@ VisualPtr BuildToolsPage(PageContext &context)
                                L"在候选项中加入匹配的 emoji（排在候选项列表最后，不挤占正常汉字候选的位置）", emoji));
         details.Add(
             DetailsRow(context, L"颜文字混输", L"在候选项中加入匹配的颜文字（排在列表末尾的 emoji 之后）", kaomoji));
+        details.Add(DetailsRow(context, L"符号混输",
+                               L"输入恰好等于某个符号编码时加入符号，首个紧跟首选，例如 alpha → α、infinity → "
+                               L"∞、szq → ①、yi → ① ⑴ ⒈。其他读得成拼音的编码（xi、ji）只在 S 模式里用",
+                               symbol));
         details.Add(
             DetailsRow(context, L"快捷短语混入候选",
                        L"输入的编码与快捷短语的编码完全一致时，快捷短语直接出现在候选首位（固定位置的候选之后），"
@@ -273,6 +278,12 @@ VisualPtr BuildToolsPage(PageContext &context)
                         L"中文模式下按 Shift+M，再输入全拼 / 简拼 / 双拼 / 英文关键词即可输入颜"
                         L"文字。例如 haixiu、hx、zai xiang、zx、kiss。空格上屏；数字选词。"),
         BindToggle(context, "utility.kaomoji_mode"), 2.0f));
+    page.AddSection(std::make_shared<TopAlignedRow>(
+        QuickTitleBlock(L"符号快捷输入(S 模式)",
+                        L"中文模式下按 Shift+S，再输入分组码或符号名即可输入符号。例如 xl 希腊字母、sx "
+                        L"数学符号、szq 带圈数字、lmd 罗马数字、jt 箭头、yi 数字 1 的各种写法、alpha、infinity。"
+                        L"空格上屏；数字选词。"),
+        BindToggle(context, "utility.symbol_mode"), 2.0f));
 
     const auto centered = [&context](const std::wstring &title, const std::wstring &description,
                                      const std::string &path) {

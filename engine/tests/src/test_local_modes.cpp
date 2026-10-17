@@ -3,6 +3,7 @@
 #include "../../local_modes/kaomoji_query.h"
 #include "../../local_modes/quick_phrase_query.h"
 #include "../../local_modes/radical_query.h"
+#include "../../local_modes/symbol_query.h"
 #include "../../local_modes/v_mode_query.h"
 #include "../../core/data_path.h"
 
@@ -366,6 +367,16 @@ int run_test()
         database.execute("INSERT INTO kaomoji VALUES('baifo','','longer key',140)");
         // 单音节条目的简拼只有一个字母：打 k 时它精确命中 jianpin，但不该因此排到全拼前缀命中前面。
         database.execute("INSERT INTO kaomoji VALUES('ku','k','jianpin initial',60)");
+        database.execute("CREATE TABLE symbol_code(code TEXT,symbol TEXT,sort_order INTEGER,mixed INTEGER)");
+        database.execute("INSERT INTO symbol_code VALUES('xl','α',10,1)");
+        database.execute("INSERT INTO symbol_code VALUES('xl','β',11,1)");
+        // 更长的编码目录位置更靠前，用来验证整串命中和短编码排在前面。
+        database.execute("INSERT INTO symbol_code VALUES('xlc','𝛂',5,1)");
+        database.execute("INSERT INTO symbol_code VALUES('xld','Α',12,1)");
+        database.execute("INSERT INTO symbol_code VALUES('xld','α',13,1)");
+        database.execute("INSERT INTO symbol_code VALUES('alpha','α',100,1)");
+        database.execute("INSERT INTO symbol_code VALUES('yi','一',20,0)");
+        database.execute("INSERT INTO symbol_code VALUES('yi','①',21,0)");
     }
 
     const auto emoji = metasequoia::local_modes::query_emoji("XIAOLIAN", SchemeType::Quanpin, others_database, 10);
@@ -447,6 +458,39 @@ int run_test()
                 kaomoji_initial.candidates[1].word == "single prefix" &&
                 kaomoji_initial.candidates[2].word == "jianpin initial",
             "Kaomoji lookup let a jianpin exact match outrank full-pinyin prefix matches.");
+
+    // S 模式：整串命中的编码在前，其余前缀命中按编码长短；同一符号只出现一次。
+    const auto symbols = metasequoia::local_modes::query_symbols("XL", others_database, 200);
+    require(!symbols.diagnostic.has_value() && symbols.candidates.size() == 4 && symbols.candidates[0].word == "α" &&
+                symbols.candidates[1].word == "β" && symbols.candidates[2].word == "𝛂" &&
+                symbols.candidates[3].word == "Α" && symbols.candidates[0].pinyin == "xl" &&
+                symbols.candidates[0].source == CandidateSource::Symbol,
+            "Symbol lookup did not normalize, order, or deduplicate code matches.");
+    require(metasequoia::local_modes::query_symbols("xl", others_database, 1).candidates.size() == 1 &&
+                metasequoia::local_modes::query_symbols("", others_database, 10).candidates.empty() &&
+                metasequoia::local_modes::query_symbols("x'l", others_database, 10).candidates.empty() &&
+                metasequoia::local_modes::query_symbols("yi", others_database, 10).candidates.size() == 2,
+            "Symbol lookup did not honor its validation and limit rules.");
+    // 混输只认整串精确命中、且标了可混输的行：xl 不带出 xlc，没标可混输的行不混。
+    const auto mixed_symbols = metasequoia::local_modes::query_mixed_symbols("xl", others_database, 3);
+    require(mixed_symbols.candidates.size() == 2 && mixed_symbols.candidates[0].word == "α" &&
+                mixed_symbols.candidates[1].word == "β",
+            "Mixed symbol lookup matched more than the exact code.");
+    require(metasequoia::local_modes::query_mixed_symbols("yi", others_database, 3).candidates.empty() &&
+                metasequoia::local_modes::query_mixed_symbols("alph", others_database, 3).candidates.empty() &&
+                metasequoia::local_modes::query_mixed_symbols("alpha", others_database, 3).candidates.front().word ==
+                    "α",
+            "Mixed symbol lookup did not respect the mixable flag and exact matching.");
+    // 旧词库没有 symbol_code 表：返回空列表和不带输入的诊断，不能崩。
+    const std::filesystem::path others_without_symbols = quick_phrase_directory / "private-others-old.db";
+    {
+        Database database(others_without_symbols);
+        database.execute("CREATE TABLE emoji_pinyin(key TEXT,emoji TEXT,sort_order INTEGER)");
+    }
+    const auto old_dictionary = metasequoia::local_modes::query_symbols("privatecode", others_without_symbols, 10);
+    require(old_dictionary.candidates.empty() && old_dictionary.diagnostic.has_value() &&
+                old_dictionary.diagnostic->find("privatecode") == std::string::npos,
+            "A dictionary without the symbol table lacked a privacy-safe diagnostic.");
 
     const auto missing_emoji = metasequoia::local_modes::query_emoji(
         "privatecode", SchemeType::Quanpin, quick_phrase_directory / "private-others-missing.db", 10);

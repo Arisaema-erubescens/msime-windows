@@ -48,6 +48,7 @@ bool g_radical_mode_triggered = false;
 bool g_date_time_mode_triggered = false;
 bool g_emoji_mode_triggered = false;
 bool g_kaomoji_mode_triggered = false;
+bool g_symbol_mode_triggered = false;
 bool g_jianpin_mode_triggered = false;
 bool g_y_mode_triggered = false;
 bool g_r_mode_triggered = false;
@@ -274,6 +275,14 @@ bool IsKaomojiCompositionActive(const std::string &raw)
            });
 }
 
+// S 模式：符号编码只有字母（万象分组码与 codex 符号名），大写按小写查。
+bool IsSymbolCompositionActive(const std::string &raw)
+{
+    return g_symbol_mode_triggered && !raw.empty() && raw.front() == 'S' &&
+           std::all_of(raw.begin() + 1, raw.end(),
+                       [](unsigned char ch) { return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'); });
+}
+
 bool IsJianpinCompositionActive(const std::string &raw)
 {
     return g_jianpin_mode_triggered && !raw.empty() && raw.front() == 'J';
@@ -310,19 +319,20 @@ void ClearSpecialModeTriggers()
     g_date_time_mode_triggered = false;
     g_emoji_mode_triggered = false;
     g_kaomoji_mode_triggered = false;
+    g_symbol_mode_triggered = false;
     g_jianpin_mode_triggered = false;
     g_y_mode_triggered = false;
     g_r_mode_triggered = false;
 }
 
-// True whenever a K/U/T/E/M/J/Y special-mode composition is in progress, even when the
+// True whenever a K/U/T/E/M/S/J/Y special-mode composition is in progress, even when the
 // typed text is not yet a complete keyword/letter sequence. Such input must never
 // be interpreted as normal pinyin.
 bool IsSpecialModeCompositionActive(const std::string &raw)
 {
     return IsQuickPhraseCompositionActive(raw) || IsRadicalCompositionActive(raw) || IsDateTimeCompositionActive(raw) ||
-           IsEmojiCompositionActive(raw) || IsKaomojiCompositionActive(raw) || IsJianpinCompositionActive(raw) ||
-           IsYModeCompositionActive(raw) || IsVModeCompositionActive(raw);
+           IsEmojiCompositionActive(raw) || IsKaomojiCompositionActive(raw) || IsSymbolCompositionActive(raw) ||
+           IsJianpinCompositionActive(raw) || IsYModeCompositionActive(raw) || IsVModeCompositionActive(raw);
 }
 
 bool IsWubiLiteralComposition(const std::string &raw)

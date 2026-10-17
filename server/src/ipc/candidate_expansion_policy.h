@@ -22,6 +22,7 @@ inline bool IsUiOnlyCandidateSource(CandidateSource source)
     case CandidateSource::EnglishDictionary:
     case CandidateSource::Emoji:
     case CandidateSource::Kaomoji:
+    case CandidateSource::Symbol:
     case CandidateSource::DateTime:
         return true;
     default:

@@ -53,6 +53,7 @@ inline constexpr bool CountsTowardFirstWordSelection(const WordItem &item)
     case CandidateSource::EnglishDictionary:
     case CandidateSource::Emoji:
     case CandidateSource::Kaomoji:
+    case CandidateSource::Symbol:
     case CandidateSource::DateTime:
         return false;
     }

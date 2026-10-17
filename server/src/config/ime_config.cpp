@@ -162,6 +162,7 @@ double g_assoc_sentence_collocation_rear_penalty = -18.0;
 bool g_assoc_sentence_source_badge = false;
 bool g_emoji_mixed_input_enabled = false;
 bool g_kaomoji_mixed_input_enabled = false;
+bool g_symbol_mixed_input_enabled = false;
 bool g_radical_mode_enabled = true;
 bool g_quick_phrase_enabled = true;
 bool g_quick_phrase_candidates_enabled = false;
@@ -172,6 +173,7 @@ bool g_date_time_menu_enabled = true;
 bool g_date_time_mode_enabled = true;
 bool g_emoji_mode_enabled = false;
 bool g_kaomoji_mode_enabled = false;
+bool g_symbol_mode_enabled = true;
 bool g_jianpin_mode_enabled = true;
 bool g_y_mode_enabled = true;
 bool g_r_mode_enabled = true;
@@ -620,6 +622,7 @@ bool LoadImeConfig()
         g_assoc_sentence_source_badge = tbl["association"]["sentence_source_badge"].value_or(false);
         g_emoji_mixed_input_enabled = tbl["general"]["emoji_mixed_input"].value_or(false);
         g_kaomoji_mixed_input_enabled = tbl["general"]["kaomoji_mixed_input"].value_or(false);
+        g_symbol_mixed_input_enabled = tbl["general"]["symbol_mixed_input"].value_or(false);
         // 改名前的 unicode_mode 作迁移兜底；升级合并已把它搬到新键，新写入只用新键。
         g_radical_mode_enabled = tbl["utility"]["radical_mode"].value_or(tbl["utility"]["unicode_mode"].value_or(true));
         g_quick_phrase_enabled = tbl["utility"]["quick_phrase"].value_or(true);
@@ -631,6 +634,7 @@ bool LoadImeConfig()
         g_date_time_mode_enabled = tbl["utility"]["date_time_mode"].value_or(true);
         g_emoji_mode_enabled = tbl["utility"]["emoji_mode"].value_or(false);
         g_kaomoji_mode_enabled = tbl["utility"]["kaomoji_mode"].value_or(false);
+        g_symbol_mode_enabled = tbl["utility"]["symbol_mode"].value_or(true);
         g_jianpin_mode_enabled = tbl["utility"]["jianpin_mode"].value_or(true);
         g_y_mode_enabled = tbl["utility"]["y_mode"].value_or(true);
         g_r_mode_enabled = tbl["utility"]["r_mode"].value_or(true);

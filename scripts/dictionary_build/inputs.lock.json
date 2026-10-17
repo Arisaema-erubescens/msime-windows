@@ -10,8 +10,7 @@
       "emoji/emoji.txt": {"size": 90178, "sha256": "a6a0af0c00e6e359eb2f1be247d15a5735c2240bc248181b6946e0377e991002"},
       "emoji/emoji_catalog.txt": {"size": 47198, "sha256": "71b4027b02b457a2cea8b988cda907763e6ee8e241a8c9c353829a464f291d60"},
       "emoji/emoji_en.txt": {"size": 183514, "sha256": "c1b0a92e5cfc6d23a972e4afac1770b1df5e8bc848ef397d2f785161e04cac48"},
-      "kaomoji/kaomoji.txt": {"size": 55524, "sha256": "0bfcd97533596496bb13652243931a4db45d47edc9f0e8241c722a98d84950ae"},
-      "symbols/piliapp_symbols.txt": {"size": 12790, "sha256": "37b6855f778ef01e112af4af68a8fe47caa6aee78b4b2b9eb39db1ae193d7fe8"}
+      "kaomoji/kaomoji.txt": {"size": 55524, "sha256": "0bfcd97533596496bb13652243931a4db45d47edc9f0e8241c722a98d84950ae"}
     }
   },
   "external": {

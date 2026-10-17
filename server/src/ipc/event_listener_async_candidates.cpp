@@ -400,7 +400,7 @@ void InsertFirstAndAppendRest(std::vector<WordItem> &items, std::vector<WordItem
 }
 } // namespace
 
-// 混输线程（MixedCandidates）查完一次输入后，把英文、emoji、颜文字、日期时间一并合进当前候选，
+// 混输线程（MixedCandidates）查完一次输入后，把英文、emoji、颜文字、符号、日期时间一并合进当前候选，
 // 只刷新一次候选窗。各来源的开关在这里再核一遍：请求发出后用户可能刚在设置页关掉了它。
 void ApplyMixedCandidates(MixedCandidates::Result result, const std::string &input, uint64_t generation)
 {
@@ -462,6 +462,13 @@ void ApplyMixedCandidates(MixedCandidates::Result result, const std::string &inp
         auto kaomoji = ReplaceSourceAndDeduplicate(items, CandidateSource::Kaomoji, std::move(result.kaomoji));
         changed = changed || !kaomoji.empty();
         AppendCandidates(items, std::move(kaomoji));
+    }
+
+    if (GetConfiguredSymbolMixedInputEnabled())
+    {
+        auto symbol = ReplaceSourceAndDeduplicate(items, CandidateSource::Symbol, std::move(result.symbol));
+        changed = changed || !symbol.empty();
+        AppendCandidates(items, std::move(symbol));
     }
 
     // 全被去重掉、列表也没少东西时，屏幕上的那页就是对的，不必重画。

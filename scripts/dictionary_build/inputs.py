@@ -1,7 +1,7 @@
 """构建输入：msime-dictionary checkout，以及 inputs.lock.json 按大小和 SHA-256 固定、首次使用时下载并缓存的仓外文件。
 
-仓外文件有三类：msime 仓库 resources/dictionary-sources/ 下人工维护的快捷短语、读音纠错、emoji、颜文字和符号表
-（固定在 Release 所用的 msime 提交）；ECDICT 与 SCOWL Aspell 包（Rust 构建器的锁文件同样固定它们）；
+仓外文件有三类：msime 仓库 resources/dictionary-sources/ 下人工维护的快捷短语、读音纠错、emoji 和颜文字
+（固定在 Release 所用的 msime 提交；符号表改在 msime-dictionary 的 sources/symbols/）；ECDICT 与 SCOWL Aspell 包（Rust 构建器的锁文件同样固定它们）；
 rime-jp_sela 的 jp_sela.dict.yaml（旧 msime.db 的 japanese_lexicon 来源）。
 """
 
