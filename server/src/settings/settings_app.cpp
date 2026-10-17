@@ -75,6 +75,7 @@ std::unique_ptr<SerialTaskQueue> g_worker;
 bool g_closing = false;
 bool g_lingering = false;
 bool g_reload_pending = false;
+bool g_theme_refresh_pending = false;
 bool g_settings_light = false;
 // appearance.settings_window_linger 的 UI 线程副本，由 ConfigCompletion 更新。
 std::string g_settings_window_linger = "off";
@@ -1832,6 +1833,31 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_pa
     case kScanSkinCatalog:
         PostConfig(true);
         return 0;
+    case WM_SETTINGCHANGE:
+        if (l_param && lstrcmpiW(reinterpret_cast<LPCWSTR>(l_param), L"ImmersiveColorSet") == 0 && g_worker &&
+            !g_closing && !g_theme_refresh_pending)
+        {
+            // 系统主题变化不会修改 config.toml，必须主动重算主题并在 UI 线程应用。
+            // 快照里只有 theme_* 原始值，跟随系统时切换前后内容相同，必须强制推给页面才会重算预览。
+            // 一次切换会连发几条广播，在途期间只排一次。
+            g_theme_refresh_pending = true;
+            g_worker->Submit([] {
+                SerialTaskQueue::Completion completion;
+                try
+                {
+                    completion = ConfigCompletion(false, true);
+                }
+                catch (...)
+                { /* 不是用户操作，失败不弹框，下次广播或配置变化再同步。 */
+                }
+                return [completion = std::move(completion)] {
+                    g_theme_refresh_pending = false;
+                    if (completion)
+                        completion();
+                };
+            });
+        }
+        break;
     case WM_NCCALCSIZE:
         if (w_param)
         {
