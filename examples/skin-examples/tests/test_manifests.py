@@ -84,6 +84,8 @@ class ManifestTests(unittest.TestCase):
                         self.assertTrue(0 <= window[key] <= limit, key)
                 if "shadow" in window:
                     self.assertIn(window["shadow"], ("none", "soft", "strong"))
+                if "backdrop" in window:
+                    self.assertIn(window["backdrop"], ("none", "acrylic", "mica"))
                 if "page_arrows" in window:
                     self.assertIsInstance(window["page_arrows"], bool, "page_arrows")
                 if "fit_content" in window:
@@ -95,6 +97,9 @@ class ManifestTests(unittest.TestCase):
                 for theme, colors in data.get("candidate", {}).items():
                     if "menu" in colors:
                         self.assertIsInstance(colors["menu"], dict, f"candidate.{theme}.menu")
+                    for key in ("backdrop_opacity", "backdrop_luminosity"):
+                        if key in colors:
+                            self.assertTrue(0 <= colors[key] <= 1, f"candidate.{theme}.{key}")
                 for theme in data["supports"]["themes"]:
                     self.assertIn(theme, data["candidate"])
                     if "toolbar" in data:

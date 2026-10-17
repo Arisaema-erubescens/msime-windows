@@ -342,6 +342,20 @@ bool SystemAnimationsEnabled()
     return enabled != FALSE;
 }
 
+// 系统「透明效果」（设置 → 个性化 → 颜色）。关掉时系统材质一律退回纯色，皮肤的亚克力也跟着退回不透明底色。
+// 读不到时按开启处理。
+bool SystemTransparencyEnabled()
+{
+    DWORD value = 1;
+    DWORD size = sizeof(value);
+    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                     L"EnableTransparency", RRF_RT_REG_DWORD, nullptr, &value, &size) != ERROR_SUCCESS)
+    {
+        return true;
+    }
+    return value != 0;
+}
+
 std::vector<CandidateSkinOverlay::Item> OverlayItems(const std::vector<CandidateSkinCatalog::FreeDecoration> &layer,
                                                      const std::wstring &packageRoot)
 {
@@ -540,6 +554,8 @@ void CandidatePresenter::ApplySkin()
     fingerprint << '|' << GetConfiguredCandidateEnglishFont() << '|' << GetConfiguredCandidateWindowFitContent();
     // 同一个外部皮肤的 skin.toml 或图片改了，只有强制重载能看出来；带上重载代数让 D2D 也重读 manifest。
     fingerprint << '|' << GetCandidateSkinReloadRevision();
+    // 亚克力皮肤在透明效果开关切换后要换底色和合成方式。
+    fingerprint << '|' << (SystemTransparencyEnabled() ? 'T' : 't') << (backdropUnavailable_ ? 'U' : 'u');
     for (const auto &font : GetConfiguredCandidateFallbackFonts())
         fingerprint << '|' << font.size() << ':' << font;
     const std::string skinKey = fingerprint.str();
@@ -868,6 +884,24 @@ void CandidatePresenter::ApplySkin()
         package && package->schemaVersion >= 2 && package->borderImage && !package->borderImage->source.empty();
     const bool canvasBase = CandidateSkinCatalog::IsCanvasBase(baseSkin);
     skinAnimates_ = package && package->schemaVersion >= 2;
+    // 面板贴图盖住整张卡片，垫系统材质没有意义。
+    const bool wantsBackdrop = package && !package->backdrop.empty() && package->backdrop != "none" && !panelImage;
+    backdropActive_ = wantsBackdrop && !backdropUnavailable_ && SystemTransparencyEnabled();
+    backdropRadiusDip_ = tokens.radius;
+    if (backdropActive_)
+    {
+        // 色调由合成层按 Fluent 材质配方画（模糊 → 亮度层 → 色调），D2D 卡片底色此时留空。
+        const bool mica = package->backdrop == "mica";
+        const CandidateSkinCatalog::CandidateColors &themeColors = candLight ? package->light : package->dark;
+        msimeui::BackdropMaterial material;
+        material.source =
+            mica ? msimeui::BackdropMaterial::Source::Wallpaper : msimeui::BackdropMaterial::Source::WindowsBehind;
+        material.tint = tokens.surface;
+        material.tintOpacity = static_cast<float>(themeColors.backdropOpacity.value_or(tokens.surface.a));
+        material.luminosityOpacity = static_cast<float>(themeColors.backdropLuminosity.value_or(mica ? 1.0 : 0.85));
+        impl_->resources.SetBackdropMaterial(material);
+    }
+    impl_->resources.SetBackdropComposition(backdropActive_);
     if (impl_->card)
     {
         const std::string shadow = package ? package->shadow : std::string{};
@@ -884,6 +918,8 @@ void CandidatePresenter::ApplySkin()
             };
             impl_->card->SetShadowEnabled(true);
             impl_->card->SetShadowPasses(shadowPasses);
+            // 卡片底色半透明时阴影会透上来把毛玻璃压暗，只画在卡片外面。
+            impl_->card->SetShadowOutsideOnly(backdropActive_);
         }
         else
         {
@@ -1126,6 +1162,12 @@ void CandidatePresenter::ApplySkin()
 
     msimeui::Brush brush;
     brush.fill = tokens.surface;
+    // 有系统材质时色调已经画在合成层里，卡片不再叠底色；皮肤要材质却用不上（透明效果关闭或系统不支持）时
+    // 把半透明底色补成不透明，免得直接透出后面的窗口。
+    if (backdropActive_)
+        brush.fill.a = 0.0f;
+    else if (wantsBackdrop)
+        brush.fill.a = 1.0f;
     brush.stroke = tokens.border;
     brush.strokeWidth = tokens.borderWidth;
     brush.radiusX = tokens.radius;
@@ -1814,17 +1856,29 @@ void CandidatePresenter::Present()
     const UINT height = static_cast<UINT>((std::max)(1L, rc.bottom));
     if (!impl_->resources.EnsureForComposition(hwnd_))
     {
-        return;
+        if (!impl_->resources.UsesBackdropComposition())
+        {
+            return;
+        }
+        // 建不起 Windows.UI.Composition：本次运行退回交换链，并让下一次 ApplySkin 换回不透明底色。
+        CAND_DIAG_LOGF(L"candidate-d2d backdrop composition unavailable, falling back to swap chain");
+        backdropUnavailable_ = true;
+        backdropActive_ = false;
+        lastSkinFingerprint_.clear();
+        impl_->resources.SetBackdropComposition(false);
+        if (!impl_->resources.EnsureForComposition(hwnd_))
+        {
+            return;
+        }
     }
     impl_->resources.Resize(width, height);
-    ID2D1RenderTarget *target = impl_->resources.GetRenderTarget();
-    if (!target)
+    // Samples the animation clock for this frame and starts the next-frame deadline over.
+    impl_->resources.BeginFrame();
+    if (!impl_->resources.BeginDraw())
     {
         return;
     }
-    // Samples the animation clock for this frame and starts the next-frame deadline over.
-    impl_->resources.BeginFrame();
-    target->BeginDraw();
+    ID2D1RenderTarget *target = impl_->resources.GetRenderTarget();
     target->Clear(D2D1::ColorF(0, 0.0f));
     if (msimeui::Scene *scene = impl_->window->GetScene())
     {
@@ -1842,7 +1896,12 @@ void CandidatePresenter::Present()
         scene->EnsureLayout({layoutW, layoutH});
         scene->Render(impl_->resources);
     }
-    const HRESULT hr = target->EndDraw();
+    if (backdropActive_ && impl_->card)
+    {
+        // 和这一帧的内容同一次提交，卡片怎么伸缩毛玻璃都贴着它。
+        impl_->resources.SetBackdrop(impl_->card->GetBounds(), backdropRadiusDip_);
+    }
+    const HRESULT hr = impl_->resources.EndDraw();
     if (hr == D2DERR_RECREATE_TARGET)
     {
         impl_->resources.DiscardTarget();
@@ -1890,14 +1949,13 @@ void CandidatePresenter::PresentEmptyFrame()
     {
         return;
     }
-    ID2D1RenderTarget *target = impl_->resources.GetRenderTarget();
-    if (!target)
+    if (!impl_->resources.BeginDraw())
     {
         return;
     }
-    target->BeginDraw();
-    target->Clear(D2D1::ColorF(0, 0.0f));
-    if (target->EndDraw() == D2DERR_RECREATE_TARGET)
+    impl_->resources.GetRenderTarget()->Clear(D2D1::ColorF(0, 0.0f));
+    impl_->resources.SetBackdrop({}, 0.0f);
+    if (impl_->resources.EndDraw() == D2DERR_RECREATE_TARGET)
     {
         impl_->resources.DiscardTarget();
         return;

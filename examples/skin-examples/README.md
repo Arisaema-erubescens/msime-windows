@@ -38,6 +38,10 @@ examples/skin-examples/
 │  │  └─ assets/
 │  │     ├─ character.png     # 卡片上方的装饰图
 │  │     └─ background.png    # 卡片背景图
+│  ├─ acrylic-demo/           # backdrop = "acrylic"：卡片背后垫系统亚克力毛玻璃
+│  │  └─ skin.toml
+│  ├─ mica-demo/              # backdrop = "mica"：卡片背后垫系统云母（模糊桌面壁纸）
+│  │  └─ skin.toml
 │  ├─ canvas-demo/            # schema_version 2 + canvas 基底的全贴图样例
 │  │  ├─ skin.toml
 │  │  └─ assets/

@@ -135,6 +135,7 @@ TEST_CASE(candidate_skin_catalog_reads_detailed_colors_menu_and_window_options)
     const auto root = WriteSkin(L"options", R"toml(border_width_dip = 2
 item_corner_radius_dip = 8
 shadow = "soft"
+backdrop = "acrylic"
 font_family = "LXGW WenKai"
 
 [candidate.dark]
@@ -147,6 +148,9 @@ selected_translation = "#ffe0a0"
 selected_bar = "#00aaff"
 preedit_background = "rgba(255, 255, 255, 0.08)"
 preedit_divider = "#444444"
+
+backdrop_opacity = 0.7
+backdrop_luminosity = 0.9
 
 [candidate.dark.menu]
 background = "#202020"
@@ -163,6 +167,11 @@ hover = "#2a2a2a"
     REQUIRE(package->itemCornerRadiusDip.has_value());
     REQUIRE(*package->itemCornerRadiusDip == 8.0);
     REQUIRE_EQ(package->shadow, std::string("soft"));
+    REQUIRE_EQ(package->backdrop, std::string("acrylic"));
+    REQUIRE(package->dark.backdropOpacity.has_value());
+    REQUIRE(*package->dark.backdropOpacity == 0.7);
+    REQUIRE(*package->dark.backdropLuminosity == 0.9);
+    REQUIRE(!package->light.backdropOpacity.has_value());
     REQUIRE_EQ(package->fontFamily, std::string("LXGW WenKai"));
     REQUIRE_EQ(package->dark.candidateText, std::string("#dddddd"));
     REQUIRE_EQ(package->dark.preeditText, std::string("#aaaaaa"));
@@ -193,6 +202,7 @@ TEST_CASE(candidate_skin_catalog_leaves_window_options_unset_by_default)
     REQUIRE(!package->borderWidthDip.has_value());
     REQUIRE(!package->itemCornerRadiusDip.has_value());
     REQUIRE(package->shadow.empty());
+    REQUIRE(package->backdrop.empty());
     REQUIRE(package->fontFamily.empty());
     std::error_code ec;
     std::filesystem::remove_all(root, ec);
@@ -206,6 +216,9 @@ TEST_CASE(candidate_skin_catalog_rejects_invalid_window_options)
     REQUIRE(Rejects(L"border-negative", "border_width_dip = -1\n"));
     REQUIRE(Rejects(L"item-radius", "item_corner_radius_dip = 17\n"));
     REQUIRE(Rejects(L"shadow", "shadow = \"huge\"\n"));
+    REQUIRE(Rejects(L"backdrop", "backdrop = \"glass\"\n"));
+    REQUIRE(Rejects(L"backdrop-opacity", "\n[candidate.dark]\nbackdrop_opacity = 1.5\n"));
+    REQUIRE(Rejects(L"backdrop-luminosity", "\n[candidate.dark]\nbackdrop_luminosity = \"high\"\n"));
     REQUIRE(Rejects(L"font", "font_family = \"Foo; color: red\"\n"));
     REQUIRE(Rejects(L"font-quote", "font_family = \"Foo'\"\n"));
     REQUIRE(Rejects(L"menu", "\n[candidate.dark]\nmenu = \"#fff\"\n"));

@@ -12,10 +12,131 @@
 #include <shlwapi.h>
 #include <windows.h>
 
+#include <DispatcherQueue.h>
+#include <d2d1effects.h>
+#include <dwmapi.h>
+#include <roapi.h>
+#include <windows.graphics.effects.h>
+#include <windows.graphics.effects.interop.h>
+#include <windows.ui.composition.desktop.h>
+#include <windows.ui.composition.h>
+#include <windows.ui.composition.interop.h>
+#include <wrl/implements.h>
+#include <wrl/wrappers/corewrappers.h>
+
 namespace msimeui
 {
+namespace abi_comp = ABI::Windows::UI::Composition;
+
+struct DeviceResources::SurfaceComposition
+{
+    Microsoft::WRL::ComPtr<abi_comp::ICompositor> compositor;
+    Microsoft::WRL::ComPtr<abi_comp::Desktop::IDesktopWindowTarget> target;
+    Microsoft::WRL::ComPtr<abi_comp::IVisual> backdrop;
+    Microsoft::WRL::ComPtr<abi_comp::ISpriteVisual> backdropSprite;
+    // Blurred sources for BackdropMaterial::Source; `wallpaper` is null where Windows lacks it.
+    Microsoft::WRL::ComPtr<abi_comp::ICompositionBrush> windowsBehind;
+    Microsoft::WRL::ComPtr<abi_comp::ICompositionBrush> wallpaper;
+    Microsoft::WRL::ComPtr<abi_comp::ICompositionRoundedRectangleGeometry> backdropShape;
+    Microsoft::WRL::ComPtr<abi_comp::IVisual> content;
+    Microsoft::WRL::ComPtr<abi_comp::ICompositionGraphicsDevice> graphicsDevice;
+    Microsoft::WRL::ComPtr<abi_comp::ICompositionDrawingSurfaceInterop> surface;
+};
+
 namespace
 {
+// DWMWA_USE_HOSTBACKDROPBRUSH; older SDKs do not name it.
+constexpr DWORD kDwmUseHostBackdropBrush = 17;
+
+// Windows.UI.Composition needs a DispatcherQueue on the thread that owns the compositor,
+// and a thread can only have one. The controller lives as long as the thread, so it is
+// deliberately never released.
+bool EnsureThreadDispatcherQueue()
+{
+    thread_local bool attempted = false;
+    thread_local bool available = false;
+    if (attempted)
+    {
+        return available;
+    }
+    attempted = true;
+    // COM is already initialized on UI threads (WIC needs it); don't touch the apartment.
+    const DispatcherQueueOptions options{sizeof(DispatcherQueueOptions), DQTYPE_THREAD_CURRENT, DQTAT_COM_NONE};
+    ABI::Windows::System::IDispatcherQueueController *controller = nullptr;
+    const HRESULT hr = CreateDispatcherQueueController(options, &controller);
+    // Failing because the thread already has a queue is fine: the compositor uses that one.
+    available = SUCCEEDED(hr) || hr == RPC_E_WRONG_THREAD || hr == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS);
+    return available;
+}
+
+bool IsDeviceLost(HRESULT hr)
+{
+    return hr == D2DERR_RECREATE_TARGET || hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET;
+}
+
+namespace abi_fx = ABI::Windows::Graphics::Effects;
+using PropertyValuePtr = Microsoft::WRL::ComPtr<ABI::Windows::Foundation::IPropertyValue>;
+using EffectSourcePtr = Microsoft::WRL::ComPtr<abi_fx::IGraphicsEffectSource>;
+
+// A Direct2D effect described for Windows.UI.Composition, which compiles the graph into an
+// effect brush. Composition reads the effect id, the properties by index and the sources;
+// nothing is animated, so there are no named property mappings.
+class CompositionEffect final
+    : public Microsoft::WRL::RuntimeClass<Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::WinRtClassicComMix>,
+                                          abi_fx::IGraphicsEffect, abi_fx::IGraphicsEffectSource,
+                                          abi_fx::IGraphicsEffectD2D1Interop>
+{
+    InspectableClass(L"msimeui.CompositionEffect", BaseTrust)
+
+        public : CompositionEffect(const GUID &id, std::vector<PropertyValuePtr> properties,
+                                   std::vector<EffectSourcePtr> sources)
+        : id_(id), properties_(std::move(properties)), sources_(std::move(sources))
+    {
+    }
+
+    IFACEMETHODIMP get_Name(HSTRING *name) override
+    {
+        return name_.CopyTo(name);
+    }
+    IFACEMETHODIMP put_Name(HSTRING name) override
+    {
+        return name_.Set(name);
+    }
+    IFACEMETHODIMP GetEffectId(GUID *id) override
+    {
+        *id = id_;
+        return S_OK;
+    }
+    IFACEMETHODIMP GetNamedPropertyMapping(LPCWSTR, UINT *, abi_fx::GRAPHICS_EFFECT_PROPERTY_MAPPING *) override
+    {
+        return E_INVALIDARG;
+    }
+    IFACEMETHODIMP GetPropertyCount(UINT *count) override
+    {
+        *count = static_cast<UINT>(properties_.size());
+        return S_OK;
+    }
+    IFACEMETHODIMP GetProperty(UINT index, ABI::Windows::Foundation::IPropertyValue **value) override
+    {
+        return index < properties_.size() ? properties_[index].CopyTo(value) : E_BOUNDS;
+    }
+    IFACEMETHODIMP GetSource(UINT index, abi_fx::IGraphicsEffectSource **source) override
+    {
+        return index < sources_.size() ? sources_[index].CopyTo(source) : E_BOUNDS;
+    }
+    IFACEMETHODIMP GetSourceCount(UINT *count) override
+    {
+        *count = static_cast<UINT>(sources_.size());
+        return S_OK;
+    }
+
+  private:
+    GUID id_;
+    Microsoft::WRL::Wrappers::HString name_;
+    std::vector<PropertyValuePtr> properties_;
+    std::vector<EffectSourcePtr> sources_;
+};
+
 UINT AlignSwapExtent(UINT value)
 {
     constexpr UINT kBucket = 64;
@@ -69,6 +190,15 @@ Microsoft::WRL::ComPtr<ID3D11Device> TakePrewarmedDevice()
     return pending.valid() ? pending.get() : nullptr;
 }
 } // namespace
+
+DeviceResources::DeviceResources() = default;
+
+DeviceResources::~DeviceResources()
+{
+    // WinRT visuals before the Direct3D device they draw with.
+    drawContext_.Reset();
+    surface_.reset();
+}
 
 void DeviceResources::PrewarmComposition()
 {
@@ -462,6 +592,340 @@ void DeviceResources::SetCompositionOpaque(bool opaque)
     }
 }
 
+bool DeviceResources::CreateCompositionDevice()
+{
+    d3dDevice_ = TakePrewarmedDevice();
+    if (!d3dDevice_)
+    {
+        d3dDevice_ = CreateD3DDevice();
+    }
+    return d3dDevice_ && SUCCEEDED(d3dDevice_.As(&dxgiDevice_)) &&
+           SUCCEEDED(d2dFactory1_->CreateDevice(dxgiDevice_.Get(), d2dDevice_.GetAddressOf())) &&
+           SUCCEEDED(d2dDevice_->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, deviceContext_.GetAddressOf()));
+}
+
+void DeviceResources::SetBackdropComposition(bool enabled)
+{
+    if (backdropComposition_ == enabled)
+    {
+        return;
+    }
+    backdropComposition_ = enabled;
+    if (composition_)
+    {
+        DiscardTarget();
+    }
+}
+
+bool DeviceResources::UsesBackdropComposition() const
+{
+    return backdropComposition_;
+}
+
+bool DeviceResources::EnsureSurfaceComposition(UINT width, UINT height)
+{
+    namespace abi_dx = ABI::Windows::Graphics::DirectX;
+    using Microsoft::WRL::ComPtr;
+
+    if (composition_ && surface_ && deviceContext_)
+    {
+        const FLOAT dpi = DpiForHwnd();
+        deviceContext_->SetDpi(dpi, dpi);
+        return GrowDrawingSurface(width, height);
+    }
+
+    DiscardTarget();
+    composition_ = true;
+    if (!CreateCompositionDevice() || !EnsureThreadDispatcherQueue())
+    {
+        DiscardTarget();
+        return false;
+    }
+
+    auto composition = std::make_unique<SurfaceComposition>();
+    ComPtr<IInspectable> instance;
+    ComPtr<abi_comp::ICompositor3> compositor3;
+    ComPtr<abi_comp::ICompositor5> compositor5;
+    ComPtr<abi_comp::ICompositor6> compositor6;
+    ComPtr<abi_comp::Desktop::ICompositorDesktopInterop> desktopInterop;
+    ComPtr<abi_comp::ICompositorInterop> interop;
+    if (FAILED(::Windows::Foundation::ActivateInstance(
+            Microsoft::WRL::Wrappers::HStringReference(RuntimeClass_Windows_UI_Composition_Compositor).Get(),
+            instance.GetAddressOf())) ||
+        FAILED(instance.As(&composition->compositor)) || FAILED(instance.As(&compositor3)) ||
+        FAILED(instance.As(&compositor5)) || FAILED(instance.As(&compositor6)) ||
+        FAILED(instance.As(&desktopInterop)) || FAILED(instance.As(&interop)))
+    {
+        DiscardTarget();
+        return false;
+    }
+
+    // The DirectComposition target this window may have had is gone with DiscardTarget above,
+    // which leaves the topmost slot free; fall back to the other slot if it is not free yet.
+    if (FAILED(desktopInterop->CreateDesktopWindowTarget(hwnd_, TRUE, composition->target.GetAddressOf())) &&
+        FAILED(desktopInterop->CreateDesktopWindowTarget(hwnd_, FALSE, composition->target.GetAddressOf())))
+    {
+        DiscardTarget();
+        return false;
+    }
+
+    ComPtr<abi_comp::IContainerVisual> root;
+    ComPtr<abi_comp::IVisual> rootVisual;
+    ComPtr<abi_comp::ICompositionTarget> target;
+    ComPtr<abi_comp::IVisualCollection> children;
+    ComPtr<abi_comp::ICompositionBackdropBrush> backdropBrush;
+    ComPtr<abi_comp::ICompositionGeometry> shapeGeometry;
+    ComPtr<abi_comp::ICompositionGeometricClip> geometricClip;
+    ComPtr<abi_comp::ICompositionClip> clip;
+    ComPtr<abi_comp::ICompositionDrawingSurface> drawingSurface;
+    ComPtr<abi_comp::ICompositionSurface> surface;
+    ComPtr<abi_comp::ICompositionSurfaceBrush> surfaceBrush;
+    ComPtr<abi_comp::ICompositionBrush> surfaceBrushBase;
+    ComPtr<abi_comp::ISpriteVisual> contentSprite;
+    abi_comp::ICompositor *compositor = composition->compositor.Get();
+    const ABI::Windows::Foundation::Size sizePixels{static_cast<FLOAT>(width), static_cast<FLOAT>(height)};
+    if (FAILED(compositor->CreateContainerVisual(root.GetAddressOf())) || FAILED(root.As(&rootVisual)) ||
+        FAILED(composition->target.As(&target)) || FAILED(target->put_Root(rootVisual.Get())) ||
+        FAILED(root->get_Children(children.GetAddressOf())) ||
+        // Backdrop: the blurred desktop behind the window, clipped to a rounded rectangle.
+        FAILED(compositor3->CreateHostBackdropBrush(backdropBrush.GetAddressOf())) ||
+        FAILED(backdropBrush.As(&composition->windowsBehind)) ||
+        FAILED(compositor->CreateSpriteVisual(composition->backdropSprite.GetAddressOf())) ||
+        FAILED(composition->backdropSprite.As(&composition->backdrop)) ||
+        FAILED(compositor5->CreateRoundedRectangleGeometry(composition->backdropShape.GetAddressOf())) ||
+        FAILED(composition->backdropShape.As(&shapeGeometry)) ||
+        FAILED(compositor6->CreateGeometricClipWithGeometry(shapeGeometry.Get(), geometricClip.GetAddressOf())) ||
+        FAILED(geometricClip.As(&clip)) || FAILED(composition->backdrop->put_Clip(clip.Get())) ||
+        FAILED(composition->backdrop->put_IsVisible(false)) ||
+        FAILED(children->InsertAtBottom(composition->backdrop.Get())) ||
+        // Content: Direct2D draws into a drawing surface shown at its pixel size, top-left aligned.
+        FAILED(interop->CreateGraphicsDevice(d2dDevice_.Get(), composition->graphicsDevice.GetAddressOf())) ||
+        FAILED(composition->graphicsDevice->CreateDrawingSurface(
+            sizePixels, abi_dx::DirectXPixelFormat_B8G8R8A8UIntNormalized, abi_dx::DirectXAlphaMode_Premultiplied,
+            drawingSurface.GetAddressOf())) ||
+        FAILED(drawingSurface.As(&surface)) || FAILED(drawingSurface.As(&composition->surface)) ||
+        FAILED(compositor->CreateSurfaceBrushWithSurface(surface.Get(), surfaceBrush.GetAddressOf())) ||
+        FAILED(surfaceBrush->put_Stretch(abi_comp::CompositionStretch_None)) ||
+        FAILED(surfaceBrush->put_HorizontalAlignmentRatio(0.0f)) ||
+        FAILED(surfaceBrush->put_VerticalAlignmentRatio(0.0f)) || FAILED(surfaceBrush.As(&surfaceBrushBase)) ||
+        FAILED(compositor->CreateSpriteVisual(contentSprite.GetAddressOf())) ||
+        FAILED(contentSprite->put_Brush(surfaceBrushBase.Get())) || FAILED(contentSprite.As(&composition->content)) ||
+        FAILED(composition->content->put_Size({sizePixels.Width, sizePixels.Height})) ||
+        FAILED(children->InsertAtTop(composition->content.Get())))
+    {
+        DiscardTarget();
+        return false;
+    }
+
+    // The blurred wallpaper (Mica's source) arrived with Windows 11; without it Wallpaper
+    // falls back to the windows behind.
+    ComPtr<abi_comp::ICompositorWithBlurredWallpaperBackdropBrush> wallpaperCompositor;
+    ComPtr<abi_comp::ICompositionBackdropBrush> wallpaperBrush;
+    if (SUCCEEDED(instance.As(&wallpaperCompositor)) &&
+        SUCCEEDED(wallpaperCompositor->TryCreateBlurredWallpaperBackdropBrush(wallpaperBrush.GetAddressOf())) &&
+        wallpaperBrush)
+    {
+        wallpaperBrush.As(&composition->wallpaper);
+    }
+
+    BOOL useHostBackdrop = TRUE;
+    DwmSetWindowAttribute(hwnd_, kDwmUseHostBackdropBrush, &useHostBackdrop, sizeof(useHostBackdrop));
+    surface_ = std::move(composition);
+    if (!ApplyBackdropMaterial())
+    {
+        DiscardTarget();
+        return false;
+    }
+    pixelWidth_ = width;
+    pixelHeight_ = height;
+    const FLOAT dpi = DpiForHwnd();
+    deviceContext_->SetDpi(dpi, dpi);
+    return true;
+}
+
+bool DeviceResources::GrowDrawingSurface(UINT width, UINT height)
+{
+    if (!surface_ || (pixelWidth_ >= width && pixelHeight_ >= height))
+    {
+        return surface_ != nullptr;
+    }
+    pixelWidth_ = (std::max)(pixelWidth_, width);
+    pixelHeight_ = (std::max)(pixelHeight_, height);
+    return SUCCEEDED(surface_->surface->Resize({static_cast<LONG>(pixelWidth_), static_cast<LONG>(pixelHeight_)})) &&
+           SUCCEEDED(surface_->content->put_Size({static_cast<FLOAT>(pixelWidth_), static_cast<FLOAT>(pixelHeight_)}));
+}
+
+void DeviceResources::SetBackdropMaterial(const BackdropMaterial &material)
+{
+    if (backdropMaterial_ == material)
+    {
+        return;
+    }
+    backdropMaterial_ = material;
+    if (surface_ && !ApplyBackdropMaterial())
+    {
+        DiscardTarget();
+    }
+}
+
+bool DeviceResources::ApplyBackdropMaterial()
+{
+    using Microsoft::WRL::ComPtr;
+    using Microsoft::WRL::Wrappers::HStringReference;
+    const BackdropMaterial &material = backdropMaterial_;
+    const ComPtr<abi_comp::ICompositionBrush> &source =
+        material.source == BackdropMaterial::Source::Wallpaper && surface_->wallpaper ? surface_->wallpaper
+                                                                                      : surface_->windowsBehind;
+    if (material.tintOpacity <= 0.0f && material.luminosityOpacity <= 0.0f)
+    {
+        return SUCCEEDED(surface_->backdropSprite->put_Brush(source.Get()));
+    }
+
+    ComPtr<ABI::Windows::Foundation::IPropertyValueStatics> values;
+    ComPtr<abi_comp::ICompositionEffectSourceParameterFactory> parameters;
+    ComPtr<abi_comp::ICompositionEffectSourceParameter> parameter;
+    EffectSourcePtr backdropInput;
+    if (FAILED(::Windows::Foundation::GetActivationFactory(
+            HStringReference(RuntimeClass_Windows_Foundation_PropertyValue).Get(), values.GetAddressOf())) ||
+        FAILED(::Windows::Foundation::GetActivationFactory(
+            HStringReference(RuntimeClass_Windows_UI_Composition_CompositionEffectSourceParameter).Get(),
+            parameters.GetAddressOf())) ||
+        FAILED(parameters->Create(HStringReference(L"Backdrop").Get(), parameter.GetAddressOf())) ||
+        FAILED(parameter.As(&backdropInput)))
+    {
+        return false;
+    }
+    const auto box = [](HRESULT hr, const ComPtr<IInspectable> &inspectable) {
+        PropertyValuePtr value;
+        if (SUCCEEDED(hr))
+        {
+            inspectable.As(&value);
+        }
+        return value;
+    };
+    // Flood fill of the tint colour at `alpha`; D2D floods take straight (unpremultiplied) colour.
+    const auto flood = [&](float alpha) -> EffectSourcePtr {
+        FLOAT rgba[4] = {material.tint.r, material.tint.g, material.tint.b, std::clamp(alpha, 0.0f, 1.0f)};
+        ComPtr<IInspectable> inspectable;
+        PropertyValuePtr color = box(values->CreateSingleArray(4, rgba, inspectable.GetAddressOf()), inspectable);
+        if (!color)
+        {
+            return nullptr;
+        }
+        return Microsoft::WRL::Make<CompositionEffect>(CLSID_D2D1Flood, std::vector<PropertyValuePtr>{color},
+                                                       std::vector<EffectSourcePtr>{});
+    };
+    // D2D blend inputs: 0 is the background (destination), 1 the foreground (source).
+    const auto blend = [&](D2D1_BLEND_MODE mode, const EffectSourcePtr &background,
+                           const EffectSourcePtr &foreground) -> EffectSourcePtr {
+        ComPtr<IInspectable> inspectable;
+        PropertyValuePtr modeValue =
+            box(values->CreateUInt32(static_cast<UINT32>(mode), inspectable.GetAddressOf()), inspectable);
+        if (!modeValue || !background || !foreground)
+        {
+            return nullptr;
+        }
+        return Microsoft::WRL::Make<CompositionEffect>(CLSID_D2D1Blend, std::vector<PropertyValuePtr>{modeValue},
+                                                       std::vector<EffectSourcePtr>{background, foreground});
+    };
+    // Same graph as the WinUI AcrylicBrush. Composition swaps the Color and Luminosity blend
+    // modes, so like WinUI the luminosity step asks for COLOR and the colour step for LUMINOSITY.
+    const EffectSourcePtr luminosity = blend(D2D1_BLEND_MODE_COLOR, backdropInput, flood(material.luminosityOpacity));
+    const EffectSourcePtr tinted = blend(D2D1_BLEND_MODE_LUMINOSITY, luminosity, flood(material.tintOpacity));
+
+    ComPtr<abi_fx::IGraphicsEffect> effect;
+    ComPtr<abi_comp::ICompositionEffectFactory> factory;
+    ComPtr<abi_comp::ICompositionEffectBrush> effectBrush;
+    ComPtr<abi_comp::ICompositionBrush> brush;
+    return tinted && SUCCEEDED(tinted.As(&effect)) &&
+           SUCCEEDED(surface_->compositor->CreateEffectFactory(effect.Get(), factory.GetAddressOf())) &&
+           SUCCEEDED(factory->CreateBrush(effectBrush.GetAddressOf())) &&
+           SUCCEEDED(effectBrush->SetSourceParameter(HStringReference(L"Backdrop").Get(), source.Get())) &&
+           SUCCEEDED(effectBrush.As(&brush)) && SUCCEEDED(surface_->backdropSprite->put_Brush(brush.Get()));
+}
+
+void DeviceResources::SetBackdrop(const RectF &rectDips, float radiusDips)
+{
+    if (!surface_)
+    {
+        return;
+    }
+    const bool visible = rectDips.width > 0.0f && rectDips.height > 0.0f;
+    surface_->backdrop->put_IsVisible(visible);
+    if (!visible)
+    {
+        return;
+    }
+    // Composition visuals of a window target are laid out in physical pixels.
+    const float scale = DpiForHwnd() / 96.0f;
+    const float left = std::round(rectDips.x * scale);
+    const float top = std::round(rectDips.y * scale);
+    const float right = std::round((rectDips.x + rectDips.width) * scale);
+    const float bottom = std::round((rectDips.y + rectDips.height) * scale);
+    const float radius = (std::max)(radiusDips, 0.0f) * scale;
+    surface_->backdrop->put_Offset({left, top, 0.0f});
+    surface_->backdrop->put_Size({right - left, bottom - top});
+    surface_->backdropShape->put_Size({right - left, bottom - top});
+    surface_->backdropShape->put_CornerRadius({radius, radius});
+}
+
+bool DeviceResources::BeginDraw()
+{
+    if (!surface_)
+    {
+        ID2D1RenderTarget *target = GetRenderTarget();
+        if (!target)
+        {
+            return false;
+        }
+        target->BeginDraw();
+        return true;
+    }
+
+    // The whole surface is redrawn every frame, like a swap chain buffer.
+    const RECT update = {0, 0, static_cast<LONG>(pixelWidth_), static_cast<LONG>(pixelHeight_)};
+    POINT offset = {};
+    Microsoft::WRL::ComPtr<ID2D1DeviceContext> context;
+    const HRESULT hr = surface_->surface->BeginDraw(&update, IID_PPV_ARGS(context.GetAddressOf()), &offset);
+    if (FAILED(hr))
+    {
+        if (IsDeviceLost(hr))
+        {
+            DiscardTarget();
+        }
+        return false;
+    }
+    // The context draws into a shared atlas: `offset` is where this surface starts in it,
+    // in pixels. Clip to the surface so Clear stays inside it, and move the origin there.
+    const FLOAT dpi = DpiForHwnd();
+    const float toDips = 96.0f / dpi;
+    const float originX = static_cast<float>(offset.x) * toDips;
+    const float originY = static_cast<float>(offset.y) * toDips;
+    context->SetDpi(dpi, dpi);
+    context->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+    context->SetTransform(D2D1::Matrix3x2F::Identity());
+    context->PushAxisAlignedClip(D2D1::RectF(originX, originY, originX + static_cast<float>(pixelWidth_) * toDips,
+                                             originY + static_cast<float>(pixelHeight_) * toDips),
+                                 D2D1_ANTIALIAS_MODE_ALIASED);
+    context->SetTransform(D2D1::Matrix3x2F::Translation(originX, originY));
+    drawContext_ = context;
+    return true;
+}
+
+HRESULT DeviceResources::EndDraw()
+{
+    if (!drawContext_)
+    {
+        ID2D1RenderTarget *target = GetRenderTarget();
+        return target ? target->EndDraw() : S_OK;
+    }
+    drawContext_->SetTransform(D2D1::Matrix3x2F::Identity());
+    drawContext_->PopAxisAlignedClip();
+    drawContext_.Reset();
+    const HRESULT hr = surface_ ? surface_->surface->EndDraw() : S_OK;
+    return IsDeviceLost(hr) ? D2DERR_RECREATE_TARGET : hr;
+}
+
 bool DeviceResources::EnsureForComposition(HWND hwnd)
 {
     hwnd_ = hwnd;
@@ -475,6 +939,11 @@ bool DeviceResources::EnsureForComposition(HWND hwnd)
     const UINT width = AlignSwapExtent(static_cast<UINT>((std::max)(rc.right, 1L)));
     const UINT height = AlignSwapExtent(static_cast<UINT>((std::max)(rc.bottom, 1L)));
 
+    if (backdropComposition_)
+    {
+        return EnsureSurfaceComposition(width, height);
+    }
+
     if (composition_ && deviceContext_ && swapChain_ && pixelWidth_ >= width && pixelHeight_ >= height)
     {
         const FLOAT dpi = DpiForHwnd();
@@ -486,24 +955,7 @@ bool DeviceResources::EnsureForComposition(HWND hwnd)
     {
         DiscardTarget();
         composition_ = true;
-
-        d3dDevice_ = TakePrewarmedDevice();
-        if (!d3dDevice_)
-        {
-            d3dDevice_ = CreateD3DDevice();
-        }
-        if (!d3dDevice_)
-        {
-            composition_ = false;
-            return false;
-        }
-        if (FAILED(d3dDevice_.As(&dxgiDevice_)))
-        {
-            composition_ = false;
-            return false;
-        }
-        if (FAILED(d2dFactory1_->CreateDevice(dxgiDevice_.Get(), d2dDevice_.GetAddressOf())) ||
-            FAILED(d2dDevice_->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, deviceContext_.GetAddressOf())))
+        if (!CreateCompositionDevice())
         {
             composition_ = false;
             return false;
@@ -577,6 +1029,11 @@ void DeviceResources::Resize(UINT width, UINT height)
         pixelHeight_ = height;
         return;
     }
+    if (composition_ && surface_)
+    {
+        GrowDrawingSurface(AlignSwapExtent(width), AlignSwapExtent(height));
+        return;
+    }
     if (composition_ && swapChain_ && deviceContext_)
     {
         const UINT neededW = AlignSwapExtent(width);
@@ -598,6 +1055,14 @@ void DeviceResources::Resize(UINT width, UINT height)
 
 void DeviceResources::DiscardTarget()
 {
+    drawContext_.Reset();
+    if (surface_)
+    {
+        // WinRT visuals go before the Direct3D device they draw with.
+        surface_.reset();
+        BOOL useHostBackdrop = FALSE;
+        DwmSetWindowAttribute(hwnd_, kDwmUseHostBackdropBrush, &useHostBackdrop, sizeof(useHostBackdrop));
+    }
     if (deviceContext_)
     {
         deviceContext_->SetTarget(nullptr);
@@ -623,6 +1088,8 @@ void DeviceResources::DiscardTarget()
 
 HRESULT DeviceResources::Present()
 {
+    // A drawing surface has nothing to present: EndDraw handed the frame to the compositor,
+    // which commits it together with the backdrop when the thread returns to its message loop.
     if (!swapChain_)
     {
         return S_OK;
@@ -637,6 +1104,10 @@ HRESULT DeviceResources::Present()
 
 ID2D1RenderTarget *DeviceResources::GetRenderTarget() const
 {
+    if (drawContext_)
+    {
+        return drawContext_.Get();
+    }
     if (deviceContext_)
     {
         return deviceContext_.Get();

@@ -21,6 +21,7 @@
 - `border_width_dip`：卡片外框线宽，`0`–`4`；颜色取 `border`，不写 `border` 时取 `base` 的边框色（杨柳青、秋桂没有外框，此时仍不可见）
 - `item_corner_radius_dip`：选中 / 悬停高亮的圆角，`0`–`16`；贴着卡片四角的那几个角仍跟 `corner_radius_dip`
 - `shadow`：卡片阴影，`none` | `soft` | `strong`；不写则沿用 `base`。只影响候选卡片，不影响右键菜单
+- `backdrop`：卡片背后的系统材质，`none` | `acrylic` | `mica`；不写等于 `none`。`acrylic` 模糊卡片后面的窗口；`mica` 模糊桌面壁纸，只透出壁纸色调（需要 Windows 11，更早的系统按 `acrylic` 画）。材质按 Fluent 配方叠「模糊背景 → 亮度层 → 色调」，色调颜色取 `surface`，两个不透明度见下面配色表里的 `backdrop_opacity` / `backdrop_luminosity`。系统关闭「透明效果」或不支持（低于 Windows 10 1903）时，`surface` 按不透明画。写了 `border_image` 时不生效
 - `font_family`：候选字体名，UTF-8 编码后最长 64 字节（约 21 个汉字），不能含引号、反斜杠、逗号、分号、尖括号、花括号和反引号。排在用户设置的字体前面，缺字时仍回落到用户字体；字号不由皮肤决定
 - `page_arrows`：候选框里的翻页箭头，`true` | `false`。横排时是候选右侧贴着最后一行的一小列，竖排时是最后一行下方的一矮行、“‹”与序号左对齐；颜色取 `number`，悬停底色取 `hover`。不写则沿用 `base` 的默认皮肤设置（数据目录 `skins\default\<base>\skin.toml`，出厂为 `false`）
 - `fit_content`：卡片是否严格按候选文字所需的宽度收紧，`true` | `false`。打开后不再垫出厂的最小宽度（160 DIP），同一次输入里后到的翻译等内容消失时宽度也立刻缩回；`min_width_dip` 和装饰图 `width_dip` 仍然生效。不写则沿用 `base` 的默认皮肤设置（出厂为 `false`）
@@ -104,6 +105,13 @@ v2 皮肤里的图片可以是动图：APNG（按 [APNG 规范](https://wiki.moz
 ## `[candidate.dark]` / `[candidate.light]`
 
 `accent`、`selected`、`hover`、`surface`、`border`、`text`、`number`、`translation`、`show_selected_bar`
+
+`candidate_window.backdrop` 不是 `none` 时还可以写两个 `0`–`1` 的数，深浅主题各自设置：
+
+- `backdrop_opacity`：`surface` 色调盖在材质上的不透明度，越高越接近纯色。不写时取 `surface` 自带的 alpha
+- `backdrop_luminosity`：亮度层的不透明度。越高，卡片明暗越不受后面画面影响，亮背景上的浅色字也能保住对比度；调低更通透，对比度跟着后面走。不写时 `acrylic` 取 `0.85`、`mica` 取 `1`
+
+Windows 11 的默认值可以作参考：亚克力深色 `#2c2c2c` / `0.15` / `0.96`、浅色 `#fcfcfc` / `0` / `0.85`；云母深色 `#202020` / `0.8` / `1`、浅色 `#f3f3f3` / `0.5` / `1`（依次是 `surface`、`backdrop_opacity`、`backdrop_luminosity`）。
 
 细分配色，都可省略，不写时按右列回落：
 

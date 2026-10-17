@@ -45,6 +45,11 @@ struct CandidateColors
     std::string menuBorder;
     std::string menuText;
     std::string menuHover;
+    // candidate_window.backdrop 不是 none 时的材质参数，0–1。backdrop_opacity 是 surface 色调盖在材质上的不透明度，
+    // 不写时取 surface 自带的 alpha；backdrop_luminosity 是亮度层的不透明度，越高越不受后面画面明暗影响，
+    // 不写时亚克力取 0.85、云母取 1。
+    std::optional<double> backdropOpacity;
+    std::optional<double> backdropLuminosity;
 };
 
 // 悬浮工具栏的配色覆盖。留空的项沿用基础皮肤。
@@ -127,6 +132,9 @@ struct Package
     std::optional<double> itemCornerRadiusDip;
     // 候选框卡片阴影：none / soft / strong；为空表示沿用基础皮肤。不影响右键菜单的阴影。
     std::string shadow;
+    // 候选框卡片背后的系统材质：none / acrylic（模糊后面的窗口）/ mica（模糊桌面壁纸，Win11；不支持时按 acrylic）；
+    // 为空等同 none。色调取 surface，参数见 CandidateColors::backdropOpacity。系统关闭透明效果时退回不透明底色。
+    std::string backdrop;
     // 候选字体族，排在用户配置的字体之前，用户字体作为回退；为空表示不改。
     std::string fontFamily;
     // 候选框卡片内的背景图，绘制在底色之上、候选文字之下，按外框圆角裁剪。

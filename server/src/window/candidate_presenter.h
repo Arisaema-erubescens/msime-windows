@@ -70,6 +70,11 @@ class CandidatePresenter
     bool fitContent_ = false;
     // 只有 v2（canvas）皮肤播放动图；v1 皮肤的图片保持原先的静态首帧。
     bool skinAnimates_ = false;
+    // 皮肤要亚克力且系统开着透明效果时，卡片下面垫一层系统毛玻璃（DeviceResources 的 backdrop composition）。
+    bool backdropActive_ = false;
+    // 这台机器建不起 Windows.UI.Composition（低于 Win10 1903 等）时置位，本次运行不再尝试，退回交换链。
+    bool backdropUnavailable_ = false;
+    float backdropRadiusDip_ = 0.0f;
     // 动画从候选窗这一次显示起算；隐藏或换皮肤后，下一次显示重新从第一帧开始。
     bool animationClockRunning_ = false;
     std::string lastSkinFingerprint_;

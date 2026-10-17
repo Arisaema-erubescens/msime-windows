@@ -99,6 +99,9 @@ target_link_libraries(msimeui PUBLIC
     uuid.lib
     windowscodecs.lib
     shlwapi.lib
+    # DeviceResources backdrop composition (Windows.UI.Composition through the WRL ABI).
+    runtimeobject.lib
+    CoreMessaging.lib
 )
 
 add_executable(msimeui-demo WIN32

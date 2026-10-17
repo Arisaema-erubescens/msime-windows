@@ -2063,6 +2063,44 @@ void Card::SetShadowEnabled(bool enabled)
     InvalidateVisual();
 }
 
+void Card::SetShadowOutsideOnly(bool outsideOnly)
+{
+    if (shadowOutsideOnly_ == outsideOnly)
+    {
+        return;
+    }
+    shadowOutsideOnly_ = outsideOnly;
+    InvalidateVisual();
+}
+
+namespace
+{
+// Layer masking out `shape`: everything within `reach` of it except the shape itself.
+bool PushOutsideLayer(ID2D1RenderTarget *target, const D2D1_ROUNDED_RECT &shape, float reach)
+{
+    ComPtr<ID2D1Factory> factory;
+    target->GetFactory(factory.GetAddressOf());
+    ComPtr<ID2D1RectangleGeometry> outer;
+    ComPtr<ID2D1RoundedRectangleGeometry> inner;
+    ComPtr<ID2D1PathGeometry> ring;
+    ComPtr<ID2D1GeometrySink> sink;
+    ComPtr<ID2D1Layer> layer;
+    const D2D1_RECT_F &r = shape.rect;
+    if (!factory ||
+        FAILED(factory->CreateRectangleGeometry(
+            D2D1::RectF(r.left - reach, r.top - reach, r.right + reach, r.bottom + reach), outer.GetAddressOf())) ||
+        FAILED(factory->CreateRoundedRectangleGeometry(shape, inner.GetAddressOf())) ||
+        FAILED(factory->CreatePathGeometry(ring.GetAddressOf())) || FAILED(ring->Open(sink.GetAddressOf())) ||
+        FAILED(outer->CombineWithGeometry(inner.Get(), D2D1_COMBINE_MODE_EXCLUDE, nullptr, sink.Get())) ||
+        FAILED(sink->Close()) || FAILED(target->CreateLayer(nullptr, layer.GetAddressOf())))
+    {
+        return false;
+    }
+    target->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), ring.Get()), layer.Get());
+    return true;
+}
+} // namespace
+
 SizeF Card::Measure(const SizeF &availableSize)
 {
     const SizeF inner = {std::max(availableSize.width - padding_.left - padding_.right, 0.0f),
@@ -2109,14 +2147,19 @@ void Card::Render(DeviceResources &deviceResources)
         return;
     }
 
-    if (shadowEnabled_)
-    {
-        RenderShadow(target);
-    }
-
     const auto roundedRect =
         D2D1::RoundedRect(D2D1::RectF(bounds_.x, bounds_.y, bounds_.x + bounds_.width, bounds_.y + bounds_.height),
                           brush_.radiusX, brush_.radiusY);
+    if (shadowEnabled_)
+    {
+        // The shadow passes reach well under 256 DIPs past the card.
+        const bool masked = shadowOutsideOnly_ && PushOutsideLayer(target, roundedRect, 256.0f);
+        RenderShadow(target);
+        if (masked)
+        {
+            target->PopLayer();
+        }
+    }
     target->FillRoundedRectangle(roundedRect, fillBrush);
     RenderBackgroundImage(deviceResources, target, roundedRect);
     target->DrawRoundedRectangle(roundedRect, strokeBrush, brush_.strokeWidth);
@@ -2396,8 +2439,32 @@ void Card::RenderShadow(ID2D1RenderTarget *target)
 void ShadowCache::Reset()
 {
     bitmap_.Reset();
-    target_.Reset();
+    owner_.Reset();
 }
+
+namespace
+{
+ComPtr<IUnknown> ShadowBitmapOwner(ID2D1RenderTarget *target)
+{
+    ComPtr<IUnknown> owner;
+    ComPtr<ID2D1DeviceContext> context;
+    ComPtr<ID2D1Device> device;
+    if (SUCCEEDED(target->QueryInterface(IID_PPV_ARGS(context.GetAddressOf()))))
+    {
+        context->GetDevice(device.GetAddressOf());
+    }
+    // Identity through the canonical IUnknown.
+    if (device)
+    {
+        device.As(&owner);
+    }
+    else
+    {
+        target->QueryInterface(IID_PPV_ARGS(owner.GetAddressOf()));
+    }
+    return owner;
+}
+} // namespace
 
 bool ShadowCache::Render(ID2D1RenderTarget *target, const RectF &bounds, float radius, const ShadowPass *passes,
                          size_t count, float scale, float opacity)
@@ -2429,9 +2496,10 @@ bool ShadowCache::Render(ID2D1RenderTarget *target, const RectF &bounds, float r
     const float sliceable = std::ceil(reach * 2.0f + kShadowStretchGuard * 2.0f + kShadowStretchSpan);
     const SizeF blurred = {std::min(bounds.width, sliceable), std::min(bounds.height, sliceable)};
 
-    const bool hit = bitmap_ && target_.Get() == target && IsSameSize(size_, blurred) && radius_ == radius &&
-                     scale_ == scale && opacity_ == opacity && dpiX_ == dpiX && dpiY_ == dpiY &&
-                     passes_.size() == count && std::equal(passes_.begin(), passes_.end(), passes);
+    const ComPtr<IUnknown> owner = ShadowBitmapOwner(target);
+    const bool hit = bitmap_ && owner_ == owner && IsSameSize(size_, blurred) && radius_ == radius && scale_ == scale &&
+                     opacity_ == opacity && dpiX_ == dpiX && dpiY_ == dpiY && passes_.size() == count &&
+                     std::equal(passes_.begin(), passes_.end(), passes);
     if (!hit)
     {
         Reset();
@@ -2465,7 +2533,7 @@ bool ShadowCache::Render(ID2D1RenderTarget *target, const RectF &bounds, float r
             return false;
         }
 
-        target_ = target;
+        owner_ = owner;
         bitmap_ = bitmap;
         size_ = blurred;
         radius_ = radius;

@@ -245,6 +245,8 @@ bool ReadCssColor(const toml::table &table, const char *key, std::string &out)
            });
 }
 
+bool ReadOptionalBounded(const toml::table &table, const char *key, double maximum, std::optional<double> &out);
+
 bool ReadColors(const toml::table *table, CandidateColors &out)
 {
     if (!table)
@@ -290,7 +292,8 @@ bool ReadColors(const toml::table *table, CandidateColors &out)
         }
         out.showSelectedBar = flag->get();
     }
-    return true;
+    return ReadOptionalBounded(*table, "backdrop_opacity", 1.0, out.backdropOpacity) &&
+           ReadOptionalBounded(*table, "backdrop_luminosity", 1.0, out.backdropLuminosity);
 }
 
 // 字体族挡住引号、反斜杠、分号、花括号、尖括号和控制字符，与各平台共用的 skin.toml 规则一致；
@@ -605,6 +608,11 @@ std::optional<Package> Load(const std::filesystem::path &skinsRoot, const std::s
         if (!ReadEnum(*window, "shadow", {"none", "soft", "strong"}, package.shadow))
         {
             SetError(error, "candidate_window.shadow 只能是 none、soft 或 strong");
+            return std::nullopt;
+        }
+        if (!ReadEnum(*window, "backdrop", {"none", "acrylic", "mica"}, package.backdrop))
+        {
+            SetError(error, "candidate_window.backdrop 只能是 none、acrylic 或 mica");
             return std::nullopt;
         }
         if (!ReadFontFamily(*window, "font_family", package.fontFamily))

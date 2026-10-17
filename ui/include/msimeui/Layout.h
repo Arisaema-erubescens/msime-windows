@@ -412,7 +412,9 @@ class ShadowCache
     void Reset();
 
   private:
-    Microsoft::WRL::ComPtr<ID2D1RenderTarget> target_;
+    // What the bitmap can be drawn on: the Direct2D device behind a device context (a
+    // drawing surface hands out a new context every frame), else the render target itself.
+    Microsoft::WRL::ComPtr<IUnknown> owner_;
     Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap_;
     // Size of the box the bitmap was blurred for, not of the box drawn now.
     SizeF size_ = {};
@@ -459,6 +461,9 @@ class Card : public Panel
     void SetShadowPasses(const std::vector<ShadowPass> &passes);
     // Turns the drop shadow off entirely; enabled by default.
     void SetShadowEnabled(bool enabled);
+    // Keeps the shadow out from under the card shape. A card with a translucent fill
+    // (e.g. over a backdrop) would otherwise show its own shadow through itself.
+    void SetShadowOutsideOnly(bool outsideOnly);
     // Draws an image file over the fill and under the children, clipped to the rounded
     // card shape. An empty path removes it. Animated images play (DeviceResources::GetImageFrame).
     void SetBackgroundImage(std::wstring filePath, ImageStretch stretch = ImageStretch::UniformToFill,
@@ -488,6 +493,7 @@ class Card : public Panel
     float shadowOpacity_ = 1.0f;
     std::vector<ShadowPass> shadowPasses_;
     bool shadowEnabled_ = true;
+    bool shadowOutsideOnly_ = false;
     SizeF childSize_ = {};
 
     // All blur passes composed into one bitmap. Rebuilding the blur inputs and
