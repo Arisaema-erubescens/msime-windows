@@ -17,11 +17,54 @@
 #include "cloud/cloud_translation.h"
 #include "cloud/translation_gloss.h"
 #include "ai/ai_assistant.h"
+#include "ai/jev_candidate_policy.h"
 #include "english/english_ime.h"
 #include "config/ime_config.h"
 #include "mixed/mixed_candidates.h"
 
 using namespace event_listener_detail;
+
+namespace
+{
+std::string g_jev_word;
+std::string g_jev_identity;
+uint64_t g_jev_generation = 0;
+} // namespace
+
+namespace event_listener_detail
+{
+void ClearJevSelection()
+{
+    g_jev_word.clear();
+    g_jev_identity.clear();
+    g_jev_generation = 0;
+}
+
+const std::string &JevSelectionWord()
+{
+    return g_jev_word;
+}
+
+void RefreshJevSelection()
+{
+    if (g_jev_word.empty())
+        return;
+    const auto &config = GetConfiguredAiAssistant();
+    const auto origin = FindAiRequestOrigin(g_jev_identity, g_jev_generation);
+    const auto current = g_inputSession ? g_inputSession->online_query() : std::nullopt;
+    if (!config.enabled || config.provider != "jev" || !g_inputSession || origin.client_id == 0 ||
+        !IsPipeActivationCurrent(origin.client_id, origin.activation_epoch) || !origin.engine_query || !current ||
+        !Jev::SameQuery(*origin.engine_query, *current) || g_inputSession->get_pinyin_segmentation() != g_jev_identity)
+    {
+        ClearJevSelection();
+        return;
+    }
+    auto &ui = Global::candidate_ui;
+    if (!IsCandidateSubPageActive() && ui.page_index == 0 && ui.selected_index_in_page == 0 &&
+        !Jev::Promote(ui.items, g_jev_word))
+        ClearJevSelection();
+}
+} // namespace event_listener_detail
 
 namespace FanyNamedPipe
 {
@@ -159,6 +202,23 @@ void ApplyAiCandidate(const std::string &candidate, const std::string &identity,
     }
     auto &items = Global::candidate_ui.items;
     const auto query = g_inputSession->get_cloud_query_state();
+    if (GetConfiguredAiAssistant().provider == "jev")
+    {
+        const auto current = g_inputSession->online_query();
+        if (!current || !Jev::SameQuery(*engine_query, *current))
+            return;
+        // The server owns this presentation order; preserve each WordItem's original metadata
+        // so selecting a partial or dictionary candidate still follows the normal commit path.
+        if (Global::candidate_ui.page_index != 0 || Global::candidate_ui.selected_index_in_page != 0 ||
+            !Jev::Promote(items, candidate))
+            return;
+        g_jev_word = candidate;
+        g_jev_identity = identity;
+        g_jev_generation = generation;
+        RefreshCandidatePageUi(true);
+        PushUiLessCandidatesToOwner();
+        return;
+    }
     // Align with cloud: if the word is already in the list, do not erase / reinsert /
     // reset page_index / re-cache. This stops cache-hit reapply from breaking paging.
     if (std::any_of(items.begin(), items.end(), [&](const WordItem &item) { return item.word == candidate; }))

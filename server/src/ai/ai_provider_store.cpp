@@ -21,7 +21,7 @@ const std::vector<std::string_view> &BuiltinProviderIds()
 {
     static const std::vector<std::string_view> ids{"deepseek",  "openai",     "siliconflow", "groq",
                                                    "custom",    "minimax",    "moonshot",    "zhipu",
-                                                   "dashscope", "volcengine", "openrouter"};
+                                                   "dashscope", "volcengine", "openrouter",  "jev"};
     return ids;
 }
 

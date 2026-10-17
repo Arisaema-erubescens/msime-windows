@@ -1,4 +1,5 @@
 #include "api_credential_test.h"
+#include "ai/jev_client.h"
 #include "api_credential_test_request.h"
 
 #include "cloud/ai_translation.h"
@@ -302,6 +303,17 @@ namespace ApiCredentialTest
 {
 Result Run(const Request &request)
 {
+    if (request.service == "ai.assistant" && Value(request, "provider") == "jev")
+    {
+        InitCurl();
+        const std::vector<std::string> candidates{"实施", "事实"};
+        const auto body =
+            Jev::BuildRequest(Value(request, "model"), "方案已经通过，明天开始", {"shi", "shi"}, candidates);
+        const auto response = Jev::Fetch(Value(request, "endpoint"), Value(request, "token"), body.dump());
+        if (response && !Jev::ParseChoice(*response, candidates).empty())
+            return {true, "连接成功，Jev 已返回有效候选选择。"};
+        return {false, "Jev 未返回有效选择，请检查 Key、模型、官方接口地址和网络。"};
+    }
     if (request.service.rfind("translation.", 0) == 0)
         return TestTranslation(request);
     if (request.service == "voice.polish" || request.service == "ai.assistant")
@@ -324,6 +336,8 @@ Result Run(const Request &request)
 
 ModelListResult FetchModels(const Request &request)
 {
+    if (request.service == "ai.assistant" && Value(request, "provider") == "jev")
+        return {true, "Jev 不提供模型列表接口，仅列出已验证的内置模型", {Jev::kModel}};
     // 语音转写和润色页的「查询模型」走同一条路：模型清单端点只依赖 Token 和接口地址，
     // 与服务类型无关。
     if (request.service != "ai.assistant" && request.service != "voice.asr" && request.service != "voice.polish")

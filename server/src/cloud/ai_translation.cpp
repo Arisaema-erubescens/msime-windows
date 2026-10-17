@@ -168,7 +168,7 @@ Config FromConfiguredTranslation(const TranslationConfig &config)
 
 bool IsUsableConfig(const Config &config)
 {
-    return CloudTranslation::IsUsableSecret(config.token) && !config.model.empty() &&
+    return config.provider != "jev" && CloudTranslation::IsUsableSecret(config.token) && !config.model.empty() &&
            (config.endpoint.rfind("https://", 0) == 0 || config.endpoint.rfind("http://", 0) == 0);
 }
 

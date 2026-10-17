@@ -37,6 +37,7 @@
 #include "conversion/chinese_converter.h"
 #include "log/candidate_diag_log.h"
 #include "ipc/event_listener_internal.h"
+#include "ai/jev_candidate_policy.h"
 
 using namespace event_listener_detail;
 
@@ -536,6 +537,7 @@ namespace event_listener_detail
 {
 void UpdateAiInput(const std::string &identity, uint64_t client_id, uint64_t activation_epoch)
 {
+    ClearJevSelection();
     std::lock_guard lock(g_async_request_mutex);
     const AiAssistantConfig config = GetConfiguredAiAssistant();
     const bool usable = config.enabled && g_inputSession &&
@@ -551,6 +553,8 @@ void UpdateAiInput(const std::string &identity, uint64_t client_id, uint64_t act
         request.context = FanyImeIpc::StripCredentialLikeText(g_ai_context);
         request.identity = identity;
         request.config = config;
+        if (config.provider == "jev")
+            request.candidates = Jev::CandidatePool(g_inputSession->get_candidates(), request.pinyin_segments.size());
     }
     AiAssistant::OnInputChanged(std::move(request));
     ++g_ai_generation;

@@ -30,6 +30,9 @@ template <typename... Args> int FanyIpcDiscardLogArgs(const Args &...);
 
 namespace event_listener_detail
 {
+void ClearJevSelection();
+void RefreshJevSelection();
+const std::string &JevSelectionWord();
 using AsyncRequestOrigin = FanyImeIpc::AsyncRequestOrigin;
 
 extern bool g_quick_phrase_triggered;

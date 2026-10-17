@@ -14,6 +14,8 @@ struct Request
     std::string context;
     std::string identity;
     AiAssistantConfig config;
+    // A bounded snapshot of local candidates, used only by choice providers.
+    std::vector<std::string> candidates;
 };
 
 using ApplyCallback = std::function<void(const std::string &, const std::string &, uint64_t)>;

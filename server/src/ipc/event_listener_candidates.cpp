@@ -22,6 +22,7 @@
 #include "cloud/cloud_translation.h"
 #include "english/english_ime.h"
 #include "config/ime_config.h"
+#include "ai/jev_candidate_policy.h"
 #include "settings/collocation_model.h"
 #include "engine/local_modes/quick_phrase_query.h"
 #include "engine/local_modes/date_time_query.h"
@@ -308,7 +309,10 @@ std::string BuildCurrentCandidatePage()
             item.source != CandidateSource::Kaomoji && item.source != CandidateSource::DateTime &&
             item.source != CandidateSource::Generated)
             view.annotation = g_inputSession->get_helpcode_annotation(item.word, uppercase_all_helpcodes);
-        if (item.source == CandidateSource::CloudSuggestion)
+        if (!IsCandidateSubPageActive() && item.word == JevSelectionWord() && Jev::IsPoolSource(item) &&
+            item.fixed_position == 0)
+            view.badge = " 〔Jev〕";
+        else if (item.source == CandidateSource::CloudSuggestion)
             view.badge = " ☁️";
         else if (item.source == CandidateSource::AiSuggestion)
             view.badge = ai_badge;
@@ -451,6 +455,7 @@ namespace event_listener_detail
 {
 void RefreshCandidatePageUi(bool show_window)
 {
+    RefreshJevSelection();
     PrepareCandidateTranslationRequest();
     const std::string candidate_string = BuildCurrentCandidatePage();
     // Host-drawn UI wants plain words (Microsoft IME style), not helpcodes.

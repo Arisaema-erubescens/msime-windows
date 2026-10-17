@@ -3,6 +3,7 @@
 #include "ai_assistant_cache_key.h"
 #include "ai_assistant_request.h"
 #include "chat_completions.h"
+#include "jev_client.h"
 
 #include <msime/voice/provider_protocol.h>
 #include <curl/curl.h>
@@ -18,6 +19,10 @@
 namespace
 {
 constexpr auto kIdleDelay = std::chrono::milliseconds(650);
+auto IdleDelay(const AiAssistant::Request &request)
+{
+    return request.config.provider == "jev" ? std::chrono::milliseconds(200) : kIdleDelay;
+}
 std::mutex g_mutex;
 std::condition_variable g_cv;
 std::thread g_worker;
@@ -28,7 +33,7 @@ std::chrono::steady_clock::time_point g_last_input;
 AiAssistant::ApplyCallback g_callback;
 AiAssistant::detail::SuggestionCache g_candidate_cache;
 
-std::string Fetch(const AiAssistant::Request &request, uint64_t generation)
+std::string Fetch(const AiAssistant::Request &request, uint64_t generation, Jev::Client &jev_client)
 {
     const auto &config = request.config;
     if (!config.enabled || config.token.empty() || config.endpoint.empty() || config.model.empty() ||
@@ -38,6 +43,25 @@ std::string Fetch(const AiAssistant::Request &request, uint64_t generation)
         return {};
     }
 
+    if (config.provider == "jev")
+    {
+        // A single candidate leaves nothing to choose; skip sending the context off-device.
+        if (request.candidates.size() < 2)
+            return {};
+        try
+        {
+            const auto body =
+                Jev::BuildRequest(config.model, request.context, request.pinyin_segments, request.candidates);
+            const auto response = jev_client.Fetch(config.endpoint, config.token, body.dump(), [generation] {
+                return !g_running || g_generation.load() != generation;
+            });
+            return response ? Jev::ParseChoice(*response, request.candidates) : std::string{};
+        }
+        catch (const std::exception &)
+        {
+            return {};
+        }
+    }
     const nlohmann::json body = AiAssistant::detail::BuildRequestBody(request);
     const auto content = ChatCompletions::FetchContent(config.endpoint, config.token, body.dump(),
                                                        AiAssistant::detail::RequestTimeoutMs(config));
@@ -67,7 +91,8 @@ std::string Fetch(const AiAssistant::Request &request, uint64_t generation)
 
 void WorkerLoop()
 {
-    uint64_t observed = g_generation.load();
+    Jev::Client jev_client;
+    uint64_t observed = 0;
     while (g_running)
     {
         std::unique_lock lock(g_mutex);
@@ -86,7 +111,7 @@ void WorkerLoop()
                 g_callback(*cached, request.identity, cached_generation);
             continue;
         }
-        auto target = g_last_input + kIdleDelay;
+        auto target = g_last_input + IdleDelay(request);
         while (g_running &&
                g_cv.wait_until(lock, target, [&] { return !g_running || g_generation.load() != observed; }))
         {
@@ -94,12 +119,12 @@ void WorkerLoop()
                 return;
             observed = g_generation.load();
             request = g_latest;
-            target = g_last_input + kIdleDelay;
+            target = g_last_input + IdleDelay(request);
         }
         lock.unlock();
         if (request.identity.empty())
             continue;
-        const std::string candidate = Fetch(request, observed);
+        const std::string candidate = Fetch(request, observed, jev_client);
         if (!candidate.empty() && g_generation.load() == observed && g_callback)
         {
             {

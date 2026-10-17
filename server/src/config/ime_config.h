@@ -90,6 +90,7 @@ struct AiAssistantConfig
         {"dashscope", "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"},
         {"volcengine", "https://ark.cn-beijing.volces.com/api/v3/chat/completions"},
         {"openrouter", "https://openrouter.ai/api/v1/chat/completions"},
+        {"jev", "https://api.typesafe.ai/v1/systemone"},
         {"custom", ""}};
     // Groq 已弃用 llama-3.3-70b-versatile，默认模型改用 qwen/qwen3.8-27b。
     // custom 槽位不预设接口地址和模型，全部由用户填写并单独保存。
@@ -103,6 +104,7 @@ struct AiAssistantConfig
                                               {"dashscope", "qwen-plus"},
                                               {"volcengine", "doubao-seed-1.6-flash"},
                                               {"openrouter", "openrouter/auto"},
+                                              {"jev", "jev-1.13.0"},
                                               {"custom", ""}};
     int candidate_limit = 3;
     // DeepSeek reasoning effort: disabled | low | high | max. Other providers ignore it.

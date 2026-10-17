@@ -1,5 +1,7 @@
 #include "settings/native/native_page_voice_fields.h"
 
+#include "ai/jev_client.h"
+
 #include "msimeui/DeviceResources.h"
 #include "msimeui/Scene.h"
 #include "msimeui/Window.h"
@@ -29,11 +31,12 @@ const std::map<std::string, ProviderDefaults> &Defaults()
         {"siliconflow", {"https://api.siliconflow.cn/v1/chat/completions", "Qwen/Qwen3-8B"}},
         {"groq", {"https://api.groq.com/openai/v1/chat/completions", "qwen/qwen3.8-27b"}},
         {"custom", {"", ""}},
+        {"jev", {Jev::kEndpoint, Jev::kModel}},
     };
     return defaults;
 }
 
-const std::vector<std::string> kProviders = {"deepseek", "openai", "siliconflow", "groq", "custom"};
+const std::vector<std::string> kProviders = {"deepseek", "openai", "siliconflow", "groq", "custom", "jev"};
 
 ProviderDefaults DefaultsOf(const std::string &provider)
 {
@@ -517,7 +520,8 @@ struct AiPage : std::enable_shared_from_this<AiPage>
     void ApplyProviderFields()
     {
         const ProviderDefaults defaults = DefaultsOf(provider);
-        endpoint->SetText(Widen(!endpoints[provider].empty() ? endpoints[provider] : defaults.endpoint));
+        endpoint->SetText(
+            Widen(provider != "jev" && !endpoints[provider].empty() ? endpoints[provider] : defaults.endpoint));
         model->Input()->SetText(Widen(!models[provider].empty() ? models[provider] : defaults.model));
         model->Input()->SetPlaceholder(Widen(defaults.model));
     }
@@ -632,7 +636,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         PageBuilder page(L"AI 辅助");
         std::weak_ptr<AiPage> weak = shared_from_this();
 
-        page.AddSection(MakeRows({MakeRow(L"启用 AI 联想", L"在全拼和双拼输入时异步生成第 3 个候选项",
+        page.AddSection(MakeRows({MakeRow(L"启用 AI 联想", L"异步生成候选；Jev 从已有候选中选择并标记推荐项",
                                           BindToggle(context, "ai_assistant.enabled"))}));
 
         // API 配置
@@ -643,7 +647,8 @@ struct AiPage : std::enable_shared_from_this<AiPage>
             column->Add(heading);
             auto description = MakeDescription(
                 L"DeepSeek、OpenAI、SiliconFlow、Groq 均使用 OpenAI 兼容的 Chat Completions 接口。Custom "
-                L"用于接入任意兼容服务，填写自己的接口地址与模型。每个提供商的接口地址、Token 和模型分开保存。");
+                L"用于接入兼容服务。Jev 使用 TypeSafe 官方 Choice 接口，将前文、拼音和最多 32 个本地候选发送给服务商。"
+                L"Jev 固定选择一个候选，不使用下方的候选数量、思考强度和自定义提示词。各提供商凭据分开保存。");
             description->SetMargin({0.0f, -10.0f, 0.0f, 16.0f});
             column->Add(description);
 
@@ -652,7 +657,8 @@ struct AiPage : std::enable_shared_from_this<AiPage>
                                                      {"openai", L"OpenAI"},
                                                      {"siliconflow", L"SiliconFlow"},
                                                      {"groq", L"Groq"},
-                                                     {"custom", L"Custom"}}));
+                                                     {"custom", L"Custom"},
+                                                     {"jev", L"Jev (TypeSafe)"}}));
             providerDropdown->SetOnChanged(
                 [this](size_t, const DropdownOption &option) { SwitchProvider(option.value); });
             grid->Add(std::make_shared<Field>(L"服务提供商", providerDropdown));
@@ -731,6 +737,13 @@ struct AiPage : std::enable_shared_from_this<AiPage>
 
             endpoint = GridInput();
             endpoint->SetOnCommit([this](const std::wstring &text) {
+                // Jev only talks to the official endpoint; any other value would silently disable it.
+                if (provider == "jev")
+                {
+                    Write("ai_assistant.endpoint", std::string(Jev::kEndpoint));
+                    endpoint->SetText(Widen(Jev::kEndpoint));
+                    return;
+                }
                 Write("ai_assistant.endpoint", Narrow(text));
                 if (text.empty())
                     endpoint->SetText(Widen(DefaultsOf(provider).endpoint));
