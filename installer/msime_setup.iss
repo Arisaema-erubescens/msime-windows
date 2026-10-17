@@ -781,6 +781,14 @@ begin
     (CompareText(FileName, 'config.base.toml') = 0);
 end;
 
+function IsUserTranslationFile(const FileName: String): Boolean;
+begin
+  { 候选窗中英翻译的人工覆盖表，由用户手工放在数据目录根下（README「自定义候选窗翻译」一节），
+    安装包不携带、引擎只读不写。它没有 config.toml 那样的出厂副本可回退，删掉就是内容
+    彻底丢失，所以必须与用户配置同等对待。}
+  Result := CompareText(FileName, 'custom_translations.txt') = 0;
+end;
+
 function IsUserSkinDirectory(const FileName: String): Boolean;
 begin
   { 外部皮肤在 %LOCALAPPDATA%\metasequoiaime\skins，升级安装不得清掉。}
@@ -812,6 +820,7 @@ begin
     IsUserDatabaseFile(FileName) or
     IsUserStatisticsDatabase(FileName) or
     IsUserConfigFile(FileName) or
+    IsUserTranslationFile(FileName) or
     IsUserSkinDirectory(FileName) or
     IsUserShuangpinDirectory(FileName) or
     IsCollocationModelDirectory(FileName) or
@@ -1370,7 +1379,7 @@ begin
     '"' + RemoveBackslashUnlessRoot(OldDir) + '" "' + RemoveBackslashUnlessRoot(NewDir) + '" ' +
     'msime_user.db msime_user.db-wal msime_user.db-shm msime_user.db-journal ' +
     'stats.db stats.db-wal stats.db-shm stats.db-journal ' +
-    'config.toml config.base.toml /MOVE /R:2 /W:1 /NJH /NJS /NP /NFL /NDL',
+    'config.toml config.base.toml custom_translations.txt /MOVE /R:2 /W:1 /NJH /NJS /NP /NFL /NDL',
     '',
     SW_HIDE,
     ewWaitUntilTerminated,
@@ -1435,14 +1444,19 @@ begin
     { 用户词库没搬成必须让安装失败。否则新版本会对着一个空的 msime_user.db 启动，
       ssPostInstall 的回放只会记一句 skipped，用户的自造词和词频就这么静悄悄没了——
       这正是 ReplayUserDictionary 失败时也要中止安装的那条理由。
-      config.toml 同理，见 ConfigMigrationFailure。皮肤等搬不动只记日志：它们丢了可以重建。}
+      config.toml 同理，见 ConfigMigrationFailure；custom_translations.txt 没有出厂副本，
+      见 TranslationMigrationFailure。皮肤等搬不动只记日志：它们丢了可以重建。}
     if FileExists(AddBackslash(OldDir) + 'msime_user.db') then
       Result :=
         '无法把用户词库从 ' + OldDir + ' 移动到 ' + NewDir + '。' + #13#10 +
         '请确认输入法相关进程已全部退出、目标磁盘可写且空间足够，然后重试安装。' + #13#10 +
         '你的用户词库仍留在 ' + OldDir + '，本次安装没有改动它。'
     else
+    begin
       Result := ConfigMigrationFailure(OldDir, NewDir);
+      if Result = '' then
+        Result := TranslationMigrationFailure(OldDir, NewDir);
+    end;
     exit;
   end;
 
