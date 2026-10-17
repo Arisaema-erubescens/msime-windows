@@ -40,6 +40,7 @@ class CandidatePresenter
     // briefly showing the previous card.
     void PresentEmptyFrame();
     void ArmHoverIfPointerMoved();
+    void NoteHoverOverItem(POINT clientPoint);
     void CommitItem(size_t pageIndex);
     void ShowItemContextMenu(size_t pageIndex, POINT clientPoint);
     void CloseContextMenu(bool restoreHost);
@@ -61,6 +62,8 @@ class CandidatePresenter
     // Set while PlaceAndShow resizes the host; it presents right afterwards.
     bool placingHost_ = false;
     POINT hoverBaseline_{};
+    // 已为哪一页报过「指针停在候选上」，同一页只报一次。
+    std::uint64_t hoverNotedGeneration_ = 0;
     float decorationTopDip_ = 0.0f;
     float decorationWidthDip_ = 0.0f;
     // 卡片最小宽度：默认 160，外部皮肤的 min_width_dip 与装饰图宽度可以把它撑大，

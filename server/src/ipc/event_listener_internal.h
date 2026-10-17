@@ -63,12 +63,18 @@ extern std::string g_date_time_page_keyword;
 extern std::vector<WordItem> g_translation_saved_items;
 extern int g_translation_saved_page_index;
 extern int g_translation_saved_selected_index;
+extern bool g_translation_saved_selection_started;
 extern bool g_dedicated_english_answer_pending;
 extern int g_authoritative_cn_mode;
 
 std::string TranslationIdentity(const EnglishIme::TranslationQuery &query);
 // 译文页或日期页正占着候选框：items 不是这次输入的候选，异步结果不能往里合并，也不能按会话扩展。
 bool IsCandidateSubPageActive();
+// 把界面线程记下的鼠标操作落到 candidate_ui.selection_started。工作线程每取一个任务先调一次，
+// 这样排在鼠标操作之前入队的异步结果也看得到它。
+void LatchCandidateUiInteraction();
+// 异步候选（云、AI、英文、混输、重排）能否改动当前列表：子页占着或用户已开始选词时都不行。
+bool CanMergeAsyncCandidates();
 bool IsUiLessMode();
 void ApplyUiLessFromPacket(const FanyImeNamedpipeData &pipe_data);
 void RequestShowCandidateWindow();

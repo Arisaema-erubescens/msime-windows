@@ -5,6 +5,7 @@
 #include "defines/globals.h"
 #include "global/globals.h"
 #include "ipc/candidate_translation_policy.h"
+#include "ipc/event_listener.h"
 #include "ipc/ipc.h"
 #include "log/candidate_diag_log.h"
 #include "skin/candidate_skin_catalog.h"
@@ -1293,6 +1294,9 @@ void CandidatePresenter::ShowItemContextMenu(size_t pageIndex, POINT clientPoint
 
     // A mouse callback has no posted-message handoff at all, so it must not walk the worker's live page either.
     const Global::CandidatePageSnapshotPtr page = Global::LoadCandidatePageSnapshot();
+    // 冻结的是用户右键时看见的那一页：已发布但还没画出来的一页不算。
+    FanyNamedPipe::NoteCandidateUiInteraction(
+        Global::rendered_candidate_page_generation.load(std::memory_order_acquire));
     std::wstring word;
     if (pageIndex < page->page_words.size())
     {
@@ -1987,6 +1991,28 @@ void CandidatePresenter::ArmHoverIfPointerMoved()
     }
 }
 
+void CandidatePresenter::NoteHoverOverItem(POINT clientPoint)
+{
+    // 指针只是从候选窗上划过不算选词，要真的停到某个候选上才冻结这一页的顺序。
+    const std::uint64_t generation = Global::rendered_candidate_page_generation.load(std::memory_order_acquire);
+    if (generation == hoverNotedGeneration_ || !impl_ || !impl_->list || !impl_->window)
+    {
+        return;
+    }
+    const msimeui::PointF point = impl_->window->ClientPixelsToDips(clientPoint);
+    for (size_t index = 0; impl_->list->GetItem(index) != nullptr; ++index)
+    {
+        const msimeui::RectF bounds = impl_->list->GetItemBounds(index);
+        if (point.x >= bounds.x && point.x < bounds.x + bounds.width && point.y >= bounds.y &&
+            point.y < bounds.y + bounds.height)
+        {
+            FanyNamedPipe::NoteCandidateUiInteraction(generation);
+            hoverNotedGeneration_ = generation;
+            return;
+        }
+    }
+}
+
 bool CandidatePresenter::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 {
     if (!bound_ || !impl_ || !impl_->window)
@@ -2031,6 +2057,10 @@ bool CandidatePresenter::HandleMessage(UINT message, WPARAM wParam, LPARAM lPara
         if (!hoverArmed_ && !(impl_ && impl_->contextMenuOpen))
         {
             return true;
+        }
+        if (hoverArmed_)
+        {
+            NoteHoverOverItem(POINT{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)});
         }
         impl_->window->DispatchImportedMessage(message, wParam, lParam);
         Present();

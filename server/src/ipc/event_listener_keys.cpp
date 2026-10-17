@@ -607,8 +607,10 @@ void ExitCandidateSubPage()
     g_translation_saved_items.clear();
     ui.page_index = g_translation_saved_page_index;
     ui.selected_index_in_page = g_translation_saved_selected_index;
+    ui.selection_started = g_translation_saved_selection_started;
     g_translation_saved_page_index = 0;
     g_translation_saved_selected_index = 0;
+    g_translation_saved_selection_started = false;
     RefreshCandidatePageUi(false);
 }
 
@@ -629,6 +631,7 @@ bool EnterDateTimeCandidatePage(const std::string &keyword)
     g_translation_saved_items = ui.items;
     g_translation_saved_page_index = ui.page_index;
     g_translation_saved_selected_index = ui.selected_index_in_page;
+    g_translation_saved_selection_started = ui.selection_started;
     ui.set_items(std::move(items));
     g_date_time_page_active = true;
     g_date_time_page_keyword = keyword;
@@ -699,6 +702,7 @@ void HandleTranslationCommitKey(uint64_t client_id, uint64_t activation_epoch, u
     g_translation_saved_items = ui.items;
     g_translation_saved_page_index = ui.page_index;
     g_translation_saved_selected_index = ui.selected_index_in_page;
+    g_translation_saved_selection_started = ui.selection_started;
     std::vector<WordItem> translation_items;
     translation_items.reserve(senses.size());
     for (const auto &sense : senses)
@@ -772,6 +776,7 @@ void PublishRestoredCompositionCandidates(uint64_t client_id, uint64_t activatio
             const int position = std::min(restored_highlight.absolute_index, ui.item_total_count - 1);
             ui.page_index = position / ui.page_size;
             ui.selected_index_in_page = position % ui.page_size;
+            ui.begin_selection();
             RefreshCandidatePageUi(false);
         }
     }
@@ -1671,6 +1676,8 @@ void HandleImeKey(uint64_t client_id, uint64_t activation_epoch, uint64_t reques
         };
         const auto move_selection = [&](int offset, UINT response_type) {
             result = response_type;
+            // 要在下面的扩展之前标记：扩展得按「已开始选词」只追加，不能重排已显示的候选。
+            ui.begin_selection();
             if (offset > 0 && (ui.is_selection_at_last_candidate() ||
                                (ui.is_selection_at_current_page_end() && ui.is_next_page_partial_last_page())))
             {

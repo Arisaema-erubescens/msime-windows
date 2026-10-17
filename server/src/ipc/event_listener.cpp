@@ -5,6 +5,7 @@
 #include <ioapiset.h>
 #include <string>
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <utility>
 #include <unordered_map>
@@ -62,6 +63,13 @@ bool g_activate_uiless = false;
 bool g_session_uiless = false;
 } // namespace
 
+namespace
+{
+// 界面线程记下的鼠标操作所在页面代次，0 表示没有。不走任务队列：排在它前面的异步结果
+// 必须在合并前就看到它，而且鼠标事件不能打断翻页任务的合并。
+std::atomic<std::uint64_t> g_candidate_ui_interaction_generation{0};
+} // namespace
+
 namespace event_listener_detail
 {
 std::unordered_map<std::string, std::string> g_candidate_translation_glosses;
@@ -76,6 +84,7 @@ std::string g_date_time_page_keyword;
 std::vector<WordItem> g_translation_saved_items;
 int g_translation_saved_page_index = 0;
 int g_translation_saved_selected_index = 0;
+bool g_translation_saved_selection_started = false;
 
 std::string TranslationIdentity(const EnglishIme::TranslationQuery &query)
 {
@@ -86,6 +95,19 @@ std::string TranslationIdentity(const EnglishIme::TranslationQuery &query)
 bool IsCandidateSubPageActive()
 {
     return g_translation_candidates_active || g_date_time_page_active;
+}
+
+void LatchCandidateUiInteraction()
+{
+    const std::uint64_t generation = g_candidate_ui_interaction_generation.exchange(0, std::memory_order_acq_rel);
+    // 只认用户操作时屏幕上那一页；之后已经换了一批候选，就不该冻结新的这批。
+    if (generation != 0 && generation == Global::LoadCandidatePageSnapshot()->generation)
+        Global::candidate_ui.begin_selection();
+}
+
+bool CanMergeAsyncCandidates()
+{
+    return !IsCandidateSubPageActive() && !Global::candidate_ui.selection_started;
 }
 
 bool IsUiLessMode()
@@ -656,6 +678,12 @@ std::wstring BuildCreateWordPipePayload(const std::string &remaining_raw_input_w
 
 namespace FanyNamedPipe
 {
+void NoteCandidateUiInteraction(uint64_t page_generation)
+{
+    if (page_generation != 0)
+        g_candidate_ui_interaction_generation.store(page_generation, std::memory_order_release);
+}
+
 FanyImeTemporaryJapanese::Policy TemporaryJapanesePolicy()
 {
     // Keep the underlying Chinese scheme available to TSF's queued language-cycle projection.
@@ -777,6 +805,7 @@ void ClearState()
     g_translation_saved_items.clear();
     g_translation_saved_page_index = 0;
     g_translation_saved_selected_index = 0;
+    g_translation_saved_selection_started = false;
     EnglishIme::ClearTranslations();
     CloudTranslation::Clear();
     UpdateMixedInput({});

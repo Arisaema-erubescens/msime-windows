@@ -146,3 +146,63 @@ TEST_CASE(candidate_expansion_rebuilds_local_candidates_without_carrying_stale_f
     for (size_t index = 0; index < expanded.size(); ++index)
         REQUIRE_EQ(ui.items[index].word, expanded[index].word);
 }
+
+TEST_CASE(candidate_expansion_keeps_every_visible_position_after_selection_started)
+{
+    Global::CandidateUiState ui;
+    ui.page_size = 3;
+    auto initial = LocalCandidates(5);
+    initial.insert(initial.begin() + 1, WordItem("ni", "cloud", 0, CandidateSource::CloudSuggestion));
+    ui.set_items(initial);
+    ui.page_index = 1;
+    ui.selected_index_in_page = 1;
+    ui.begin_selection();
+
+    // 新的引擎结果顺序已经变化，且带有重复的云候选；扩展只能在原列表后追加新词。
+    auto expanded = LocalCandidates(10);
+    std::reverse(expanded.begin(), expanded.end());
+    expanded.push_back(initial[1]);
+    REQUIRE(FanyImeIpc::SetExpandedCandidatesKeepingPagePosition(ui, std::move(expanded)));
+    REQUIRE(ui.selection_started);
+    REQUIRE_EQ(ui.page_index, 1);
+    REQUIRE_EQ(ui.selected_index_in_page, 1);
+    REQUIRE_EQ(ui.item_total_count, 11);
+    for (size_t index = 0; index < initial.size(); ++index)
+    {
+        REQUIRE_EQ(ui.items[index].word, initial[index].word);
+        REQUIRE(ui.items[index].source == initial[index].source);
+    }
+    REQUIRE_EQ(ui.items[6].word, std::string("local-9"));
+    REQUIRE_EQ(ui.items.back().word, std::string("local-5"));
+    REQUIRE(ui.has_next_page());
+}
+
+TEST_CASE(candidate_expansion_after_selection_keeps_same_word_with_other_pinyin_or_source)
+{
+    Global::CandidateUiState ui;
+    ui.page_size = 3;
+    ui.set_items({WordItem("hang", "行", 2), WordItem("ni", "cloud", 0, CandidateSource::CloudSuggestion)});
+    ui.begin_selection();
+
+    // 多音字和快捷短语与已显示的同字，却是另外的候选；与界面独有的云候选同字的本地候选仍要挡掉。
+    std::vector<WordItem> expanded{WordItem("hang", "行", 2), WordItem("xing", "行", 1),
+                                   WordItem("hang", "行", 0, CandidateSource::QuickPhrase), WordItem("ni", "cloud", 0)};
+    REQUIRE(FanyImeIpc::SetExpandedCandidatesKeepingPagePosition(ui, std::move(expanded)));
+    REQUIRE_EQ(ui.item_total_count, 4);
+    REQUIRE_EQ(ui.items[2].pinyin, std::string("xing"));
+    REQUIRE(ui.items[3].source == CandidateSource::QuickPhrase);
+}
+
+TEST_CASE(candidate_expansion_after_selection_reports_no_change_when_nothing_new)
+{
+    Global::CandidateUiState ui;
+    ui.page_size = 3;
+    ui.set_items(LocalCandidates(4));
+    ui.begin_selection();
+
+    auto expanded = LocalCandidates(4);
+    std::reverse(expanded.begin(), expanded.end());
+    REQUIRE(!FanyImeIpc::SetExpandedCandidatesKeepingPagePosition(ui, std::move(expanded)));
+    REQUIRE_EQ(ui.item_total_count, 4);
+    REQUIRE_EQ(ui.items.front().word, std::string("local-0"));
+}

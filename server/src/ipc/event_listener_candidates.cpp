@@ -540,7 +540,8 @@ FanyImeIpc::EnglishPlacement CurrentEnglishPlacement(const std::vector<WordItem>
 
 // Pulls the next batch of candidates out of the session without disturbing
 // where the user currently is: set_items resets the page and the selection, so
-// both are restored afterwards. Returns false when nothing more was loaded.
+// both are restored afterwards. Returns false when nothing more was loaded, or
+// when everything loaded was already on the list.
 bool ExpandCandidatesKeepingPagePosition()
 {
     auto &ui = Global::candidate_ui;
@@ -556,8 +557,8 @@ bool ExpandCandidatesKeepingPagePosition()
         [](const std::string &key, const std::string &value) { return g_inputSession->find_candidate(key, value); },
         g_inputSession->has_active_helpcode());
     PlaceQuickPhrases(expanded, g_inputSession->get_pinyin_sequence_with_cases());
-    FanyImeIpc::SetExpandedCandidatesKeepingPagePosition(ui, std::move(expanded), CurrentEnglishPlacement(ui.items));
-    return true;
+    return FanyImeIpc::SetExpandedCandidatesKeepingPagePosition(ui, std::move(expanded),
+                                                                CurrentEnglishPlacement(ui.items));
 }
 
 // Moves one page in `offset`'s direction, expanding the candidate list first
@@ -566,6 +567,7 @@ bool ExpandCandidatesKeepingPagePosition()
 PageMoveResult MoveCandidatePage(int offset)
 {
     auto &ui = Global::candidate_ui;
+    ui.begin_selection();
     if (offset > 0 && ui.is_next_page_partial_last_page())
     {
         // Populate the last partial page before entering it, so the first

@@ -48,6 +48,27 @@ TEST_CASE(candidate_ui_selection_stops_at_first_and_last_candidate)
     REQUIRE_EQ(state.selected_index_in_page, 1);
 }
 
+TEST_CASE(candidate_ui_selection_stays_started_until_items_are_rebuilt)
+{
+    auto state = MakeCandidateUiState(8, 3);
+    REQUIRE(!state.selection_started);
+    REQUIRE(state.move_selection(1));
+    REQUIRE(state.selection_started);
+    state.clear_page();
+    state.select_first_on_page();
+    REQUIRE(state.selection_started);
+    // 到达边界也已经表达了选词意图，异步结果不能趁这次按键没有移动而重排。
+    REQUIRE(!state.move_selection(-1));
+    REQUIRE(state.selection_started);
+    state.set_items({WordItem("hao", "好", 1)});
+    REQUIRE(!state.selection_started);
+    state.begin_selection();
+    REQUIRE(state.selection_started);
+    state.set_items({});
+    state.begin_selection();
+    REQUIRE(!state.selection_started);
+}
+
 TEST_CASE(candidate_ui_detects_only_the_last_loaded_candidate_as_exhausted)
 {
     auto state = MakeCandidateUiState(24, 6);

@@ -304,6 +304,8 @@ struct CandidateUiState
     int cur_page_max_word_len = 2;
     int cur_page_item_cnt = 8;
     bool is_num_out_of_range = false;
+    // 用户开始选词后保持候选顺序，直到输入变化后重新建立候选列表。
+    bool selection_started = false;
 
     void set_items(std::vector<CandidateWordItem> new_items)
     {
@@ -311,6 +313,7 @@ struct CandidateUiState
         item_total_count = static_cast<int>(items.size());
         page_index = 0;
         selected_index_in_page = 0;
+        selection_started = false;
         clear_page();
     }
 
@@ -329,6 +332,11 @@ struct CandidateUiState
         selected_index_in_page = 0;
     }
 
+    void begin_selection()
+    {
+        selection_started = item_total_count > 0;
+    }
+
     bool move_selection(int offset)
     {
         if (page_size <= 0)
@@ -343,6 +351,7 @@ struct CandidateUiState
             selected_index_in_page = 0;
             return false;
         }
+        begin_selection();
         selected_index_in_page = std::clamp(selected_index_in_page, 0, count - 1);
         const int next = current_page_start() + selected_index_in_page + offset;
         if (next < 0 || next >= item_total_count)

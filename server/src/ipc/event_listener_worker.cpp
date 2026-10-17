@@ -218,6 +218,7 @@ void WorkerThread()
             if (task.type == TaskType::ApplyRescoredOrder)
                 rescoreApplyQueued = false;
         }
+        LatchCandidateUiInteraction();
 
         if (task.type == TaskType::ClientDeactivated || task.type == TaskType::ClientSuspended)
         {
