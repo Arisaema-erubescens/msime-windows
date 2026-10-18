@@ -4,7 +4,6 @@
     "commit": "e12279943acca455583326030a214af02c323625",
     "path": "resources/dictionary-sources",
     "files": {
-      "mix/quick_phrases.txt": {"size": 511, "sha256": "4df48be42f38bc33f216558db077b2248ace71b05b8e450fc223993c05ddd771"},
       "pinyin-reading-corrections.txt": {"size": 13175, "sha256": "d77fb4183d3df50ca3ebd4de6a482d5b3bc3051ed18fa7300e70fa4c7c34eb5f"},
       "pinyin-overrides.txt": {"size": 1582, "sha256": "e2770db162955de16cf82f82368c469e5a0060dcb4ff9911424998bb4d9a0a8d"},
       "emoji/emoji.txt": {"size": 90178, "sha256": "a6a0af0c00e6e359eb2f1be247d15a5735c2240bc248181b6946e0377e991002"},

@@ -1,4 +1,4 @@
-"""msime.db：全拼表、地名补充与自定义词条、读音纠错、86 五笔、快捷短语，以及日文直出候选表 japanese_lexicon。
+"""msime.db：全拼表、地名补充与自定义词条、读音纠错、86 五笔、空的快捷短语表（出厂不带内置快捷短语），以及日文直出候选表 japanese_lexicon。
 
 对应 Rust 构建器 msime.rs 的 quanpin / places-supplement / custom-words / reading-corrections / wubi / quick-phrases
 阶段。Release 把五笔拆进了 msime-wubi.db，Windows 端仍然一个库：这里全建在 msime.db 里。98 五笔 Windows 端不读，不建。
@@ -223,20 +223,14 @@ def apply_reading_corrections(connection: sqlite3.Connection, entries: list[tupl
 
 # ---- 编码表：86 五笔与快捷短语 ----
 
-def _parse_code_line(line: str, code_first: bool) -> tuple[str, str, int] | None:
-    """五笔是 `词<TAB>编码<TAB>权重[...]`，快捷短语是 `编码<TAB>词<TAB>权重`。无效行返回 None（计入跳过），和 Python 时代的导入器一样。"""
-    comment = line.lstrip() if code_first else line
-    if not line or comment.startswith("#"):
+def _parse_code_line(line: str) -> tuple[str, str, int] | None:
+    """五笔是 `词<TAB>编码<TAB>权重[...]`。无效行返回 None（计入跳过），和 Python 时代的导入器一样。"""
+    if not line or line.startswith("#"):
         return None
     columns = line.split("\t")
-    if code_first:
-        if len(columns) != 3:
-            return None
-        key, value, weight = columns
-    else:
-        if len(columns) < 3:
-            return None
-        value, key, weight = columns[0], columns[1], columns[2]
+    if len(columns) < 3:
+        return None
+    value, key, weight = columns[0], columns[1], columns[2]
     key = key.strip().lower()
     if not value or not textutil.is_ascii_alpha(key):
         return None
@@ -275,7 +269,7 @@ def build_wubi86(connection: sqlite3.Connection, paths: list[Path]) -> tuple[int
         nonlocal outside
         for path in paths:
             for line in textutil.universal_lines(textutil.without_bom(textutil.read(path))):
-                row = _parse_code_line(line, code_first=False)
+                row = _parse_code_line(line)
                 if row is not None and _outside_basic_cjk(row[1]):
                     outside += 1
                     continue
@@ -285,16 +279,9 @@ def build_wubi86(connection: sqlite3.Connection, paths: list[Path]) -> tuple[int
     return imported, skipped, outside
 
 
-def build_quick_phrases(connection: sqlite3.Connection, path: Path) -> tuple[int, int]:
-    lines = textutil.universal_lines(textutil.without_bom(textutil.read(path)))
-    counts = _write_code_table(connection, "quick_parases", CREATE_QUICK_PHRASES, QUICK_PHRASE_INDEXES,
-                               (_parse_code_line(line, code_first=True) for line in lines))
-    rows, distinct = connection.execute(
-        'SELECT (SELECT COUNT(*) FROM quick_parases), (SELECT COUNT(*) FROM (SELECT 1 FROM quick_parases GROUP BY "key", "value"))'
-    ).fetchone()
-    if rows == 0 or rows != distinct:
-        raise ValueError(f"quick_parases: unexpected row counts: rows={rows}, distinct_entries={distinct}")
-    return counts
+def build_quick_phrases(connection: sqlite3.Connection) -> None:
+    """出厂不带任何快捷短语，只建空表：K 模式和设置页的用户快捷短语都写在这张表里，安装回放也往这里写。"""
+    _write_code_table(connection, "quick_parases", CREATE_QUICK_PHRASES, QUICK_PHRASE_INDEXES, ())
 
 
 # ---- 日文直出候选 ----

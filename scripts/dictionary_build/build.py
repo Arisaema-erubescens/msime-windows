@@ -68,8 +68,11 @@ def build_msime(source: inputs.Inputs, path: Path, stage: Stages) -> None:
             return f"{imported} rows imported, {skipped} skipped, {outside} outside the basic CJK set left out"
 
         stage("wubi", wubi)
-        stage("quick-phrases", lambda: "{} rows imported, {} blank, comment or invalid lines".format(
-            *pinyin_db.build_quick_phrases(connection, source.resource("mix/quick_phrases.txt"))))
+        def quick_phrases():
+            pinyin_db.build_quick_phrases(connection)
+            return "empty table, no built-in phrases"
+
+        stage("quick-phrases", quick_phrases)
         stage("japanese-lexicon", lambda: f"{pinyin_db.build_japanese_lexicon(connection, source.jp_sela)} entries")
         textutil.integrity_check(connection)
         with connection:
@@ -197,9 +200,14 @@ def check_outputs(directory: Path) -> None:
     # 连接要显式关掉，否则 Windows 上临时目录删不掉。
     with closing(sqlite3.connect(f"file:{directory / 'msime.db'}?mode=ro", uri=True)) as msime:
         tables = {row[0] for row in msime.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        for table in ("wubi86", "japanese_lexicon", "quick_parases", "tbl_1_a", "tbl_2_n", "tbl_others_s"):
+        for table in ("wubi86", "japanese_lexicon", "tbl_1_a", "tbl_2_n", "tbl_others_s"):
             if table not in tables or not msime.execute(f'SELECT 1 FROM "{table}" LIMIT 1').fetchone():
                 raise ValueError(f"msime.db 缺少表或表为空：{table}")
+        # 快捷短语表必须在（用户快捷短语写在这里），但出厂必须是空的。
+        if "quick_parases" not in tables:
+            raise ValueError("msime.db 缺少表：quick_parases")
+        if msime.execute('SELECT 1 FROM "quick_parases" LIMIT 1').fetchone():
+            raise ValueError("msime.db 的 quick_parases 不应带内置快捷短语")
     with closing(sqlite3.connect(f"file:{directory / 'english.db'}?mode=ro", uri=True)) as english:
         columns = list(english.execute("PRAGMA table_info(english_words)"))
     if "weight" not in {c[1] for c in columns} or [c[1] for c in columns if c[5] > 0] != ["word", "display"]:

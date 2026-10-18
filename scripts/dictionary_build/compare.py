@@ -84,7 +84,8 @@ def compare(built: Path, tag: str, cache: Path, checkout_commit: str, msime_comm
     with closing(sqlite3.connect(f"file:{release / 'msime-pinyin.db'}?mode=ro", uri=True)) as pinyin:
         quanpin = [row[0] for row in pinyin.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'tbl#_%' ESCAPE '#' ORDER BY name")]
     checked = _compare_tables(built / "msime.db", release / "msime-pinyin.db",
-                              [(table, "rowid") for table in quanpin] + [("quick_parases", "rowid")], problems)
+                              [(table, "rowid") for table in quanpin], problems)
+    # quick_parases 不比：本地构建有意不带 Release 里的内置快捷短语。
     checked += _compare_tables(built / "msime.db", release / "msime-wubi.db", [("wubi86", "rowid")], problems)
     checked += _compare_tables(built / "english.db", release / "msime-english.db",
                                [("english_words", "word, display"), ("en_zh_glosses", "english"),
