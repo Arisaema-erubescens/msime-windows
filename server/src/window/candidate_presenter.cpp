@@ -71,17 +71,20 @@ int AlignHostPixels(int value)
 
 // Recompute half-screen DIP limits against `scale` when it differs from the
 // monitor-derived scale, so clamping and window sizing stay on one scale.
+// 横排强制单行时宽度上限放开到整个屏幕宽度，横排列表只在超出屏幕时才换行。
 HalfScreenDipLimits ApplyScaleToHalfScreenLimits(POINT pt, FLOAT scale)
 {
     HalfScreenDipLimits limits = QueryHalfScreenDipLimitsForPoint(pt);
+    const double widthFraction =
+        GetConfiguredCandidateWindowSingleLine() && GetConfiguredCandidateWindowLayout() == "horizontal" ? 1.0 : 0.5;
+    const double monitorWidthPx = static_cast<double>((std::max)(1, limits.monitor.right - limits.monitor.left));
     if (scale > 0.0f)
     {
-        const double monitorWidthPx = static_cast<double>((std::max)(1, limits.monitor.right - limits.monitor.left));
         const double monitorHeightPx = static_cast<double>((std::max)(1, limits.monitor.bottom - limits.monitor.top));
         limits.scale = scale;
-        limits.maxWidthDip = (monitorWidthPx * 0.5) / static_cast<double>(scale);
         limits.maxHeightDip = (monitorHeightPx * 0.5) / static_cast<double>(scale);
     }
+    limits.maxWidthDip = (monitorWidthPx * widthFraction) / static_cast<double>(limits.scale);
     return limits;
 }
 

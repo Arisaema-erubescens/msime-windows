@@ -246,6 +246,7 @@ extern std::string g_punctuation_lock;
 extern std::string g_candidate_window_layout;
 extern bool g_candidate_window_follow_cursor;
 extern bool g_candidate_window_fit_content;
+extern bool g_candidate_window_single_line;
 extern std::string g_candidate_skin;
 extern std::string g_candidate_window_preedit_style;
 extern bool g_candidate_fixed_badge;

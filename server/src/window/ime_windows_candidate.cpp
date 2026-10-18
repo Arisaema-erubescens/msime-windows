@@ -446,6 +446,7 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
             const std::string previous_layout = GetConfiguredCandidateWindowLayout();
             const std::string previous_candidate_skin = GetConfiguredCandidateSkin();
             const bool previous_fit_content = GetConfiguredCandidateWindowFitContent();
+            const bool previous_single_line = GetConfiguredCandidateWindowSingleLine();
             const bool previous_floating_toolbar = GetConfiguredFloatingToolbarEnabled();
             const bool previous_caret_state_indicator = GetConfiguredCaretStateIndicatorEnabled();
             const FloatingToolbarItemsConfig previous_floating_toolbar_items = GetConfiguredFloatingToolbarItems();
@@ -527,6 +528,7 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
                 if (::is_global_wnd_cand_shown &&
                     (previous_layout != GetConfiguredCandidateWindowLayout() ||
                      previous_fit_content != GetConfiguredCandidateWindowFitContent() ||
+                     previous_single_line != GetConfiguredCandidateWindowSingleLine() ||
                      previous_candidate_skin != GetConfiguredCandidateSkin() ||
                      previous_theme_mode != GetConfiguredThemeMode() ||
                      previous_theme_cand != GetConfiguredThemeCand() || previous_font != GetConfiguredCandidateFont() ||

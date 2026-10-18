@@ -221,6 +221,21 @@ bool SetConfiguredCandidateWindowFitContent(bool enabled)
     return true;
 }
 
+bool GetConfiguredCandidateWindowSingleLine()
+{
+    return g_candidate_window_single_line;
+}
+
+bool SetConfiguredCandidateWindowSingleLine(bool enabled)
+{
+    if (!WriteConfiguredValue("appearance", "candidate_window_single_line", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_candidate_window_single_line = enabled;
+    return true;
+}
+
 const std::string &GetConfiguredCandidateSkin()
 {
     return g_candidate_skin;

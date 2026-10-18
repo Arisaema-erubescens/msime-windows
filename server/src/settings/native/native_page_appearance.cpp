@@ -678,9 +678,13 @@ VisualPtr BuildAppearancePage(PageContext &context)
     }
 
     // 候选项排列方式
-    page.AddSection(MakeRow(L"候选项排列方式", L"",
-                            BindDropdown(context, "appearance.candidate_window_layout",
-                                         Options({{"horizontal", L"横向"}, {"vertical", L"纵向"}}))));
+    page.AddSection(MakeRows({
+        MakeRow(L"候选项排列方式", L"",
+                BindDropdown(context, "appearance.candidate_window_layout",
+                             Options({{"horizontal", L"横向"}, {"vertical", L"纵向"}}))),
+        MakeRow(L"横向候选强制单行", L"仅横向排列时生效：候选窗口最宽可到当前屏幕宽度，超出屏幕才换行",
+                BindToggle(context, "appearance.candidate_window_single_line")),
+    }));
 
     // 行内预编辑
     page.AddSection(MakeRows({
