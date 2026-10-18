@@ -866,8 +866,8 @@ json::object MutateChinese(const json::object &request)
             (void)user_dictionary::record_user_insert(user_dictionary::default_user_db_path(),
                                                       user_dictionary::DictionaryKind::Pinyin, key, word, weight);
         else
-            (void)user_dictionary::record_upsert(user_dictionary::default_user_db_path(),
-                                                 user_dictionary::DictionaryKind::Pinyin, key, word, weight);
+            (void)user_dictionary::record_weight_edit(user_dictionary::default_user_db_path(),
+                                                      user_dictionary::DictionaryKind::Pinyin, key, word, weight);
         NotifyImeServerClearDictCache();
     }
     return Result(ok, ok ? "词条修改成功" : "修改失败：" + std::string(sqlite3_errmsg(db.get())));
@@ -1071,9 +1071,9 @@ json::object HandleEnglish(const json::object &request)
                                                           user_dictionary::DictionaryKind::English, word, display,
                                                           weight, display);
             else
-                (void)user_dictionary::record_upsert(user_dictionary::default_user_db_path(),
-                                                     user_dictionary::DictionaryKind::English, word, display, weight,
-                                                     display);
+                (void)user_dictionary::record_weight_edit(user_dictionary::default_user_db_path(),
+                                                          user_dictionary::DictionaryKind::English, word, display,
+                                                          weight, display);
         }
     }
     const char *label = action == "create" ? "新增" : action == "update" ? "修改" : "删除";
@@ -1239,8 +1239,8 @@ json::object HandleWubi(const json::object &request)
                 (void)user_dictionary::record_user_insert(user_dictionary::default_user_db_path(),
                                                           user_dictionary::DictionaryKind::Wubi, code, word, weight);
             else
-                (void)user_dictionary::record_upsert(user_dictionary::default_user_db_path(),
-                                                     user_dictionary::DictionaryKind::Wubi, code, word, weight);
+                (void)user_dictionary::record_weight_edit(user_dictionary::default_user_db_path(),
+                                                          user_dictionary::DictionaryKind::Wubi, code, word, weight);
         }
     }
     const char *label = action == "create" ? "新增" : action == "update" ? "修改" : "删除";
@@ -1485,9 +1485,9 @@ json::object HandleQuickPhrase(const json::object &request)
                                                           user_dictionary::DictionaryKind::QuickPhrase, code, phrase,
                                                           weight);
             else
-                (void)user_dictionary::record_upsert(user_dictionary::default_user_db_path(),
-                                                     user_dictionary::DictionaryKind::QuickPhrase, code, phrase,
-                                                     weight);
+                (void)user_dictionary::record_weight_edit(user_dictionary::default_user_db_path(),
+                                                          user_dictionary::DictionaryKind::QuickPhrase, code, phrase,
+                                                          weight);
         }
     }
     const char *label = action == "create" ? "新增" : action == "update" ? "修改" : "删除";

@@ -39,6 +39,8 @@ int run(int argc, wchar_t **argv)
         return 1;
     }
     std::cout << "Applied " << result.applied << " user dictionary operations.\n";
+    if (result.rebased > 0)
+        std::cout << "Kept the new dictionary weight for " << result.rebased << " learned entries.\n";
     return 0;
 }
 } // namespace

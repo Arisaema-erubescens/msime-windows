@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -167,6 +168,130 @@ TEST_CASE(UserDictionaryReplayIsIdempotentAcrossAllSettingsDictionaries)
     }
 
     std::filesystem::remove_all(directory);
+}
+
+// The journal stores the absolute weights a learning write produced against the shipped
+// dictionary of that time. After an upgrade that rescaled the dictionary (msime-dictionary
+// aligned its pinyin weights with rime-wanxiang: 了/le went from 3.5 million to 52 million),
+// replaying 了 at its old learned 6.5 million put 来 and 里 ahead of it on "l". A changed
+// dictionary now keeps the new shipped weight for learned rows that sit below it.
+TEST_CASE(UserDictionaryReplayKeepsNewShippedWeightsWhenTheDictionaryChanged)
+{
+    const auto directory =
+        std::filesystem::temp_directory_path() / ("msime-replay-rebase-" + std::to_string(GetCurrentProcessId()));
+    std::error_code ec;
+    std::filesystem::remove_all(directory, ec);
+    std::filesystem::create_directories(directory);
+    const auto user_path = directory / "msime_user.db";
+    const auto main_path = directory / "msime.db";
+    const auto english_path = directory / "english.db";
+    const auto manifest_path = directory / "dictionary-manifest.json";
+
+    const auto install_dictionary = [&](const char *sha256) {
+        std::filesystem::remove(main_path, ec);
+        {
+            TestDatabase main_db(main_path);
+            main_db.exec("CREATE TABLE tbl_1_l(key TEXT,jp TEXT,value TEXT,weight INTEGER);"
+                         "CREATE TABLE tbl_2_z(key TEXT,jp TEXT,value TEXT,weight INTEGER);"
+                         "CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);"
+                         "INSERT INTO tbl_1_l VALUES('le','l','了',52009647);"
+                         "INSERT INTO tbl_1_l VALUES('le','l','乐',6501204);"
+                         "INSERT INTO tbl_1_l VALUES('lai','l','来',9077734);"
+                         "INSERT INTO tbl_2_z VALUES('zhi''dao','zd','知道',1807266);"
+                         "INSERT INTO tbl_2_z VALUES('zhi''dao','zd','直到',364449);"
+                         "INSERT INTO wubi86 VALUES('bnhn','了',900);");
+        }
+        if (sha256 == nullptr)
+        {
+            std::filesystem::remove(manifest_path, ec);
+            return;
+        }
+        std::ofstream manifest(manifest_path, std::ios::binary | std::ios::trunc);
+        manifest << "{\"files\":{\"msime.db\":{\"sha256\":\"" << sha256 << "\"}}}";
+    };
+    {
+        TestDatabase english_db(english_path);
+        english_db.exec("CREATE TABLE english_words(word TEXT PRIMARY KEY,display TEXT);");
+    }
+
+    // Learned on the previous dictionary: 了 and 乐 by the old staircase, 直到 promoted past 知道,
+    // 了 in wubi. 来 was added by hand and 知道 lowered by hand in settings; both are replayed as
+    // written whatever the dictionary says.
+    REQUIRE(user_dictionary::record_upsert(test::Utf8(user_path), user_dictionary::DictionaryKind::Pinyin, "le", "了",
+                                           6501704));
+    REQUIRE(user_dictionary::record_upsert(test::Utf8(user_path), user_dictionary::DictionaryKind::Pinyin, "le", "乐",
+                                           6501204));
+    REQUIRE(user_dictionary::record_upsert(test::Utf8(user_path), user_dictionary::DictionaryKind::Pinyin, "zhi'dao",
+                                           "直到", 5052903));
+    REQUIRE(user_dictionary::record_upsert(test::Utf8(user_path), user_dictionary::DictionaryKind::Wubi, "bnhn", "了",
+                                           100));
+    REQUIRE(user_dictionary::record_user_insert(test::Utf8(user_path), user_dictionary::DictionaryKind::Pinyin, "lai",
+                                                "来", 10000));
+    REQUIRE(user_dictionary::record_weight_edit(test::Utf8(user_path), user_dictionary::DictionaryKind::Pinyin,
+                                                "zhi'dao", "知道", 1));
+
+    // No manifest: the shipped dictionary cannot be identified, so every weight is replayed as written.
+    install_dictionary(nullptr);
+    auto replay = user_dictionary::replay(test::Utf8(user_path), test::Utf8(main_path), test::Utf8(english_path));
+    REQUIRE(replay.error.empty());
+    REQUIRE_EQ(replay.rebased, 0);
+    {
+        TestDatabase main_db(main_path);
+        REQUIRE_EQ(main_db.scalar_int64("SELECT weight FROM tbl_1_l WHERE value='了'"), 6501704);
+    }
+
+    // A dictionary the journal has not been replayed onto yet.
+    install_dictionary("a");
+    replay = user_dictionary::replay(test::Utf8(user_path), test::Utf8(main_path), test::Utf8(english_path));
+    REQUIRE(replay.error.empty());
+    REQUIRE_EQ(replay.failed, 0);
+    REQUIRE_EQ(replay.applied, 6);
+    REQUIRE_EQ(replay.rebased, 2);
+    {
+        TestDatabase main_db(main_path);
+        REQUIRE_EQ(main_db.scalar_int64("SELECT weight FROM tbl_1_l WHERE value='了'"), 52009647);
+        REQUIRE_EQ(main_db.scalar_int64("SELECT weight FROM tbl_1_l WHERE value='乐'"), 6501204);
+        REQUIRE_EQ(main_db.scalar_int64("SELECT weight FROM tbl_2_z WHERE value='直到'"), 5052903);
+        REQUIRE_EQ(main_db.scalar_int64("SELECT weight FROM tbl_2_z WHERE value='知道'"), 1);
+        REQUIRE_EQ(main_db.scalar_int64("SELECT weight FROM wubi86 WHERE value='了'"), 900);
+        REQUIRE_EQ(main_db.scalar_int64("SELECT weight FROM tbl_1_l WHERE value='来'"), 10000);
+        TestDatabase journal(user_path);
+        REQUIRE_EQ(journal.scalar_int64("SELECT weight FROM user_dictionary_operations WHERE value='了' AND "
+                                        "dictionary='pinyin'"),
+                   52009647);
+        REQUIRE_EQ(journal.scalar_int64("SELECT weight FROM user_dictionary_operations WHERE value='了' AND "
+                                        "dictionary='wubi'"),
+                   900);
+        REQUIRE_EQ(journal.scalar_int64("SELECT weight FROM user_dictionary_operations WHERE value='直到'"), 5052903);
+        REQUIRE_EQ(journal.scalar_int("SELECT COUNT(*) FROM dictionary_state WHERE "
+                                      "name='replayed_dictionary_sha256' AND value='a'"),
+                   1);
+    }
+
+    // Learning on that dictionary, then reinstalling the same dictionary: weights below the
+    // shipped ones are the staircase room made for a promotion and must replay exactly.
+    REQUIRE(user_dictionary::record_upsert(test::Utf8(user_path), user_dictionary::DictionaryKind::Pinyin, "le", "乐",
+                                           5000000));
+    install_dictionary("a");
+    replay = user_dictionary::replay(test::Utf8(user_path), test::Utf8(main_path), test::Utf8(english_path));
+    REQUIRE(replay.error.empty());
+    REQUIRE_EQ(replay.rebased, 0);
+    {
+        TestDatabase main_db(main_path);
+        REQUIRE_EQ(main_db.scalar_int64("SELECT weight FROM tbl_1_l WHERE value='了'"), 52009647);
+        REQUIRE_EQ(main_db.scalar_int64("SELECT weight FROM tbl_1_l WHERE value='乐'"), 5000000);
+        REQUIRE_EQ(main_db.scalar_int64("SELECT weight FROM tbl_2_z WHERE value='直到'"), 5052903);
+    }
+
+    // A learning write over a hand-set weight makes the row learned again.
+    REQUIRE(user_dictionary::record_upsert(test::Utf8(user_path), user_dictionary::DictionaryKind::Pinyin, "zhi'dao",
+                                           "知道", 2));
+    {
+        TestDatabase journal(user_path);
+        REQUIRE_EQ(journal.scalar_int("SELECT weight_edited FROM user_dictionary_operations WHERE value='知道'"), 0);
+    }
+
+    std::filesystem::remove_all(directory, ec);
 }
 
 TEST_CASE(UserDictionaryTracksOnlyExplicitUserInsertionsForExport)
