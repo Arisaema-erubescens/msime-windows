@@ -326,18 +326,22 @@ void ApplyCandidateTranslations(std::vector<EnglishIme::TranslationResult> resul
     for (auto &result : results)
     {
         std::string gloss = std::move(result.gloss);
+        // Merged results come from the cloud; an unmerged result carries the english.db
+        // gloss unless it was empty and the cloud cache had to fill in.
+        const bool from_dictionary = !merge && !gloss.empty();
         if (gloss.empty() && !merge)
             gloss = CloudTranslation::LookupCache(result.key, result.direction);
         const std::string identity = TranslationIdentity({result.key, result.direction});
         if (!gloss.empty())
         {
             auto existing = g_candidate_translation_glosses.find(identity);
-            if (existing != g_candidate_translation_glosses.end() && existing->second == gloss)
+            if (existing != g_candidate_translation_glosses.end() && existing->second.text == gloss &&
+                existing->second.from_dictionary == from_dictionary)
                 continue;
             if (g_candidate_translation_glosses.size() >= kMaxCandidateTranslationGlosses &&
                 existing == g_candidate_translation_glosses.end())
                 g_candidate_translation_glosses.clear();
-            g_candidate_translation_glosses[identity] = std::move(gloss);
+            g_candidate_translation_glosses[identity] = {std::move(gloss), from_dictionary};
             glosses_changed = true;
         }
         else if (!merge)

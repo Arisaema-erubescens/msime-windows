@@ -74,7 +74,7 @@ std::atomic<std::uint64_t> g_candidate_ui_interaction_generation{0};
 
 namespace event_listener_detail
 {
-std::unordered_map<std::string, std::string> g_candidate_translation_glosses;
+std::unordered_map<std::string, CandidateTranslationGloss> g_candidate_translation_glosses;
 std::string g_candidate_translation_signature;
 
 // 副候选框：Ctrl+Enter 在高亮候选有多条译义时，把候选框整个换成那几条译义，让空格/

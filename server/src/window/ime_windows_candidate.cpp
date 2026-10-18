@@ -442,6 +442,7 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
             const std::string previous_shuangpin_schema = GetConfiguredShuangpinSchema();
             const std::string previous_character_set = GetConfiguredCharacterSet();
             const bool previous_translation_show_pos = GetConfiguredCandidateTranslationShowPos();
+            const bool previous_translation_single_sense = GetConfiguredCandidateTranslationSingleSense();
             const std::string previous_layout = GetConfiguredCandidateWindowLayout();
             const std::string previous_candidate_skin = GetConfiguredCandidateSkin();
             const bool previous_fit_content = GetConfiguredCandidateWindowFitContent();
@@ -506,7 +507,8 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
                     UpdateFtbCharacterSetState();
                 }
                 if (previous_character_set != GetConfiguredCharacterSet() ||
-                    previous_translation_show_pos != GetConfiguredCandidateTranslationShowPos())
+                    previous_translation_show_pos != GetConfiguredCandidateTranslationShowPos() ||
+                    previous_translation_single_sense != GetConfiguredCandidateTranslationSingleSense())
                 {
                     FanyNamedPipe::EnqueueRefreshCandidatePageTask();
                 }

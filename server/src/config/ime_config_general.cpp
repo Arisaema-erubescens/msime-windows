@@ -105,6 +105,19 @@ bool SetConfiguredCandidateTranslationShowPos(bool show)
     return true;
 }
 
+bool GetConfiguredCandidateTranslationSingleSense()
+{
+    return g_candidate_translation_single_sense.load(std::memory_order_relaxed);
+}
+
+bool SetConfiguredCandidateTranslationSingleSense(bool single)
+{
+    if (!WriteConfiguredValue("general", "candidate_translation_single_sense", single ? "true" : "false"))
+        return false;
+    g_candidate_translation_single_sense.store(single, std::memory_order_relaxed);
+    return true;
+}
+
 int GetConfiguredEnglishMixedInputMinChars()
 {
     return g_english_mixed_input_min_chars;

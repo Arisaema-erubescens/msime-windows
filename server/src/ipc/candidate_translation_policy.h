@@ -104,16 +104,43 @@ inline std::vector<TranslationSegment> SegmentTranslationGloss(std::string_view 
 
 // Display-only formatting. Keep the original gloss for caching and Ctrl+Enter;
 // unlike splitting commit candidates, hiding labels preserves every separator.
-inline std::string FormatTranslationGlossForDisplay(std::string_view gloss, bool show_pos)
+// `single_sense` keeps only the first sense, dropping the first separator and
+// everything after it. `first_synonym` additionally cuts that sense at its first
+// ", " outside parentheses: english.db lists synonyms that way ("v. teach,
+// instruct"), but a cloud sentence's commas are punctuation, so callers only set
+// it for dictionary glosses.
+inline std::string FormatTranslationGlossForDisplay(std::string_view gloss, bool show_pos, bool single_sense = false,
+                                                    bool first_synonym = false)
 {
-    if (show_pos)
+    if (first_synonym)
+    {
+        int depth = 0;
+        for (size_t i = 0; i < gloss.size(); ++i)
+        {
+            const char ch = gloss[i];
+            if (ch == '(')
+                ++depth;
+            else if (ch == ')' && depth > 0)
+                --depth;
+            else if (ch == ';')
+                break;
+            else if (ch == ',' && depth == 0)
+            {
+                gloss = gloss.substr(0, i);
+                break;
+            }
+        }
+    }
+    if (show_pos && !single_sense)
         return std::string(gloss);
 
     std::string displayed;
     bool after_label = false;
     for (const auto &segment : SegmentTranslationGloss(gloss))
     {
-        if (segment.kind == TranslationSegmentKind::PartOfSpeech)
+        if (single_sense && segment.kind == TranslationSegmentKind::Separator)
+            break;
+        if (!show_pos && segment.kind == TranslationSegmentKind::PartOfSpeech)
         {
             after_label = true;
             continue;
@@ -124,6 +151,8 @@ inline std::string FormatTranslationGlossForDisplay(std::string_view gloss, bool
         displayed += text;
         after_label = false;
     }
+    if (single_sense)
+        displayed.erase((std::min)(displayed.find_last_not_of(" \t\r\n") + 1, displayed.size()));
     return displayed;
 }
 

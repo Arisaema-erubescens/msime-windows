@@ -150,6 +150,35 @@ TEST_CASE(shipped_translation_pos_defaults_and_upgrade_preserve_user_choice)
     }
 }
 
+TEST_CASE(shipped_translation_single_sense_defaults_and_upgrade_preserve_user_choice)
+{
+    std::ifstream input(MSIME_DEFAULT_CONFIG_PATH, std::ios::binary);
+    REQUIRE(static_cast<bool>(input));
+    const std::string installed((std::istreambuf_iterator<char>(input)), {});
+    const auto working_path =
+        std::filesystem::path(MSIME_DEFAULT_CONFIG_PATH).parent_path().parent_path().parent_path() /
+        "server/assets/config/config.toml";
+    std::ifstream development(working_path, std::ios::binary);
+    REQUIRE(static_cast<bool>(development));
+    const std::string working((std::istreambuf_iterator<char>(development)), {});
+    REQUIRE(!toml::parse(installed)["general"]["candidate_translation_single_sense"].value_or(true));
+    REQUIRE(!toml::parse(working)["general"]["candidate_translation_single_sense"].value_or(true));
+
+    const std::string old_template = "[general]\ncandidate_translations = false\n";
+    const auto upgraded = toml::parse(MergeConfigIntoTemplate(installed, old_template, old_template));
+    REQUIRE(!upgraded["general"]["candidate_translation_single_sense"].value_or(true));
+    for (const bool single : {false, true})
+    {
+        const std::string configured =
+            old_template + "candidate_translation_single_sense = " + (single ? "true\n" : "false\n");
+        for (const auto &baseline : {std::string(), old_template, installed})
+        {
+            const auto preserved = toml::parse(MergeConfigIntoTemplate(installed, configured, baseline));
+            REQUIRE_EQ(preserved["general"]["candidate_translation_single_sense"].value_or(!single), single);
+        }
+    }
+}
+
 TEST_CASE(shipped_english_first_page_count_defaults_and_upgrade_preserve_user_choice)
 {
     std::ifstream input(MSIME_DEFAULT_CONFIG_PATH, std::ios::binary);

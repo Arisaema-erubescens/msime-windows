@@ -1275,6 +1275,7 @@ struct InputPage
     std::shared_ptr<OpacityBox> translationOptions;
     std::vector<std::shared_ptr<Dimmable>> translationInputs;
     std::shared_ptr<Dimmable> showPosBlock;
+    std::shared_ptr<Dimmable> singleSenseBlock;
     std::map<std::string, std::shared_ptr<Hideable>> providerFields;
     std::map<std::string, std::shared_ptr<ApiField>> fields;
     std::shared_ptr<ApiField> aiSummary;
@@ -1379,13 +1380,14 @@ struct InputPage
     }
 
     // setCandidateTranslationOptionsDisabled: the block greys out, its rows and fields stop
-    // taking input (the test button keeps working), 显示词性 turns aria-disabled.
+    // taking input (the test button keeps working), 显示词性 and 只显示单条释义 turn aria-disabled.
     void SetTranslationsEnabled(bool enabled)
     {
         translationOptions->SetDimmed(!enabled);
         for (auto &dim : translationInputs)
             dim->SetDisabled(!enabled);
         showPosBlock->SetDisabled(!enabled);
+        singleSenseBlock->SetDisabled(!enabled);
     }
 
     void SyncMode(const std::string &mode)
@@ -1727,6 +1729,8 @@ VisualPtr BuildInputPage(PageContext &context)
         auto master = std::make_shared<ToggleSwitch>(false);
         auto showPos = BindToggle(context, "general.candidate_translation_show_pos");
         s->showPosBlock = std::make_shared<Dimmable>(showPos, 1.0f);
+        auto singleSense = BindToggle(context, "general.candidate_translation_single_sense");
+        s->singleSenseBlock = std::make_shared<Dimmable>(singleSense, 1.0f);
         Dropdown::Options language;
         language.minWidth = 140.0f;
         language.menuMinWidth = 140.0f;
@@ -1819,6 +1823,9 @@ VisualPtr BuildInputPage(PageContext &context)
         auto options = Col(
             {std::make_shared<Divider>(Divider::Kind::Option),
              blockInput(LanguageRow(L"显示词性", L"显示译文中的 n.、v. 等词性标记，关闭后仅显示释义", s->showPosBlock)),
+             std::make_shared<Divider>(Divider::Kind::Option),
+             blockInput(LanguageRow(L"只显示单条释义", L"每个候选只显示第一条译文释义；Ctrl+Enter 仍可选择全部释义上屏",
+                                    s->singleSenseBlock)),
              std::make_shared<Divider>(Divider::Kind::Option),
              blockInput(LanguageRow(L"在线翻译服务",
                                     L"可使用腾讯云、小牛翻译、自己部署的 DeepLX 兼容接口，或复用 AI 辅助的配置",

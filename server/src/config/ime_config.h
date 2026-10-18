@@ -470,6 +470,8 @@ bool GetConfiguredCandidateTranslationsEnabled();
 bool SetConfiguredCandidateTranslationsEnabled(bool enabled);
 bool GetConfiguredCandidateTranslationShowPos();
 bool SetConfiguredCandidateTranslationShowPos(bool show);
+bool GetConfiguredCandidateTranslationSingleSense();
+bool SetConfiguredCandidateTranslationSingleSense(bool single);
 int GetConfiguredEnglishMixedInputMinChars();
 bool SetConfiguredEnglishMixedInputMinChars(int min_chars);
 int GetConfiguredEnglishMixedInputFirstPageCount();

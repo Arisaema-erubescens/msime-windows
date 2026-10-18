@@ -138,6 +138,7 @@ bool g_floating_toolbar_shadow = true;
 bool g_english_candidates_enabled = false;
 bool g_candidate_translations_enabled = false;
 std::atomic_bool g_candidate_translation_show_pos{true};
+std::atomic_bool g_candidate_translation_single_sense{false};
 int g_english_mixed_input_min_chars = kEnglishMixedInputMinCharsDefault;
 int g_english_mixed_input_first_page_count = kEnglishMixedInputFirstPageCountDefault;
 bool g_cloud_candidates_enabled = true;
@@ -585,6 +586,8 @@ bool LoadImeConfig()
         g_candidate_translations_enabled = tbl["general"]["candidate_translations"].value_or(false);
         g_candidate_translation_show_pos.store(tbl["general"]["candidate_translation_show_pos"].value_or(true),
                                                std::memory_order_relaxed);
+        g_candidate_translation_single_sense.store(tbl["general"]["candidate_translation_single_sense"].value_or(false),
+                                                   std::memory_order_relaxed);
         {
             const int min_chars =
                 tbl["general"]["cn_en_mixed_input_min_chars"].value_or(kEnglishMixedInputMinCharsDefault);

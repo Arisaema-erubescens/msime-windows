@@ -57,7 +57,15 @@ extern bool g_english_input_mode;
 // once the lookup answered. Bounded like the cloud cache, and dropped whenever
 // the provider set changes (the target language is already in the identity).
 constexpr size_t kMaxCandidateTranslationGlosses = 2048;
-extern std::unordered_map<std::string, std::string> g_candidate_translation_glosses;
+struct CandidateTranslationGloss
+{
+    std::string text;
+    // english.db glosses use ", " between synonyms of one sense; a cloud gloss is
+    // a sentence whose commas are punctuation, so only dictionary glosses may be
+    // trimmed at them.
+    bool from_dictionary = false;
+};
+extern std::unordered_map<std::string, CandidateTranslationGloss> g_candidate_translation_glosses;
 extern std::string g_candidate_translation_signature;
 extern bool g_translation_candidates_active;
 // 日期页：选中混输里的「📅日期」入口后，候选框换成整组日期时间格式。和译文页一样不动输入串，

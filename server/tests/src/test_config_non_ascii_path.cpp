@@ -242,6 +242,46 @@ TEST_CASE(candidate_translation_show_pos_defaults_and_round_trips)
     fs::remove_all(unique_root, ec);
 }
 
+TEST_CASE(candidate_translation_single_sense_defaults_and_round_trips)
+{
+    namespace fs = std::filesystem;
+    const fs::path unique_root = MakeProfileRoot() / L"translation-single-sense";
+    const fs::path data_dir = unique_root / L"metasequoiaime";
+    const fs::path config_path = data_dir / L"config.toml";
+    std::error_code ec;
+    fs::remove_all(unique_root, ec);
+    fs::create_directories(data_dir, ec);
+    REQUIRE(!ec);
+
+    {
+        ScopedConfigLocation location(unique_root);
+        WriteText(config_path, "[general]\ncandidate_translations = true\n");
+        InitImeConfig();
+        REQUIRE(!GetConfiguredCandidateTranslationSingleSense());
+
+        for (const bool single : {true, false, true})
+        {
+            REQUIRE(SetConfiguredCandidateTranslationSingleSense(single));
+            REQUIRE_EQ(GetConfiguredCandidateTranslationSingleSense(), single);
+            const auto stored = toml::parse(ReadText(config_path));
+            REQUIRE_EQ(stored["general"]["candidate_translation_single_sense"].value_or(!single), single);
+            InitImeConfig();
+            REQUIRE_EQ(GetConfiguredCandidateTranslationSingleSense(), single);
+        }
+
+        // toml++ reads a non-zero integer as true, so only non-numeric junk falls back to the default.
+        for (const std::string value : {"\"true\"", "[]", "{}"})
+        {
+            REQUIRE(SetConfiguredCandidateTranslationSingleSense(true));
+            WriteText(config_path, "[general]\ncandidate_translation_single_sense = " + value + "\n");
+            InitImeConfig();
+            REQUIRE(!GetConfiguredCandidateTranslationSingleSense());
+        }
+    }
+
+    fs::remove_all(unique_root, ec);
+}
+
 TEST_CASE(english_first_page_count_defaults_validates_and_round_trips)
 {
     namespace fs = std::filesystem;
