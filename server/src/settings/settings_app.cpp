@@ -203,6 +203,7 @@ nlohmann::json CanvasSkinPreviewJson(const CandidateSkinCatalog::Package &skin)
     {
         const CandidateSkinLayers::NineSlice nine = CandidateSkinLayers::ResolveNineSlice(*skin.borderImage);
         json["panel"] = {{"image", skin.borderImage->source},
+                         {"lightImage", CandidateSkinCatalog::BorderImageSource(*skin.borderImage, true)},
                          {"slice", edges(nine.slice)},
                          {"width", edges(nine.width)},
                          {"fill", nine.fill}};

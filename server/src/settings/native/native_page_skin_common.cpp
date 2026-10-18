@@ -770,7 +770,9 @@ CandidateLook ResolveCandidateLook(const SettingsModel &model, const std::string
         {
             k.containerPad = edges(canvas, "padding");
             const Json *panel = canvas->contains("panel") ? &(*canvas)["panel"] : nullptr;
-            const std::string image = panel && panel->is_object() ? panel->value("image", std::string()) : "";
+            std::string image = panel && panel->is_object() ? panel->value("image", std::string()) : "";
+            if (light && !image.empty())
+                image = panel->value("lightImage", image);
             if (!image.empty())
             {
                 k.panelImage = SkinResourcePath(model, skinId, image);
@@ -821,7 +823,8 @@ ToolbarLook ResolveToolbarLook(const SettingsModel &model, const std::string &sk
     ToolbarLook t;
     t.bg = light ? Hex(0xFFFFFF) : Hex(0x1A1A1A);
     t.border = light ? Rgba(0, 0, 0, 0.12f) : Rgba(255, 255, 255, 0.15f);
-    t.handle = Hex(0x8E8CD8);
+    // 拖动条与候选窗的强调色（选中竖条、光标）同色，FloatingToolbarSkin 同一组值。
+    t.handle = Hex(0x6B69D6);
     t.divider = light ? Rgba(0, 0, 0, 0.12f) : Rgba(255, 255, 255, 0.15f);
     t.icon = light ? Hex(0x1A1A1A) : Hex(0xFFFFFF);
     t.shadows = {{8.0f, 10.0f, 24.0f, light ? 0.18f : 0.34f}, {2.0f, 3.0f, 8.0f, light ? 0.10f : 0.22f}};

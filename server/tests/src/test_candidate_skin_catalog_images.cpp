@@ -490,6 +490,60 @@ z_index = -4
     REQUIRE(!CandidateSkinCatalog::IsAnimatableImagePath("a.png/b"));
 }
 
+TEST_CASE(candidate_skin_catalog_border_image_light_source_swaps_the_panel_for_light)
+{
+    const auto root = WriteV2Skin(L"v2-light", "canvas", R"toml(
+[candidate_window.border_image]
+source = "assets/panel.png"
+light_source = "assets/mascot.apng"
+slice_dip = [12]
+)toml");
+    std::string error;
+    const auto package = CandidateSkinCatalog::Load(root, "art", &error);
+    REQUIRE(error.empty());
+    REQUIRE(package.has_value());
+    REQUIRE_EQ(package->borderImage->lightSource, std::string("assets/mascot.apng"));
+    REQUIRE_EQ(CandidateSkinCatalog::BorderImageSource(*package->borderImage, false), std::string("assets/panel.png"));
+    REQUIRE_EQ(CandidateSkinCatalog::BorderImageSource(*package->borderImage, true), std::string("assets/mascot.apng"));
+    RemoveSkin(root);
+
+    // Without light_source both themes draw source.
+    CandidateSkinCatalog::BorderImage shared;
+    shared.source = "assets/panel.png";
+    REQUIRE_EQ(CandidateSkinCatalog::BorderImageSource(shared, true), std::string("assets/panel.png"));
+
+    const std::string head = "[candidate_window.border_image]\nsource = \"assets/panel.png\"\nslice_dip = [4]\n";
+    REQUIRE(V2LoadFails(L"bi-light-jpg", head + "light_source = \"assets/photo.jpg\"\n"));
+    REQUIRE(V2LoadFails(L"bi-light-missing", head + "light_source = \"assets/missing.png\"\n"));
+    REQUIRE(V2LoadFails(L"bi-light-escape", head + "light_source = \"../panel.png\"\n"));
+}
+
+TEST_CASE(candidate_skin_catalog_toolbar_handle_follows_the_accent)
+{
+    const auto root = WriteV2Skin(L"handle-accent", "canvas", std::string(kPanel) + R"toml(
+[candidate.dark]
+accent = "#5eead4"
+
+[candidate.light]
+accent = "#16a37f"
+
+[toolbar.light]
+handle = "#123456"
+)toml");
+    std::string error;
+    const auto package = CandidateSkinCatalog::Load(root, "art", &error);
+    REQUIRE(error.empty());
+    REQUIRE(package.has_value());
+    // Left out: the theme's accent. Written: kept as is.
+    REQUIRE_EQ(package->toolbarDark.handle, std::string("#5eead4"));
+    REQUIRE_EQ(package->toolbarLight.handle, std::string("#123456"));
+    RemoveSkin(root);
+
+    REQUIRE(CandidateSkinCatalog::IsOfficialPackage("green_leaf"));
+    REQUIRE(!CandidateSkinCatalog::IsOfficialPackage("fluent"));
+    REQUIRE(!CandidateSkinCatalog::IsBuiltIn("green_leaf"));
+}
+
 TEST_CASE(candidate_skin_catalog_rejects_invalid_v2_values)
 {
     const std::string panel = kPanel;

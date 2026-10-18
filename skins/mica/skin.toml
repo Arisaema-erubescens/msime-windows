@@ -1,12 +1,12 @@
-# 云母样例：候选卡片背后是系统云母，取样的是桌面壁纸而不是后面的窗口，只透出壁纸的一点色调。
+# 云母：候选卡片背后是系统云母，取样的是桌面壁纸而不是后面的窗口，只透出壁纸的一点色调。
 # 材质参数取 Windows 11 云母的默认值，高亮、描边和菜单按 Fluent 控件配色。
 # 云母需要 Windows 11，更早的系统上按亚克力画（模糊后面的窗口）。
 #
-# 材质各键的含义见 acrylic-demo。系统关闭「透明效果」或不支持时，surface 按不透明画。
+# 材质各键的含义见 acrylic 皮肤。系统关闭「透明效果」或不支持时，surface 按不透明画。
 
 schema_version = 1
-id = "mica-demo"
-name = "Mica Demo"
+id = "mica"
+name = "云母 Mica"
 version = "0.2.0"
 author = "Metasequoia IME contributors"
 description = "候选卡片背后是系统云母：取样桌面壁纸，配 Fluent 风格的高亮与描边。"

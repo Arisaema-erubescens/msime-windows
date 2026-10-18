@@ -37,7 +37,7 @@ show_selected_bar = false
 [toolbar.light]
 background = "#C3D2C7"
 border = "#828ACA39"
-handle = "#BACCDE"
+handle = "#1B3B5C"
 divider = "#828ACA39"
 icon = "#526A82"
 hover = "#0000000D"

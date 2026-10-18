@@ -390,6 +390,17 @@ void CheckForUpdate(PageContext &context, const std::shared_ptr<AboutState> &sta
             ShowUpdateDialog(*ctx, latest, releaseUrl, mirror, manifest);
         });
 }
+
+std::weak_ptr<Button> g_restartButton;
+void CALLBACK RestoreRestartButton(HWND hwnd, UINT, UINT_PTR id, DWORD)
+{
+    KillTimer(hwnd, id);
+    if (auto button = g_restartButton.lock())
+    {
+        button->SetDisabled(false);
+        button->SetText(L"重启");
+    }
+}
 } // namespace
 
 VisualPtr BuildAboutPage(PageContext &context)
@@ -467,6 +478,42 @@ VisualPtr BuildAboutPage(PageContext &context)
     }
     auto linksSection = std::make_shared<PaddedSection>(links, Thickness{24.0f, 0.0f, 24.0f, 0.0f});
     page.AddRaw(linksSection);
+
+    // 输入法进程与设置窗口
+    {
+        Dropdown::Options linger;
+        linger.minWidth = 150.0f;
+        linger.matchToggleWidth = true;
+        HostServices *host = &context.host;
+        auto restart = std::make_shared<Button>(L"重启", ButtonKind::Secondary);
+        g_restartButton = restart;
+        std::weak_ptr<Button> weakRestart = restart;
+        restart->SetOnClick([model, host, weakRestart]() {
+            // The Watchdog owns the relaunch and never answers; hold the button for a moment
+            // so repeated clicks do not queue several exits.
+            auto button = weakRestart.lock();
+            if (!button || button->IsDisabled())
+                return;
+            button->SetDisabled(true);
+            button->SetText(L"重启中…");
+            model->Post("restartServer");
+            SetTimer(host->Hwnd(), 0x4E60, 3000, &RestoreRestartButton);
+        });
+        page.AddSection(MakeRows({
+            MakeRow(L"重启输入法进程", L"立即重启输入法后台进程，使需要重启的设置生效。", restart),
+            MakeRow(L"设置窗口后台驻留",
+                    L"关闭设置窗口后在后台保留一段时间，期间重新打开无需等待加载；驻留越久占用内存越久。",
+                    BindDropdown(context, "appearance.settings_window_linger",
+                                 Options({{"off", L"关闭后立即退出"},
+                                          {"1m", L"1 分钟"},
+                                          {"5m", L"5 分钟"},
+                                          {"10m", L"10 分钟"},
+                                          {"30m", L"30 分钟"},
+                                          {"60m", L"1 小时"},
+                                          {"forever", L"一直驻留"}}),
+                                 linger)),
+        }));
+    }
 
     page.AddSection(MakeRow(L"启动动画",
                             L"打开设置窗口时先在窗口中央显示齿轮图标，再淡入主界面。关闭后只短暂显示纯色背景。",

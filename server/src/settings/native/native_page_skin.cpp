@@ -1,5 +1,7 @@
 #include "settings/native/native_page_skin_common.h"
 
+#include "skin/candidate_skin_catalog.h"
+
 #include <algorithm>
 
 // partials/skin.html + modules/skin.ts + styles/modules/skin.css.
@@ -153,6 +155,8 @@ struct SkinCard
 {
     std::string id;
     bool external = false;
+    // 官方贴图皮肤：照外部皮肤渲染，但和内置皮肤列在一起，标题同样带深浅后缀。
+    bool official = false;
     std::vector<std::string> themes;
     int previewOverride = -1; // -1 follows the candidate theme, 0 dark, 1 light
     std::shared_ptr<Label> title;
@@ -176,7 +180,7 @@ class SkinPage
     void Sync();
 
   private:
-    std::shared_ptr<SkinCard> MakeCard(const std::string &id, const Json *external);
+    std::shared_ptr<SkinCard> MakeCard(const std::string &id, const Json *external, bool official = false);
     bool PreviewLight(const SkinCard &card) const;
     void ApplyCard(SkinCard &card);
     void RebuildExternal();
@@ -184,6 +188,8 @@ class SkinPage
     SettingsModel *model_;
     std::vector<std::shared_ptr<SkinCard>> builtin_;
     std::vector<std::shared_ptr<SkinCard>> external_;
+    std::vector<std::shared_ptr<SkinCard>> official_;
+    std::shared_ptr<msimeui::Container> officialHost_;
     std::shared_ptr<msimeui::Container> externalHost_;
     std::shared_ptr<CodeChip> directory_;
     std::string catalogKey_ = "\x01";
@@ -192,11 +198,12 @@ class SkinPage
     bool diagnosticsOpen_ = false;
 };
 
-std::shared_ptr<SkinCard> SkinPage::MakeCard(const std::string &id, const Json *external)
+std::shared_ptr<SkinCard> SkinPage::MakeCard(const std::string &id, const Json *external, bool official)
 {
     auto card = std::make_shared<SkinCard>();
     card->id = id;
     card->external = external != nullptr;
+    card->official = official;
 
     auto titles = std::make_shared<Column>(0.0f);
     card->title =
@@ -208,16 +215,19 @@ std::shared_ptr<SkinCard> SkinPage::MakeCard(const std::string &id, const Json *
         card->themes = StringList(external->contains("themes") ? &(*external)["themes"] : nullptr);
         compatible = !(external->contains("compatible") && (*external)["compatible"].is_boolean() &&
                        !(*external)["compatible"].get<bool>());
-        std::wstring meta = Widen(id);
-        const std::string version = JsonString(*external, "version");
-        const std::string author = JsonString(*external, "author");
-        if (!version.empty())
-            meta += L" · v" + Widen(version);
-        if (!author.empty())
-            meta += L" · " + Widen(author);
-        auto metaLabel = std::make_shared<Label>(meta, CaptionMuted(), TextRole::Muted);
-        metaLabel->SetMargin({0.0f, 4.0f, 0.0f, 0.0f});
-        titles->Add(metaLabel);
+        if (!official)
+        {
+            std::wstring meta = Widen(id);
+            const std::string version = JsonString(*external, "version");
+            const std::string author = JsonString(*external, "author");
+            if (!version.empty())
+                meta += L" · v" + Widen(version);
+            if (!author.empty())
+                meta += L" · " + Widen(author);
+            auto metaLabel = std::make_shared<Label>(meta, CaptionMuted(), TextRole::Muted);
+            metaLabel->SetMargin({0.0f, 4.0f, 0.0f, 0.0f});
+            titles->Add(metaLabel);
+        }
 
         std::wstring description;
         if (compatible)
@@ -301,6 +311,12 @@ void SkinPage::ApplyCard(SkinCard &card)
     const bool light = PreviewLight(card);
     if (!card.external)
         card.title->SetText(std::wstring(BuiltinName(card.id)) + (light ? L"(Light)" : L"(Dark)"));
+    else if (card.official)
+    {
+        const Json *manifest = skinpreview::FindExternalSkin(*model_, card.id);
+        card.title->SetText(Widen(manifest ? JsonString(*manifest, "name") : card.id) +
+                            (light ? L"(Light)" : L"(Dark)"));
+    }
     card.previewSwitch->SetText(light ? L"预览深色" : L"预览浅色");
 
     bool arrows = false;
@@ -321,16 +337,13 @@ void SkinPage::ApplyCard(SkinCard &card)
     card.horizontal->Set(skinpreview::ResolveCandidateLook(*model_, card.id, light, true, font.size), font, options);
     options.horizontal = false;
     card.vertical->Set(skinpreview::ResolveCandidateLook(*model_, card.id, light, false, font.size), font, options);
-    skinpreview::ToolbarLook toolbarLook = skinpreview::ResolveToolbarLook(*model_, card.id, light);
-    // The Fluent card's toolbar host carries skin-microsoft in skin.html.
-    if (card.id == "fluent")
-        toolbarLook.handle = Hex(0xE183D9);
-    card.toolbar->Set(toolbarLook, {});
+    card.toolbar->Set(skinpreview::ResolveToolbarLook(*model_, card.id, light), {});
 }
 
 void SkinPage::RebuildExternal()
 {
     external_.clear();
+    official_.clear();
     auto column = std::make_shared<Column>(0.0f);
     const Json *skins = model_->Find("appearance.external_candidate_skins");
     if (skins && skins->is_array())
@@ -340,10 +353,27 @@ void SkinPage::RebuildExternal()
             if (!skin.is_object() || !skin.contains("id") || !skin["id"].is_string() || !skin.contains("name") ||
                 !skin["name"].is_string())
                 continue;
-            auto card = MakeCard(skin["id"].get<std::string>(), &skin);
-            external_.push_back(card);
+            const std::string id = skin["id"].get<std::string>();
+            if (CandidateSkinCatalog::IsOfficialPackage(id))
+                continue;
+            external_.push_back(MakeCard(id, &skin));
+        }
+        // 官方贴图皮肤按 OfficialPackageIds 的顺序排在内置皮肤后面；用户删掉了目录就不列。
+        for (const auto &id : CandidateSkinCatalog::OfficialPackageIds())
+        {
+            if (const Json *skin = skinpreview::FindExternalSkin(*model_, id);
+                skin && skin->contains("name") && (*skin)["name"].is_string())
+                official_.push_back(MakeCard(id, skin, true));
         }
     }
+    auto officialColumn = std::make_shared<Column>(0.0f);
+    for (const auto &card : official_)
+    {
+        card->card->SetMargin({0.0f, 0.0f, 0.0f, 18.0f});
+        officialColumn->Add(card->card);
+    }
+    officialHost_->SetChild(officialColumn);
+    officialHost_->InvalidateMeasure();
     // `.external-skin-list { display: grid; gap: 18px }`: the cards' own 18px margins do
     // not collapse into the gap.
     for (size_t i = 0; i < external_.size(); ++i)
@@ -449,7 +479,7 @@ void SkinPage::Sync()
                                                (settingsLight ? L"浅色" : L"深色") + L" · 候选 " +
                                                (candLight_ ? L"浅色" : L"深色"));
     }
-    for (auto *cards : {&builtin_, &external_})
+    for (auto *cards : {&builtin_, &official_, &external_})
     {
         for (auto &card : *cards)
         {
@@ -469,9 +499,11 @@ VisualPtr SkinPage::Build(PageContext &)
     {
         auto card = MakeCard(skins[i], nullptr);
         builtin_.push_back(card);
-        // The last card's 18px margin collapses into the heading's 28px.
-        page.AddRaw(card->card, i + 1 < skins.size() ? 18.0f : 28.0f);
+        page.AddRaw(card->card, 18.0f);
     }
+    // 官方贴图皮肤的卡片各带 18px 下边距；最后一张卡片的 18px 并进标题前的 28px。
+    officialHost_ = std::make_shared<msimeui::Container>();
+    page.AddRaw(officialHost_, 10.0f);
 
     // `.external-skin-heading`.
     auto titles = std::make_shared<Column>(0.0f);

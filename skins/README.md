@@ -6,6 +6,9 @@
 
 | 目录 | 名称 | 说明 |
 | --- | --- | --- |
+| [`green_leaf`](green_leaf/) | 绿叶 | 官方贴图皮肤（`canvas` 全贴图，原 `canvas-demo`）：深色夜蓝、浅色薄荷白的九宫格玻璃面板，面板后探出的叶子与右上角闪烁的 APNG 星光。设置页把它列在内置皮肤之后，不在「外部皮肤」里 |
+| [`acrylic`](acrylic/) | 亚克力 Acrylic | 候选卡片背后垫系统亚克力，模糊后面的窗口 |
+| [`mica`](mica/) | 云母 Mica | 候选卡片背后垫系统云母，取样桌面壁纸（Windows 11；更早的系统按亚克力画） |
 | [`niya-demo`](niya-demo/) | Niya Demo | 官方外部皮肤样例：候选框上方的人物装饰图、星点背景图、12dip 圆角，以及配套的悬浮工具栏配色 |
 | [`bigfish`](bigfish/) | 蓝色大肥鱼 | 鲸鱼女仆角色装饰、海底气泡背景，深海蓝配色搭配金色序号 |
 | [`bigfish-national-day`](bigfish-national-day/) | 大肥鱼·国庆 | 红裙敬礼的大肥鱼站在卡片右上方、金色星星背景，中国红高亮搭配金色序号 |
@@ -15,7 +18,11 @@
 | [`sogou-classic`](sogou-classic/) | 搜狗经典·石墨 | 基于石墨，仿经典搜狗：白底浅蓝边框、蓝字候选、首选红字不铺底色、拼音下方浅蓝分隔线 |
 | [`wechat_glass`](wechat_glass/) | 微信玻璃 | 移植自 rime-wechat-glass 的微信绿配色与紧凑几何，磨砂玻璃用自绘噪点底图近似 |
 
-除 `sogou-classic` 基于 `graphite` 外，其余皮肤均基于 `fluent`；全部支持横排 / 竖排布局以及深色 / 浅色主题。
+除 `sogou-classic` 基于 `graphite`、`shoudao-blue` 基于 `willow_green`、`green_leaf` 基于 `canvas` 外，其余皮肤均基于 `fluent`；全部支持横排 / 竖排布局以及深色 / 浅色主题。
+
+官方贴图皮肤的名单在 Server 的 `CandidateSkinCatalog::OfficialPackageIds()`（目前只有 `green_leaf`）。它们和其他随包皮肤一样装到 `skins\<id>`、照外部皮肤加载，只是设置页的展示位置不同；用户删掉目录后设置页就不再列出。
+
+所有皮肤的悬浮工具栏拖动条（`[toolbar.*].handle`）都与同一主题的 `accent` 同色，没写 `handle` 时自动取 `accent`；`examples/skin-examples/tests/test_manifests.py` 会检查写了的两者是否一致。
 
 ## 默认皮肤设置（`default/`）
 
@@ -68,7 +75,8 @@ my-skin/
 | `[candidate_window.background]` | 卡片背景图：`image`、`fit`（`cover` / `contain` / `stretch`）、`opacity`（0–1） |
 | `[candidate.dark]` / `[candidate.light]` | 候选配色：`accent`、`selected`、`hover`、`surface`、`border`、`text`、`number`、`translation`、`show_selected_bar`；细分配色 `candidate_text`、`preedit_text`、`preedit_caret`、`selected_text`、`selected_number`、`selected_translation`、`translation_pos`、`translation_separator`、`selected_translation_pos`、`selected_translation_separator`、`selected_bar`、`preedit_background`、`preedit_divider` |
 | `[candidate.dark.menu]` / `[candidate.light.menu]` | 候选窗右键菜单：`background`、`border`、`text`、`hover` |
-| `[toolbar]` / `[toolbar.dark]` / `[toolbar.light]` | 悬浮工具栏：`corner_radius_dip`，以及 `background`、`border`、`handle`、`divider`、`icon`、`hover` |
+| `[candidate_window.border_image]` | v2 九宫格面板图：`source`、`light_source`（浅色主题换用的面板图，几何与 `source` 相同）、`slice_dip`、`stretch_dip`、`width_dip`、`fill`，见 [schema 说明](../examples/skin-examples/schema/README.md) |
+| `[toolbar]` / `[toolbar.dark]` / `[toolbar.light]` | 悬浮工具栏：`corner_radius_dip`，以及 `background`、`border`、`handle`（不写时取同主题的 `accent`）、`divider`、`icon`、`hover` |
 | `[license]` | `code`、`assets`、`source`：代码与素材的授权信息 |
 
 所有颜色键（`[candidate.*]` 里除 `show_selected_bar` 外的键、`[candidate.*.menu]` 与 `[toolbar.*]` 的全部键）都支持十六进制 `#RGB`、`#RGBA`、`#RRGGBB`、`#RRGGBBAA`，以及 `rgb(r, g, b)`、`rgba(r, g, b, a)` 和 `transparent`。十六进制必须带 `#`（清单格式的约定，与 CSS 写法一致；渲染器对不带 `#` 的写法有容错，但不要依赖它），不透明度在末尾（`#RRGGBBAA`，不是 `#AARRGGBB`），例如 `rgba(224, 138, 168, 0.28)` 与 `#e08aa847` 等价。图片路径相对于皮肤目录，且不能指向目录之外。完整的带注释示例见 [`niya-demo/skin.toml`](niya-demo/skin.toml)。

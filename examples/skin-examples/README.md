@@ -38,16 +38,6 @@ examples/skin-examples/
 │  │  └─ assets/
 │  │     ├─ character.png     # 卡片上方的装饰图
 │  │     └─ background.png    # 卡片背景图
-│  ├─ acrylic-demo/           # backdrop = "acrylic"：卡片背后垫系统亚克力毛玻璃
-│  │  └─ skin.toml
-│  ├─ mica-demo/              # backdrop = "mica"：卡片背后垫系统云母（模糊桌面壁纸）
-│  │  └─ skin.toml
-│  ├─ canvas-demo/            # schema_version 2 + canvas 基底的全贴图样例
-│  │  ├─ skin.toml
-│  │  └─ assets/
-│  │     ├─ panel.png         # 九宫格面板（2 倍图）
-│  │     ├─ leaf.png          # 面板下层挂件
-│  │     └─ sparkle.apng      # 面板上层的循环 APNG 挂件
 │  └─ sakura-night/           # v2 实机演示「夜樱」：面板后的月亮、APNG 花瓣、GIF 星星
 │     ├─ skin.toml
 │     └─ assets/
@@ -116,14 +106,14 @@ icon = "#f6e4eb"
 - `font_family` 排在用户设置的字体前面，缺字时回落到用户字体；字号始终由用户设置决定。
 - `page_arrows = true` 可以打开候选框里的翻页箭头；不写时沿用 `base` 内置皮肤的设置（出厂为关闭）。
 - `fit_content = true` 让卡片严格按候选文字的宽度收紧，不再垫出厂最小宽度；`min_width_dip` 和装饰图宽度仍然生效。不写时沿用 `base` 内置皮肤的设置（出厂为关闭）。
-- `[toolbar]` 下的所有键都可以省略，没写的沿用 `base` 皮肤。
+- `[toolbar]` 下的所有键都可以省略，没写的沿用 `base` 皮肤；只有拖动条 `handle` 例外，没写时跟同一主题的 `accent`。
 - `[supports].themes` 里声明的每套主题都要有对应的 `[candidate.<theme>]`；写了 `[toolbar]` 的话，也要有对应的 `[toolbar.<theme>]`。
 
 完整字段见 [schema/README.md](schema/README.md)。
 
 ## 全贴图皮肤（schema_version 2）
 
-`canvas-demo` 演示 v2 皮肤：`schema_version = 2`、`base = "canvas"`，候选框的外观全部来自贴图。
+`sakura-night` 和随安装包分发的 [`绿叶`](../../skins/green_leaf/skin.toml)（原 `canvas-demo`）都是 v2 皮肤：`schema_version = 2`、`base = "canvas"`，候选框的外观全部来自贴图。下面的片段取自绿叶。
 
 ```toml
 schema_version = 2
@@ -131,6 +121,7 @@ base = "canvas"                  # v2 必须以 canvas 为 base
 
 [candidate_window.border_image]
 source = "assets/panel.png"      # 64×64 的 2 倍图
+light_source = "assets/panel-light.png" # 可选：浅色主题换这张，几何与 source 相同
 slice_dip = [20]                 # 切片线，按源图像素
 width_dip = [10]                 # 边框绘制宽度，按 DIP：2 倍图写切片的一半，200% 缩放下逐像素清晰
 
@@ -148,7 +139,7 @@ z_index = 2                      # z_index < 1 画在面板之下，其余画在
 - 面板四角画死的花纹要落在切片之内，否则会被拉伸。中心块可以用 `fill = false` 留空。
 - 文字离面板外缘的距离用 `content_insets_dip`，挂件伸出卡片时用 `outer_insets_dip` 给窗口留出空白。
 - 动图在系统关闭「动画效果」时只显示第一帧。动图解码后合计不超过 64 MB、最多 1024 帧，超出时只显示第一帧。
-- 样例里的三张图都是程序生成的几何图形，随本目录以 MIT 授权，可以直接改用。
+- 绿叶和夜樱的图都是程序生成的几何图形，以 MIT 授权，可以直接改用；绿叶的浅色面板由 `tools/gen_green_leaf_panel.py` 生成。
 
 `sakura-night`（夜樱）是一个更完整的实机演示，把 v2 的能力都用上了：
 

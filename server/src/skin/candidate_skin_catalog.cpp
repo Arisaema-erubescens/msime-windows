@@ -434,6 +434,23 @@ const std::vector<std::string> &BuiltInIds()
     return ids;
 }
 
+const std::vector<std::string> &OfficialPackageIds()
+{
+    static const std::vector<std::string> ids = {"green_leaf"};
+    return ids;
+}
+
+bool IsOfficialPackage(const std::string &id)
+{
+    const auto &ids = OfficialPackageIds();
+    return std::find(ids.begin(), ids.end(), id) != ids.end();
+}
+
+const std::string &BorderImageSource(const BorderImage &borderImage, bool light)
+{
+    return light && !borderImage.lightSource.empty() ? borderImage.lightSource : borderImage.source;
+}
+
 bool IsCanvasBase(const std::string &base)
 {
     return base == kCanvasBase;
@@ -662,6 +679,14 @@ std::optional<Package> Load(const std::filesystem::path &skinsRoot, const std::s
                     SetError(error, "candidate_window.border_image.source 无效（需为 .png、.apng、.gif 或 .webp）");
                     return std::nullopt;
                 }
+                if (borderImageTable->contains("light_source") &&
+                    (!ReadResource(*borderImageTable, "light_source", bi.lightSource) ||
+                     !IsAnimatableImagePath(bi.lightSource)))
+                {
+                    SetError(error,
+                             "candidate_window.border_image.light_source 无效（需为 .png、.apng、.gif 或 .webp）");
+                    return std::nullopt;
+                }
                 if (!borderImageTable->contains("slice_dip") ||
                     !ReadBoxValues(*borderImageTable, "slice_dip", bi.sliceDip))
                 {
@@ -845,6 +870,13 @@ std::optional<Package> Load(const std::filesystem::path &skinsRoot, const std::s
             SetError(error, "找不到 candidate_window.border_image.source 文件");
             return std::nullopt;
         }
+        if (package.borderImage && !package.borderImage->lightSource.empty() &&
+            !std::filesystem::is_regular_file(directory / std::filesystem::u8path(package.borderImage->lightSource),
+                                              ec))
+        {
+            SetError(error, "找不到 candidate_window.border_image.light_source 文件");
+            return std::nullopt;
+        }
         for (const auto &dec : package.freeDecorations)
         {
             if (!dec.image.empty() &&
@@ -855,6 +887,9 @@ std::optional<Package> Load(const std::filesystem::path &skinsRoot, const std::s
             }
         }
         AdaptSharedBase(package);
+        // 工具栏拖动条没单独写时跟候选的 accent 走，与选中竖条、预编辑光标同色；accent 也没写才沿用 base。
+        FillColor(package.toolbarDark.handle, package.dark.accent);
+        FillColor(package.toolbarLight.handle, package.light.accent);
         return package;
     }
     catch (const toml::parse_error &)

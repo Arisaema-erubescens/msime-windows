@@ -55,6 +55,7 @@
 九宫格面板图，语义同 CSS `border-image`（`border-image-repeat: stretch`）：四角按边宽缩放，四边沿长度方向拉伸，中心双向拉伸。
 
 - `source`：图片路径，`.png`、`.apng`、`.gif` 或 `.webp`
+- `light_source`：可选，浅色主题换用的面板图，格式要求同 `source`。切片、边宽和 `fill` 与 `source` 共用，所以两张图要按同一套几何画；不写时深浅主题都用 `source`
 - `slice_dip`：切片线位置，**按源图像素计**（同 CSS `border-image-slice` 的数值，键名里的 `_dip` 是历史写法），1、2 或 4 个 `0`–`500` 的数，按 CSS 简写展开成上右下左（1 个值四边相同，2 个值是「上下 左右」）
 - `stretch_dip`：可选，同为源图像素，给出时代替 `slice_dip`。**面板图里画死的装饰必须落在切片之内（可拉伸区之外）**，否则会被拉长；例如帆船画在右侧，就把右侧切片放到船身左侧
 - `width_dip`：可选，四边在屏幕上画多宽，**按 DIP 计**（同 CSS `border-image-width`），写法同上。不写时取切片的数值当 DIP。给 2 倍图时写成切片的一半，200% 缩放下逐像素清晰、100% 下是缩小一半的同一张图。两条对边加起来比面板还宽时四边按同一比例缩小
@@ -150,7 +151,7 @@ translation_separator = "#529cca73"
 悬浮工具栏样式。所有键都可省略，不写的沿用 `base`。
 
 - `corner_radius_dip`：`0`–`32`
-- `[toolbar.dark]` / `[toolbar.light]`：`background`、`border`、`handle`（左侧拖动条）、`divider`、`icon`、`hover`
+- `[toolbar.dark]` / `[toolbar.light]`：`background`、`border`、`handle`（左侧拖动条）、`divider`、`icon`、`hover`。`handle` 不写时取同一主题的 `[candidate.*].accent`，与选中竖条、预编辑光标同色；`accent` 也没写才沿用 `base`。写的话也请与 `accent` 一致
 
 ## 颜色格式
 

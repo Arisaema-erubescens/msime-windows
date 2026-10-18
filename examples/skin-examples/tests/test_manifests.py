@@ -43,6 +43,10 @@ class ManifestTests(unittest.TestCase):
                 if "border_image" in window:
                     assets["candidate_window.border_image.source"] = window["border_image"]["source"]
                     v2_images.append(window["border_image"]["source"])
+                    if "light_source" in window["border_image"]:
+                        light_source = window["border_image"]["light_source"]
+                        assets["candidate_window.border_image.light_source"] = light_source
+                        v2_images.append(light_source)
                     for key in ("slice_dip", "stretch_dip", "width_dip"):
                         if key in window["border_image"]:
                             values = window["border_image"][key]
@@ -104,6 +108,12 @@ class ManifestTests(unittest.TestCase):
                     self.assertIn(theme, data["candidate"])
                     if "toolbar" in data:
                         self.assertIn(theme, data["toolbar"])
+                    # The toolbar's drag handle is the theme's accent, like the selection bar and caret; the
+                    # catalog fills it in from accent when a skin leaves it out.
+                    accent = data["candidate"][theme].get("accent")
+                    handle = data.get("toolbar", {}).get(theme, {}).get("handle")
+                    if accent and handle:
+                        self.assertEqual(handle.lower(), accent.lower(), f"toolbar.{theme}.handle")
 
     def test_default_skin_settings(self):
         # skins/default/<id>/skin.toml carries the built-in skins' switches; only collections that ship it are checked.

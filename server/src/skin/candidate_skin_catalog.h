@@ -66,6 +66,9 @@ struct ToolbarColors
 struct BorderImage
 {
     std::string source;
+    // 浅色主题换用的面板图（light_source），切片、边宽和 fill 与 source 共用，两张图要按同一套几何画；
+    // 为空时深浅主题都用 source。
+    std::string lightSource;
     // 切片线位置，以源图像素计（同 CSS border-image-slice 的数值，键名沿用 _dip）：1/2/4 个值，按 CSS
     // 简写展开成上右下左。
     std::vector<double> sliceDip;
@@ -206,9 +209,16 @@ bool IsCanvasBase(const std::string &base);
 // v2 图片（border_image.source、decorations.image）允许的扩展名：.png、.apng、.gif、.webp，不分大小写。
 bool IsAnimatableImagePath(const std::string &path);
 
+// 指定主题下实际要画的面板图：浅色主题优先 light_source，没写就用 source。
+const std::string &BorderImageSource(const BorderImage &borderImage, bool light);
+
 // 六个内置皮肤的 ID，按设置页的展示顺序。
 const std::vector<std::string> &BuiltInIds();
 bool IsBuiltIn(const std::string &id);
+// 官方贴图皮肤：本身是 skins\<id> 下的外部皮肤包，随安装包装到数据目录、照外部皮肤加载和渲染，
+// 只是设置页把它们列在内置皮肤之后，而不是「外部皮肤」列表里。按设置页的展示顺序。
+const std::vector<std::string> &OfficialPackageIds();
+bool IsOfficialPackage(const std::string &id);
 bool IsSafeId(const std::string &id);
 // 安装包覆盖同名随包皮肤前，把旧目录改名成 <id>.bak（重名时 <id>.2.bak …）；Scan 跳过它们。
 bool IsBackupFolder(const std::string &folder);

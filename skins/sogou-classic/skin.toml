@@ -69,7 +69,7 @@ corner_radius_dip = 6
 [toolbar.dark]
 background = "#1F2631"
 border = "#3A5A80"
-handle = "#FF6B6B"
+handle = "#6FAEF2"
 divider = "rgba(111, 174, 242, 0.24)"
 icon = "#8CBEF5"
 hover = "rgba(111, 174, 242, 0.16)"
@@ -77,7 +77,7 @@ hover = "rgba(111, 174, 242, 0.16)"
 [toolbar.light]
 background = "#FFFFFF"
 border = "#A9CBEA"
-handle = "#E0201C"
+handle = "#1F74CC"
 divider = "#D3E4F5"
 icon = "#2F6DB5"
 hover = "#EAF3FC"

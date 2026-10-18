@@ -1,4 +1,4 @@
-# 亚克力样例：候选卡片背后是系统亚克力，模糊卡片后面的窗口。参数取 Windows 11 应用内亚克力的默认值。
+# 亚克力：候选卡片背后是系统亚克力，模糊卡片后面的窗口。参数取 Windows 11 应用内亚克力的默认值。
 #
 # 材质按 Fluent 的配方叠三层：模糊的背景 → 亮度层 → 色调。
 #   - surface：色调的颜色，只取 RGB。
@@ -8,8 +8,8 @@
 # 深浅主题各写各的。系统关闭「透明效果」（设置 → 个性化 → 颜色）或不支持时，surface 按不透明画。
 
 schema_version = 1
-id = "acrylic-demo"
-name = "Acrylic Demo"
+id = "acrylic"
+name = "亚克力 Acrylic"
 version = "0.2.0"
 author = "Metasequoia IME contributors"
 description = "候选卡片背后是系统亚克力，模糊后面的窗口，亮度层保证亮暗背景上的文字对比度。"
@@ -23,7 +23,7 @@ themes = ["dark", "light"]
 corner_radius_dip = 8
 border_width_dip = 1
 shadow = "soft"
-# 卡片背后的系统材质：none（默认）| acrylic（模糊后面的窗口）| mica（模糊桌面壁纸，见 mica-demo）。
+# 卡片背后的系统材质：none（默认）| acrylic（模糊后面的窗口）| mica（模糊桌面壁纸，见 mica 皮肤）。
 backdrop = "acrylic"
 
 [candidate.dark]

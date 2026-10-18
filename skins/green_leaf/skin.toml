@@ -1,13 +1,13 @@
-# 水杉输入法 schema_version 2 皮肤样例：在 canvas 全贴图基底上，用九宫格面板图、上下两层挂件和一个循环播放的
-# APNG 小动画拼出整个候选框。v1 的键（配色、字体、翻页箭头、工具栏……）在这里照样可用，写法见 niya-demo。
-# 所有图片都是程序生成的几何图形，随本目录以 MIT 授权。
+# 绿叶：随安装包分发的官方贴图皮肤，设置页把它列在内置皮肤之后。在 canvas 全贴图基底上，用九宫格面板图、
+# 上下两层挂件和一个循环播放的 APNG 小动画拼出整个候选框；深色是夜蓝玻璃面板，浅色换成薄荷白面板。
+# 所有图片都是程序生成的几何图形；浅色面板由 examples/skin-examples/tools/gen_green_leaf_panel.py 生成。
 
 schema_version = 2                 # v2 必须以 canvas 为 base；写了 2 而 base 不是 canvas 的皮肤按 1 处理
-id = "canvas-demo"
-name = "Canvas Demo"
-version = "1.0.0"
+id = "green_leaf"
+name = "绿叶"
+version = "1.1.0"
 author = "Metasequoia IME contributors"
-description = "canvas 全贴图基底样例：夜蓝玻璃九宫格面板、面板后探出的叶子、右上角循环闪烁的 APNG 星光。"
+description = "夜蓝 / 薄荷白玻璃九宫格面板、面板后探出的叶子、右上角循环闪烁的星光。"
 # canvas：透明面板、无描边、无圆角、无阴影，外观全部来自下面的贴图。它只能当 base，不能单独选用。
 base = "canvas"
 
@@ -22,10 +22,11 @@ item_corner_radius_dip = 5         # 选中 / 悬停高亮的圆角
 line_gap_dip = 4
 
 # 九宫格面板图，语义同 CSS border-image（stretch）。
-# panel.png 是 64×64 的 2 倍图：切片按源图像素写 20，边框按屏幕 DIP 画 10 宽，所以 200% 缩放下逐像素清晰，
+# 两张面板都是 64×64 的 2 倍图：切片按源图像素写 20，边框按屏幕 DIP 画 10 宽，所以 200% 缩放下逐像素清晰，
 # 100% 下是缩小一半的同一张图。四角的小菱形落在切片之内，不会被拉伸。
 [candidate_window.border_image]
-source = "assets/panel.png"
+source = "assets/panel.png"        # 深色主题
+light_source = "assets/panel-light.png" # 浅色主题；切片、边宽与 fill 和 source 共用
 slice_dip = [20]                   # 切片线，源图像素，1/2/4 个值（上右下左，同 CSS）
 width_dip = [10]                   # 边框绘制宽度，DIP；不写时取切片的数值
 fill = true                        # 画九宫格中心块；false 时中心留空
@@ -64,7 +65,7 @@ width_dip = 24
 height_dip = 24
 z_index = 2
 
-# 面板是深色玻璃，深浅两套主题都用浅色文字。
+# 深色：夜蓝玻璃面板上的浅色文字。
 [candidate.dark]
 accent = "#5eead4"
 selected = "rgba(94, 234, 212, 0.20)"
@@ -75,16 +76,46 @@ preedit_text = "#99f6e4"
 selected_text = "#ffffff"
 selected_bar = "#fde68a"
 
+# 浅色：薄荷白面板上的深色文字，强调色换成叶绿。
 [candidate.light]
-accent = "#5eead4"
-selected = "rgba(94, 234, 212, 0.22)"
-hover = "rgba(94, 234, 212, 0.12)"
-text = "#f1f5ff"
-number = "rgba(241, 245, 255, 0.62)"
-translation = "#c4b5fd"            # 浅色主题的默认翻译色偏深，压在深色面板上看不清
-preedit_text = "#99f6e4"
-selected_text = "#ffffff"
-selected_bar = "#fde68a"
+accent = "#16a37f"
+selected = "rgba(22, 163, 127, 0.16)"
+hover = "rgba(22, 163, 127, 0.08)"
+text = "#17322a"
+number = "rgba(23, 50, 42, 0.55)"
+translation = "#5b6f68"
+preedit_text = "#0f766e"
+selected_text = "#0b3b30"
+selected_bar = "#e2ac2e"
+
+[candidate.dark.menu]
+background = "#1b2236"
+border = "rgba(94, 234, 212, 0.35)"
+text = "#e8f1ff"
+hover = "rgba(94, 234, 212, 0.14)"
+
+[candidate.light.menu]
+background = "#f7fcf9"
+border = "rgba(22, 163, 127, 0.35)"
+text = "#17322a"
+hover = "rgba(22, 163, 127, 0.10)"
+
+# 悬浮工具栏与面板同色，拖动条跟 accent。
+[toolbar.dark]
+background = "#1b2236"
+border = "rgba(94, 234, 212, 0.35)"
+handle = "#5eead4"
+divider = "rgba(94, 234, 212, 0.22)"
+icon = "#e8f1ff"
+hover = "rgba(94, 234, 212, 0.14)"
+
+[toolbar.light]
+background = "#f7fcf9"
+border = "rgba(22, 163, 127, 0.35)"
+handle = "#16a37f"
+divider = "rgba(22, 163, 127, 0.22)"
+icon = "#17322a"
+hover = "rgba(22, 163, 127, 0.10)"
 
 [license]
 code = "MIT"

@@ -7,7 +7,7 @@ TEST_CASE(floating_toolbar_skin_defaults_to_fluent_toolbar)
 {
     const FloatingToolbarSkin dark = ResolveFloatingToolbarSkin("fluent", false);
     REQUIRE_EQ(FlattenCandidateColor(dark.fill, dark.fill), RGB(26, 26, 26));
-    REQUIRE_EQ(FlattenCandidateColor(dark.handle, dark.fill), RGB(142, 140, 216));
+    REQUIRE_EQ(FlattenCandidateColor(dark.handle, dark.fill), RGB(107, 105, 214));
     REQUIRE_EQ(dark.radius, 8.0f);
 
     const FloatingToolbarSkin unknown = ResolveFloatingToolbarSkin("no_such_skin", true);
@@ -74,7 +74,7 @@ TEST_CASE(floating_toolbar_skin_applies_external_overrides_for_the_theme)
     ApplyFloatingToolbarSkinOverrides(light, package, true);
     REQUIRE_EQ(FlattenCandidateColor(light.fill, light.fill), RGB(255, 247, 250));
     REQUIRE_EQ(FlattenCandidateColor(light.glyph, light.fill), RGB(58, 42, 48));
-    REQUIRE_EQ(FlattenCandidateColor(light.handle, light.fill), RGB(142, 140, 216));
+    REQUIRE_EQ(FlattenCandidateColor(light.handle, light.fill), RGB(107, 105, 214));
 
     CandidateSkinCatalog::Package plain;
     FloatingToolbarSkin graphite = ResolveFloatingToolbarSkin("graphite", false);

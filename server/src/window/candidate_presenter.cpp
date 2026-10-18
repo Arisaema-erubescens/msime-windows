@@ -1198,9 +1198,11 @@ void CandidatePresenter::ApplySkin()
         if (panelImage)
         {
             // CSS border-image 语义：切片以源图像素计，边宽以 DIP 计，fill 决定是否画中心块。
+            // 浅色主题有 light_source 时换那张图，几何不变。
             const CandidateSkinLayers::NineSlice nine = CandidateSkinLayers::ResolveNineSlice(*package->borderImage);
             impl_->card->SetBackgroundNineSlice(
-                packageRoot + string_to_wstring(package->borderImage->source),
+                packageRoot +
+                    string_to_wstring(CandidateSkinCatalog::BorderImageSource(*package->borderImage, candLight)),
                 msimeui::NineSlice{ToThickness(nine.slice), ToThickness(nine.width), nine.fill}, 1.0f);
         }
         else

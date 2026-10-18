@@ -5,13 +5,14 @@
 
 FloatingToolbarSkin ResolveFloatingToolbarSkin(const std::string &skinId, bool light)
 {
-    // The default skin: the base every other skin starts from.
+    // The default skin: the base every other skin starts from. The handle is Fluent's accent, the colour of its
+    // selection bar and caret.
     FloatingToolbarSkin skin = light ? FloatingToolbarSkin{CandidateColorFromRgb(0xFFFFFF),
                                                            D2D1::ColorF(0, 0.12f),
                                                            CandidateColorFromRgb(0x1A1A1A),
                                                            D2D1::ColorF(0, 0.08f),
                                                            D2D1::ColorF(0, 0.12f),
-                                                           CandidateColorFromRgb(0x8E8CD8),
+                                                           CandidateColorFromRgb(0x6B69D6),
                                                            8.0f,
                                                            6.0f}
                                      : FloatingToolbarSkin{CandidateColorFromRgb(0x1A1A1A),
@@ -19,7 +20,7 @@ FloatingToolbarSkin ResolveFloatingToolbarSkin(const std::string &skinId, bool l
                                                            CandidateColorFromRgb(0xFFFFFF),
                                                            D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.10f),
                                                            D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.15f),
-                                                           CandidateColorFromRgb(0x8E8CD8),
+                                                           CandidateColorFromRgb(0x6B69D6),
                                                            8.0f,
                                                            6.0f};
     if (skinId == "wechat")
