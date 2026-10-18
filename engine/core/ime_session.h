@@ -7,6 +7,7 @@
 #include "../providers/provider_registry.h"
 #include "../schemes/input_scheme.h"
 #include "../schemes/wubi_scheme.h"
+#include "../contracts/mid_sentence_helpcode.h"
 #include "../shuangpin/shuangpin_profile.h"
 #include <memory>
 
@@ -20,6 +21,19 @@ class ImeSession
     void handle_key(ImeKeyCode vk, ImeModifierMask modifiers_down = 0, ImeCharacter wch = 0);
     void switch_scheme(SchemeType scheme_type);
     void set_shuangpin_helpcode_enabled(bool enabled);
+    // 双拼末尾辅助码怎么触发：direct 开着时按输入形状认辅码（完整音节后多一个键，或末尾两键带大写）；
+    // 关着时改由引导键（输入串里的 kEndMarker 段）或 uppercase_trigger 开着时的大写字母触发。
+    void set_shuangpin_helpcode_triggers(bool direct, bool uppercase_trigger);
+    bool end_helpcode_uppercase_trigger_active() const
+    {
+        return enable_shuangpin_helpcode_ && !shuangpin_helpcode_direct_ && end_helpcode_uppercase_trigger_ &&
+               !enable_direct_helpcode_ && !mid_sentence_uppercase_trigger_active();
+    }
+    // 解析原串时哪种大写字母开段，TSF、Server 与引擎按同一组规则数这一节的键。
+    FanyImeMidSentenceHelpcode::UppercaseTriggers helpcode_uppercase_triggers() const
+    {
+        return {mid_sentence_uppercase_trigger_active(), end_helpcode_uppercase_trigger_active()};
+    }
     void set_mid_sentence_helpcode_enabled(bool enabled);
     // 句中辅助码的大写触发（见 FanyImeMidSentenceHelpcode::StartsUppercaseBlock）。只在句中辅助码开着、
     // 直接辅助码关着时生效。
@@ -131,6 +145,8 @@ class ImeSession
     std::unique_ptr<IInputScheme> scheme_;
     CompositionState state_;
     bool enable_shuangpin_helpcode_ = false;
+    bool shuangpin_helpcode_direct_ = true;
+    bool end_helpcode_uppercase_trigger_ = false;
     bool enable_mid_sentence_helpcode_ = false;
     bool enable_direct_helpcode_ = false;
     bool direct_helpcode_slash_marker_ = true;

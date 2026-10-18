@@ -158,6 +158,19 @@ std::vector<WordItem> ShuangpinEngine::query_unfiltered(const QueryRequest &requ
         return {};
     }
 
+    // 引导键触发的末尾辅助码：辅码由方案层从末尾段里取出，输入串里已经没有它们，不用再猜哪几个键是
+    // 辅码，也不会和「再打一个声母」混在一起，所以单码不补原拼音的候选。
+    if (!request.end_helpcodes.empty())
+    {
+        const std::string segmentation = shuangpin::segment_input(raw_input, profile_);
+        const auto base = query_normal(dictionary_, request, profile_);
+        auto filtered =
+            request.end_helpcodes.size() == 2
+                ? HelpcodeUtils::filter_candidates_with_double_helpcodes(base, request.end_helpcodes, helpcodes_.get())
+                : HelpcodeUtils::reorder_candidates_with_single_helpcode(base, request.end_helpcodes, helpcodes_.get());
+        return append_fuzzy(std::move(filtered), segmentation, request.fuzzy_pinyin, request.end_helpcodes);
+    }
+
     if (request.enable_shuangpin_helpcode)
     {
         // 双码辅助

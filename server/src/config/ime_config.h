@@ -344,11 +344,32 @@ bool GetConfiguredTsfPreeditShuangpinQuanpin();
 bool SetConfiguredTsfPreeditShuangpinQuanpin(bool enabled);
 bool GetConfiguredShuangpinHelpcodeEnabled();
 bool SetConfiguredShuangpinHelpcodeEnabled(bool enabled);
+// 双拼末尾辅助码直接触发（helpcode.shuangpin_helpcode_direct，默认开）：按输入形状认辅码。关掉后改由引导键
+// 触发（间接），触发键见下。
+bool GetConfiguredShuangpinHelpcodeDirect();
+bool SetConfiguredShuangpinHelpcodeDirect(bool enabled);
+// 双拼末尾辅助码（间接）的触发键，可多选：反引号（helpcode.shuangpin_helpcode_trigger_backtick，默认关）、
+// 分号（..._semicolon，默认开）和大写字母（..._uppercase，默认关）。取消不掉最后一个（返回 false）。与句中
+// 辅助码的触发键互斥：勾上一边的某个键会取消另一边的同一个键，哪怕那是另一边最后一个键。
+bool GetConfiguredShuangpinHelpcodeTriggerBacktick();
+bool SetConfiguredShuangpinHelpcodeTriggerBacktick(bool enabled);
+bool GetConfiguredShuangpinHelpcodeTriggerSemicolon();
+bool SetConfiguredShuangpinHelpcodeTriggerSemicolon(bool enabled);
+bool GetConfiguredShuangpinHelpcodeTriggerUppercase();
+bool SetConfiguredShuangpinHelpcodeTriggerUppercase(bool enabled);
+// 字符 ch（'`' 或 ';'）此刻是不是一个生效的末尾辅助码（间接）触发键：双拼辅助码开着、关着直接、没开直接
+// 辅助码、勾了这个键，且句中辅助码没占着它（手改配置两边都勾时句中辅助码优先）。
+bool IsConfiguredEndHelpcodeTrigger(wchar_t ch);
+// 末尾辅助码（间接）的大写触发此刻是否生效，条件同上。
+bool IsConfiguredEndHelpcodeUppercaseTrigger();
+// EndHelpcodeTriggersChanged 的载荷（FanyImeEndHelpcode::PayloadFor）：当前方案是双拼时上面三项生效的位。
+std::wstring FormatEndHelpcodeTriggersWorkerPayload();
 // 双拼句中辅助码（helpcode.shuangpin_mid_sentence_helpcode），默认关闭。
 bool GetConfiguredShuangpinMidSentenceHelpcodeEnabled();
 bool SetConfiguredShuangpinMidSentenceHelpcodeEnabled(bool enabled);
 // 句中辅助码的触发键，可多选：反引号（helpcode.shuangpin_mid_sentence_helpcode_backtick，默认开）
-// 和分号（helpcode.shuangpin_mid_sentence_helpcode_semicolon，默认关）。
+// 和分号（helpcode.shuangpin_mid_sentence_helpcode_semicolon，默认关）。与末尾辅助码（间接）的触发键互斥，
+// 规则同 SetConfiguredShuangpinHelpcodeTriggerBacktick。
 bool GetConfiguredShuangpinMidSentenceHelpcodeBacktick();
 bool SetConfiguredShuangpinMidSentenceHelpcodeBacktick(bool enabled);
 bool GetConfiguredShuangpinMidSentenceHelpcodeSemicolon();

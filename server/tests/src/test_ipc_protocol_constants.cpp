@@ -67,7 +67,8 @@ TEST_CASE(ipc_pipe_ready_is_a_distinct_server_reply)
     REQUIRE_EQ(Global::DataFromServerMsgTypeToTsfWorkerThread::AiContextUploadChanged, 34u);
     REQUIRE_EQ(Global::DataFromServerMsgTypeToTsfWorkerThread::UiLessCandidatesChanged, 35u);
     REQUIRE_EQ(Global::DataFromServerMsgTypeToTsfWorkerThread::TemporaryJapanesePolicyChanged, 36u);
-    REQUIRE_EQ(Global::DataFromServerMsgTypeToTsfWorkerThread::MaxKnown, 36u);
+    REQUIRE_EQ(Global::DataFromServerMsgTypeToTsfWorkerThread::EndHelpcodeTriggersChanged, 37u);
+    REQUIRE_EQ(Global::DataFromServerMsgTypeToTsfWorkerThread::MaxKnown, 37u);
     REQUIRE(Global::DataFromServerMsgTypeToTsfWorkerThread::FocusSessionReady >
             Global::DataFromServerMsgTypeToTsfWorkerThread::PagingCommaPeriodChanged);
     REQUIRE(Global::DataFromServerMsgTypeToTsfWorkerThread::PipeReady >
@@ -122,8 +123,10 @@ TEST_CASE(ipc_pipe_ready_is_a_distinct_server_reply)
             Global::DataFromServerMsgTypeToTsfWorkerThread::TrilingualCycleChanged);
     REQUIRE(Global::DataFromServerMsgTypeToTsfWorkerThread::UiLessCandidatesChanged >
             Global::DataFromServerMsgTypeToTsfWorkerThread::AiContextUploadChanged);
+    REQUIRE(Global::DataFromServerMsgTypeToTsfWorkerThread::EndHelpcodeTriggersChanged >
+            Global::DataFromServerMsgTypeToTsfWorkerThread::TemporaryJapanesePolicyChanged);
     REQUIRE_EQ(Global::DataFromServerMsgTypeToTsfWorkerThread::MaxKnown,
-               Global::DataFromServerMsgTypeToTsfWorkerThread::TemporaryJapanesePolicyChanged);
+               Global::DataFromServerMsgTypeToTsfWorkerThread::EndHelpcodeTriggersChanged);
 }
 
 TEST_CASE(ipc_client_suspension_is_a_distinct_nonterminal_route_reset)

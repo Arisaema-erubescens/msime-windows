@@ -74,6 +74,12 @@ class IInputSession
     {
         return false;
     }
+    // 光标停在 caret 处时能否开一段双拼末尾辅助码（间接），语义见 engine accepts_end_helpcode_marker_at。
+    // 默认不能。
+    virtual bool accepts_end_helpcode_marker(std::size_t) const
+    {
+        return false;
+    }
     // 光标停在 caret 处时 / 能否作为直接辅助码四码后的终止键插进编码串，语义见 engine
     // accepts_direct_helpcode_slash_at。默认不能。
     virtual bool accepts_direct_helpcode_slash(std::size_t) const

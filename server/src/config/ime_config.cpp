@@ -98,6 +98,10 @@ std::string g_tsf_preedit_style = "raw";
 bool g_tsf_preedit_shuangpin_quanpin = false;
 bool g_candidate_window_preedit_shuangpin_quanpin = false;
 bool g_shuangpin_helpcode_enabled = true;
+bool g_shuangpin_helpcode_direct = true;
+bool g_shuangpin_helpcode_trigger_backtick = false;
+bool g_shuangpin_helpcode_trigger_semicolon = true;
+bool g_shuangpin_helpcode_trigger_uppercase = false;
 bool g_shuangpin_mid_sentence_helpcode_enabled = false;
 bool g_shuangpin_mid_sentence_helpcode_backtick = true;
 bool g_shuangpin_mid_sentence_helpcode_semicolon = false;
@@ -492,6 +496,12 @@ bool LoadImeConfig()
         g_wubi_fifth_code_top_commit = tbl["input"]["wubi_fifth_code_top_commit"].value_or(true);
         g_shuangpin_preedit_mode = tbl["input"]["shuangpin_preedit_mode"].value_or(std::string("quanpin"));
         g_shuangpin_helpcode_enabled = tbl["helpcode"]["shuangpin_helpcode"].value_or(true);
+        g_shuangpin_helpcode_direct = tbl["helpcode"]["shuangpin_helpcode_direct"].value_or(true);
+        g_shuangpin_helpcode_trigger_backtick = tbl["helpcode"]["shuangpin_helpcode_trigger_backtick"].value_or(false);
+        g_shuangpin_helpcode_trigger_semicolon = tbl["helpcode"]["shuangpin_helpcode_trigger_semicolon"].value_or(true);
+        g_shuangpin_helpcode_trigger_uppercase =
+            tbl["helpcode"]["shuangpin_helpcode_trigger_uppercase"].value_or(false);
+        // 三个都关是合法状态（句中辅助码把最后一个键拿走了），不补默认：补出来的键可能正被句中辅助码占着。
         g_shuangpin_mid_sentence_helpcode_enabled = tbl["helpcode"]["shuangpin_mid_sentence_helpcode"].value_or(false);
         g_shuangpin_mid_sentence_helpcode_backtick =
             tbl["helpcode"]["shuangpin_mid_sentence_helpcode_backtick"].value_or(true);

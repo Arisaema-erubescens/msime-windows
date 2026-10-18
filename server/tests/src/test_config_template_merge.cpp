@@ -223,6 +223,31 @@ TEST_CASE(shipped_tsf_diagnostic_log_survives_template_upgrade)
     REQUIRE(!toml::parse(installed)["general"]["tsf_diagnostic_log"].value_or(true));
 }
 
+TEST_CASE(shipped_shuangpin_helpcode_triggers_default_and_survive_template_upgrade)
+{
+    std::ifstream input(MSIME_DEFAULT_CONFIG_PATH, std::ios::binary);
+    REQUIRE(static_cast<bool>(input));
+    const std::string installed((std::istreambuf_iterator<char>(input)), {});
+    const auto fresh = toml::parse(installed);
+    REQUIRE(fresh["helpcode"]["shuangpin_helpcode_direct"].value_or(false));
+    REQUIRE(!fresh["helpcode"]["shuangpin_helpcode_trigger_backtick"].value_or(true));
+    REQUIRE(fresh["helpcode"]["shuangpin_helpcode_trigger_semicolon"].value_or(false));
+    REQUIRE(!fresh["helpcode"]["shuangpin_helpcode_trigger_uppercase"].value_or(true));
+
+    const std::string configured = "[helpcode]\nshuangpin_helpcode_direct = false\n"
+                                   "shuangpin_helpcode_trigger_backtick = true\n"
+                                   "shuangpin_helpcode_trigger_semicolon = false\n"
+                                   "shuangpin_helpcode_trigger_uppercase = true\n";
+    for (const auto &baseline : {std::string(), installed})
+    {
+        const auto merged = toml::parse(MergeConfigIntoTemplate(installed, configured, baseline));
+        REQUIRE(!merged["helpcode"]["shuangpin_helpcode_direct"].value_or(true));
+        REQUIRE(merged["helpcode"]["shuangpin_helpcode_trigger_backtick"].value_or(false));
+        REQUIRE(!merged["helpcode"]["shuangpin_helpcode_trigger_semicolon"].value_or(true));
+        REQUIRE(merged["helpcode"]["shuangpin_helpcode_trigger_uppercase"].value_or(false));
+    }
+}
+
 TEST_CASE(shipped_vim_mode_apps_survive_template_upgrade)
 {
     // Only the TSF DLL reads this list; the template is what keeps it across upgrades.

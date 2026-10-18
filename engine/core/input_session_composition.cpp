@@ -790,7 +790,8 @@ bool InputSession::has_active_helpcode() const
     }
     if (is_shuangpin())
     {
-        return ResolveShuangpinCompositionBase(request(), shuangpin_profile_).helpcode_length > 0;
+        return !request().end_helpcodes.empty() ||
+               ResolveShuangpinCompositionBase(request(), shuangpin_profile_).helpcode_length > 0;
     }
     return HasActiveQuanpinHelpcode(request());
 }

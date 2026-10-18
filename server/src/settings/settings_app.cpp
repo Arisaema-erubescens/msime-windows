@@ -562,6 +562,10 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
           {"network", {{"proxy_mode", network_proxy.mode}, {"proxy_server", network_proxy.server}}},
           {"helpcode",
            {{"shuangpin_helpcode", GetConfiguredShuangpinHelpcodeEnabled()},
+            {"shuangpin_helpcode_direct", GetConfiguredShuangpinHelpcodeDirect()},
+            {"shuangpin_helpcode_trigger_backtick", GetConfiguredShuangpinHelpcodeTriggerBacktick()},
+            {"shuangpin_helpcode_trigger_semicolon", GetConfiguredShuangpinHelpcodeTriggerSemicolon()},
+            {"shuangpin_helpcode_trigger_uppercase", GetConfiguredShuangpinHelpcodeTriggerUppercase()},
             {"shuangpin_mid_sentence_helpcode", GetConfiguredShuangpinMidSentenceHelpcodeEnabled()},
             {"shuangpin_mid_sentence_helpcode_backtick", GetConfiguredShuangpinMidSentenceHelpcodeBacktick()},
             {"shuangpin_mid_sentence_helpcode_semicolon", GetConfiguredShuangpinMidSentenceHelpcodeSemicolon()},
@@ -954,6 +958,14 @@ bool ApplyConfigUpdate(const json::object &data)
         return SetConfiguredShowShuangpinHelpcodeInCandidateWindow(json::value_to<bool>(data.at("value")));
     if (path == "helpcode.shuangpin_helpcode")
         return SetConfiguredShuangpinHelpcodeEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "helpcode.shuangpin_helpcode_direct")
+        return SetConfiguredShuangpinHelpcodeDirect(json::value_to<bool>(data.at("value")));
+    if (path == "helpcode.shuangpin_helpcode_trigger_backtick")
+        return SetConfiguredShuangpinHelpcodeTriggerBacktick(json::value_to<bool>(data.at("value")));
+    if (path == "helpcode.shuangpin_helpcode_trigger_semicolon")
+        return SetConfiguredShuangpinHelpcodeTriggerSemicolon(json::value_to<bool>(data.at("value")));
+    if (path == "helpcode.shuangpin_helpcode_trigger_uppercase")
+        return SetConfiguredShuangpinHelpcodeTriggerUppercase(json::value_to<bool>(data.at("value")));
     if (path == "helpcode.shuangpin_mid_sentence_helpcode")
         return SetConfiguredShuangpinMidSentenceHelpcodeEnabled(json::value_to<bool>(data.at("value")));
     if (path == "helpcode.shuangpin_mid_sentence_helpcode_backtick")
