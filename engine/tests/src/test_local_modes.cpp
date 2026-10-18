@@ -424,6 +424,20 @@ int run_test()
                 shuangpin_exact_first.candidates[1].word == "😀",
             "Emoji lookup let a raw shuangpin exact match outrank the expanded full pinyin.");
 
+    // 混输只认整串精确命中：ku 不带出 kuxiao 的 😅，xiao 这样的前缀什么都不出。
+    using metasequoia::local_modes::query_mixed_emoji;
+    const auto mixed_exact = query_mixed_emoji("KU", SchemeType::Quanpin, others_database, 3);
+    require(!mixed_exact.diagnostic.has_value() && mixed_exact.candidates.size() == 2 &&
+                mixed_exact.candidates[0].word == "😢" && mixed_exact.candidates[1].word == "😭",
+            "Mixed emoji lookup did not return only exact key matches in catalog order.");
+    require(query_mixed_emoji("xiao", SchemeType::Quanpin, others_database, 3).candidates.empty() &&
+                query_mixed_emoji("xiaolia", SchemeType::Quanpin, others_database, 3).candidates.empty(),
+            "Mixed emoji lookup matched a key by prefix.");
+    // 双拼下只查展开后的全拼：xl → xiang 出 🐘，原始码 xl 的简拼键不算。
+    const auto mixed_shuangpin = query_mixed_emoji("xl", SchemeType::Shuangpin, others_database, 3);
+    require(mixed_shuangpin.candidates.size() == 1 && mixed_shuangpin.candidates[0].word == "🐘",
+            "Mixed emoji lookup let a raw shuangpin code match a jianpin key.");
+
     const auto kaomoji = metasequoia::local_modes::query_kaomoji("HAIXIU", SchemeType::Quanpin, others_database, 10);
     require(!kaomoji.diagnostic.has_value() && kaomoji.candidates.size() == 2 &&
                 kaomoji.candidates[0].word == "(*/ω＼*)" && kaomoji.candidates[1].word == "(^_^)" &&

@@ -106,9 +106,10 @@ void WorkerLoop()
         const bool expressive_prefix = request.input.size() >= kExpressiveMinimumPrefixLength;
         if (request.emoji && expressive_prefix)
         {
-            result.emoji = metasequoia::local_modes::query_emoji(request.input, request.scheme, others_db_path,
-                                                                 kExpressiveCandidateLimit,
-                                                                 GetShuangpinProfile(GetConfiguredShuangpinSchema()))
+            // emoji 和符号一样只认整串精确等于键，打到一半的前缀不混进来。
+            result.emoji = metasequoia::local_modes::query_mixed_emoji(
+                               request.input, request.scheme, others_db_path, kExpressiveCandidateLimit,
+                               GetShuangpinProfile(GetConfiguredShuangpinSchema()))
                                .candidates;
             if (IsStale(observed_generation))
                 continue;

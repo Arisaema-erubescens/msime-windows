@@ -64,11 +64,6 @@ class Pinyin:
             items.append(other)
         return items
 
-    def syllables(self) -> set[str]:
-        """单字表里出现过的全部无声调音节（ü 写成 v）。"""
-        return {self._plain(reading).replace("ü", "v") for readings in self._readings.values()
-                for reading in readings.split(",")}
-
     def full_and_initials(self, keyword: str) -> tuple[str, str]:
         items = self.lazy(keyword)
         return "".join(items), "".join(item[0] for item in items if item)

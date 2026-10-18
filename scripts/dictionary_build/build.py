@@ -158,11 +158,13 @@ def build_others(source: inputs.Inputs, path: Path, stage: Stages) -> None:
             groups = symbols_db.parse_wanxiang(textutil.read(source.source(symbols_db.WANXIANG)))
             codex = symbols_db.parse_codex(textutil.read(source.source(symbols_db.CODEX)))
             excluded = symbols_db.parse_unrenderable(textutil.read(source.source(symbols_db.UNRENDERABLE)))
+            readings = symbols_db.parse_readings(textutil.read(source.source(symbols_db.READINGS)))
             catalog = symbols_db.catalog_rows(pinyin, groups, codex, excluded)
-            codes = symbols_db.code_rows(groups, codex, excluded, pinyin.syllables())
+            codes = symbols_db.code_rows(groups, readings, codex, excluded)
             symbols_db.build(connection, catalog, codes)
-            return (f"{len(catalog)} panel symbols, {len(codes)} code rows from {len(groups)} groups and "
-                    f"{len(codex)} codex names, {len(excluded)} unrenderable left out")
+            return (f"{len(catalog)} panel symbols, {len(codes)} code rows from {len(groups)} groups, "
+                    f"{len(readings)} pinyin readings and {len(codex)} codex names, "
+                    f"{len(excluded)} unrenderable left out")
 
         stage("symbols", symbols)
     finally:

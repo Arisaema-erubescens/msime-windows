@@ -4,6 +4,7 @@
     wanxiang_symbols.yaml  rime-wanxiang 的符号表，取 symbols: 下 `'/编码': [符号, ...]` 分组
     codex_sym.txt          rime-wanxiang 从 typst/codex 生成的 `名称<TAB>符号`
     wanxiang-unrenderable.txt  Windows 自带字体显示不了的符号（scripts/check-symbol-rendering.py 生成），一律不入库
+以及 custom/symbols.txt：人工维护的 `拼音<TAB>符号`（dian → ·、，shuminghao → 《》），万象只按分组码收标点。
 
 万象表里不是符号的分组不收：Emoji 分类（E 模式和表情面板已有 emoji）、元素周期表（元素信息文本）、
 XCompose 合成（编码含标点，S 模式只能输入字母）。
@@ -21,6 +22,7 @@ from .others_db import Pinyin
 WANXIANG = "sources/symbols/wanxiang_symbols.yaml"
 CODEX = "sources/symbols/codex_sym.txt"
 UNRENDERABLE = "sources/symbols/wanxiang-unrenderable.txt"
+READINGS = "custom/symbols.txt"
 
 _GROUP_LINE = re.compile(r"""^ {4}(['"])/(.*?)\1:\s*\[(.*)\]\s*(?:#.*)?$""")
 _COMMENT_LINE = re.compile(r"^ {4}#\s*(.*?)\s*$")
@@ -29,8 +31,7 @@ _CODEPOINT = re.compile(r"U\+([0-9A-F]{4,6})\Z")
 
 # 万象用数字作编码的「同一个数的各种写法」：S 模式只能输入字母，改用读音作编码。
 DIGIT_CODES = {"0": "ling", "1": "yi", "2": "er", "3": "san", "4": "si", "5": "wu", "6": "liu", "7": "qi", "8": "ba",
-               "9": "jiu", "10": "shi"}
-# Dingbats 区的无衬线带圈数字 ➀–➉、➊–➓ 和 ①–⑩、❶–❿ 在候选窗里看不出区别，万象两套都收了，
+               "9": "jiu", "10": "shi"}# Dingbats 区的无衬线带圈数字 ➀–➉、➊–➓ 和 ①–⑩、❶–❿ 在候选窗里看不出区别，万象两套都收了，
 # 列在一起就像同一个符号出现了两次，所以不收。
 _VISUAL_DUPLICATES = ((0x2780, 0x2793),)
 # 数字别名混进普通候选时只取序号写法：带圈 ①–⑩、带括号 ⑴–⑽、带点 ⒈–⒑、带圈零 ⓪。
@@ -182,6 +183,19 @@ def parse_unrenderable(text: str) -> set[str]:
     return symbols
 
 
+def parse_readings(text: str) -> list[tuple[str, str]]:
+    """`编码<TAB>符号`，编码只含小写字母；同一编码的多行按文件顺序，混输时第一行紧跟首选。"""
+    entries = []
+    for number, line in enumerate(textutil.universal_lines(textutil.without_bom(text)), start=1):
+        if not line or line.startswith("#"):
+            continue
+        code, separator, symbol = line.partition("\t")
+        if not separator or not re.fullmatch(r"[a-z]+", code) or not symbol or "\t" in symbol:
+            raise ValueError(f"{READINGS}:{number}: expected lowercase pinyin<TAB>symbol")
+        entries.append((code, symbol))
+    return entries
+
+
 def input_code(code: str) -> str | None:
     """S 模式能输入的编码：只含字母，统一小写（万象的 /a 与 /A 合成一个 a）；数字编码改用读音。"""
     if _CODE.match(code):
@@ -189,21 +203,14 @@ def input_code(code: str) -> str | None:
     return DIGIT_CODES.get(code)
 
 
-def reads_as_pinyin(code: str, syllables: set[str]) -> bool:
-    """整串能切成完整的拼音音节（yi、xi、zeta = ze + ta）。"""
-    reachable = [True] + [False] * len(code)
-    for end in range(1, len(code) + 1):
-        reachable[end] = any(reachable[start] and code[start:end] in syllables for start in range(max(0, end - 6), end))
-    return reachable[-1]
+def code_rows(groups: list[Group], readings: list[tuple[str, str]], codex: list[tuple[str, str]],
+              excluded: set[str]) -> list[tuple]:
+    """symbol_code 的行：(编码, 符号, sort_order, 可混输)。万象分组在前、按文件顺序，然后是 custom/symbols.txt 的拼音读音，
+    codex 名称在后。
 
-
-def code_rows(groups: list[Group], codex: list[tuple[str, str]], excluded: set[str],
-              syllables: set[str]) -> list[tuple]:
-    """symbol_code 的行：(编码, 符号, sort_order, 可混输)。万象分组在前、按文件顺序，codex 名称在后。
-
-    可混输：符号混输只在普通拼音候选里认整串精确匹配。读得成拼音的编码（希腊字母名 xi、假名 ji）一混进来，
-    打「西」「几」都会冒出符号，所以只留给 S 模式。数字别名（yi、er）例外：打 yi 想要 ① 是常见用法，
-    但只混序号写法（① ⑴ ⒈ ⓪），一、壹、¹ 这些仍只在 S 模式里出。
+    可混输：符号混输只在普通拼音候选里认整串精确匹配，所以读得成拼音的编码（dian、xi）也照样混进来，
+    只有单字母编码不混（混输从两个字母起才查）。数字别名（yi、er）只混序号写法（① ⑴ ⒈ ⓪），
+    一、壹、¹ 这些仍只在 S 模式里出。
     """
     rows, seen = [], set()
 
@@ -214,7 +221,7 @@ def code_rows(groups: list[Group], codex: list[tuple[str, str]], excluded: set[s
         if digit:
             mixed = 1 if len(symbol) == 1 and any(low <= ord(symbol) <= high for low, high in _SEQUENCE_NUMBERS) else 0
         else:
-            mixed = 1 if len(code) >= 2 and not reads_as_pinyin(code, syllables) else 0
+            mixed = 1 if len(code) >= 2 else 0
         rows.append((code, symbol, len(rows), mixed))
 
     for group in groups:
@@ -223,6 +230,8 @@ def code_rows(groups: list[Group], codex: list[tuple[str, str]], excluded: set[s
             continue
         for symbol in group.items:
             add(code, symbol, digit=group.code in DIGIT_CODES)
+    for code, symbol in readings:
+        add(code, symbol)
     for name, symbol in codex:
         code = name.replace(".", "").lower()
         if _CODE.match(code):

@@ -834,9 +834,9 @@ void PrepareCandidateList(uint64_t client_id, uint64_t activation_epoch)
         mixed.english = GetConfiguredEnglishCandidatesEnabled();
         mixed.english_min_prefix = static_cast<size_t>(GetConfiguredEnglishMixedInputMinChars());
         mixed.english_first_page_count = static_cast<size_t>(GetConfiguredEnglishMixedInputFirstPageCount());
-        mixed.emoji = GetConfiguredEmojiMixedInputEnabled();
+        // emoji 和符号按整串编码精确匹配，光标前缀截断时整串不是用户要的编码。
+        mixed.emoji = GetConfiguredEmojiMixedInputEnabled() && g_inputSession->prefix_end() == current_input.size();
         mixed.kaomoji = GetConfiguredKaomojiMixedInputEnabled();
-        // 符号按整串编码精确匹配，光标前缀截断时整串不是用户要的编码。
         if (GetConfiguredSymbolMixedInputEnabled() && g_inputSession->prefix_end() == current_input.size())
             mixed.symbol_codes = SymbolMixedCodes(current_input, scheme);
         if (GetConfiguredDateTimeCandidatesEnabled() && g_inputSession->prefix_end() == current_input.size())
