@@ -1347,7 +1347,7 @@ struct InputPage
         bool ok = false;
         if (provider == "ai")
         {
-            text = L"请先在 AI 辅助页面填写接口地址、Token 和模型";
+            text = L"请先在「AI 与云联想」页面填写接口地址、Token 和模型";
             ok = AiUsable();
         }
         else if (provider == "custom")
@@ -1802,9 +1802,9 @@ VisualPtr BuildInputPage(PageContext &context)
                                                    L"API Key（可选，以 Bearer Token 发送）", L"留空表示不鉴权", true),
                                              true}}))});
         s->aiSummary = std::make_shared<ApiField>(L"当前服务商与模型", L"未配置", false, true);
-        auto ai =
-            Col({heading(L"复用 AI 辅助配置", L"使用 AI 辅助页当前服务商的接口地址、Token 与模型，无需在此重复填写"),
-                 blockInput(grid({{s->aiSummary, true}}))});
+        auto ai = Col(
+            {heading(L"复用 AI 辅助配置", L"使用「AI 与云联想」页当前服务商的接口地址、Token 与模型，无需在此重复填写"),
+             blockInput(grid({{s->aiSummary, true}}))});
         s->providerFields["tencent"] = std::make_shared<Hideable>(tencent, true);
         s->providerFields["niutrans"] = std::make_shared<Hideable>(niutrans, false);
         s->providerFields["custom"] = std::make_shared<Hideable>(custom, false);
@@ -1917,7 +1917,6 @@ VisualPtr BuildInputPage(PageContext &context)
     page.AddSection(MakeRow(
         L"简繁输入", L"",
         BindDropdown(context, "input.character_set", Options({{"simplified", L"简体"}, {"traditional", L"繁体"}}))));
-    page.AddSection(MakeRow(L"云候选", L"", Toggle(context, "general.cloud_candidates")));
 
     // ---- 整句候选 ----
     {
