@@ -481,7 +481,8 @@ void PublishBuiltCandidatePage(const std::wstring &candidate_string)
     snapshot->page_count = ui.current_page_count();
     snapshot->page_item_count = ui.cur_page_item_cnt;
     snapshot->has_previous_page = ui.has_prev_page();
-    snapshot->has_next_page = ui.has_next_page() || ui.is_current_page_full();
+    snapshot->has_next_page =
+        ui.has_next_page() || (ui.is_current_page_full() && FanyNamedPipe::CanExpandCandidatesKeepingPagePosition());
     if (Global::candidate_expand_panel_open.load(std::memory_order_acquire) && !IsUiLessMode())
     {
         // 展开面板只显示文字，徽标、辅助码与译文仍只在首行（当前页）上。
@@ -589,6 +590,21 @@ FanyImeIpc::EnglishPlacement CurrentEnglishPlacement(const std::vector<WordItem>
     return placement;
 }
 
+namespace
+{
+bool CandidateListAcceptsExpansion()
+{
+    // 译文页、日期页是一份固定的列表，session 里再多的候选也不属于它。
+    return !IsCandidateSubPageActive() &&
+           !IsSpecialModeCompositionActive(GlobalIme::composition.raw_input_with_cases) && g_inputSession;
+}
+} // namespace
+
+bool CanExpandCandidatesKeepingPagePosition()
+{
+    return CandidateListAcceptsExpansion() && g_inputSession->can_expand_initial_candidates();
+}
+
 // Pulls the next batch of candidates out of the session without disturbing
 // where the user currently is: set_items resets the page and the selection, so
 // both are restored afterwards. Returns false when nothing more was loaded, or
@@ -596,9 +612,7 @@ FanyImeIpc::EnglishPlacement CurrentEnglishPlacement(const std::vector<WordItem>
 bool ExpandCandidatesKeepingPagePosition()
 {
     auto &ui = Global::candidate_ui;
-    // 译文页、日期页是一份固定的列表，session 里再多的候选也不属于它。
-    if (IsCandidateSubPageActive() || IsSpecialModeCompositionActive(GlobalIme::composition.raw_input_with_cases) ||
-        !g_inputSession || !g_inputSession->expand_initial_candidates())
+    if (!CandidateListAcceptsExpansion() || !g_inputSession->expand_initial_candidates())
     {
         return false;
     }

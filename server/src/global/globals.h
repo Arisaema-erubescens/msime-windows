@@ -439,7 +439,7 @@ struct CandidatePageSnapshot
     int page_count = 0;
     int page_item_count = 0;
     // 翻页箭头的可用状态。候选是分批展开的，满页的最后一页后面可能还能展开出下一页，
-    // 所以满页时下一页箭头保持可点；真的展开不出来时翻页任务什么也不做。
+    // 所以满页且引擎还能展开首字母候选时下一页箭头保持可点；展开不了的末页满页置灰。
     bool has_previous_page = false;
     bool has_next_page = false;
     // 卷轴展开面板打开时（candidate_expand_panel_open）才填：当前页之后的候选显示文字，

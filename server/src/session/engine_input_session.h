@@ -29,6 +29,7 @@ class EngineInputSession : public IInputSession
     void reset_sentence_cache() override;
 
     const std::vector<WordItem> &get_candidates() const override;
+    bool can_expand_initial_candidates() const override;
     bool expand_initial_candidates() override;
     std::string get_helpcode_annotation(const std::string &word, bool uppercase_all) const override;
     std::optional<WordItem> find_candidate(const std::string &key, const std::string &value) override;

@@ -207,6 +207,8 @@ std::string EnglishRankingContextKey();
 std::string EnglishInputKey();
 int EnglishSlotMaximum();
 FanyImeIpc::EnglishPlacement CurrentEnglishPlacement(const std::vector<WordItem> &items);
+// 只判断 ExpandCandidatesKeepingPagePosition 还有没有可能展开出新候选，不改任何状态。
+bool CanExpandCandidatesKeepingPagePosition();
 bool ExpandCandidatesKeepingPagePosition();
 PageMoveResult MoveCandidatePage(int offset);
 // 把当前页挪到卷轴展开面板里点中的那个候选所在的页，返回它在页内的下标；核对不上返回 -1。

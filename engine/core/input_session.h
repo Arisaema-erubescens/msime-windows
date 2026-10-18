@@ -195,6 +195,7 @@ class InputSession
     void reset_sentence_cache();
 
     const std::vector<WordItem> &get_candidates() const;
+    bool can_expand_initial_candidates() const;
     bool expand_initial_candidates();
     std::optional<WordItem> find_candidate(const std::string &key, const std::string &value);
 

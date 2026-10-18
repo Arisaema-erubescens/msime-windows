@@ -1347,7 +1347,9 @@ TEST_CASE(EngineShuangpinInitialVQueriesZhCandidatesAndExpands)
     }));
     const auto initial_count = initial_candidates.size();
 
+    REQUIRE(session.can_expand_initial_candidates());
     REQUIRE(session.expand_initial_candidates());
+    REQUIRE(!session.can_expand_initial_candidates());
     const auto &expanded_candidates = session.get_candidates();
     REQUIRE(expanded_candidates.size() > initial_count);
     REQUIRE(
@@ -1367,9 +1369,23 @@ TEST_CASE(EngineQuanpinInitialCandidatesStartLimitedAndExpand)
                         [](const IInputSession::WordItem &item) { return item.pinyin.rfind("z", 0) == 0; }));
     const auto initial_count = initial_candidates.size();
 
+    REQUIRE(session.can_expand_initial_candidates());
     REQUIRE(session.expand_initial_candidates());
+    // 展开过一次就到底了：候选窗满页末页的下一页箭头靠这个置灰。
+    REQUIRE(!session.can_expand_initial_candidates());
+    REQUIRE(!session.expand_initial_candidates());
     const auto &expanded_candidates = session.get_candidates();
     REQUIRE(expanded_candidates.size() > initial_count);
+}
+
+TEST_CASE(EngineQuanpinFullSyllableCandidatesCannotExpand)
+{
+    EngineInputSession session(SchemeType::Quanpin);
+    InputLetters(session, "nihao");
+
+    REQUIRE(!session.get_candidates().empty());
+    REQUIRE(!session.can_expand_initial_candidates());
+    REQUIRE(!session.expand_initial_candidates());
 }
 
 TEST_CASE(EngineQuanpinSegmentedInitialCandidatesExpandInPlace)

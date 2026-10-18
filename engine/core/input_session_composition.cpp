@@ -557,6 +557,11 @@ const std::vector<WordItem> &InputSession::get_candidates() const
     return candidates();
 }
 
+bool InputSession::can_expand_initial_candidates() const
+{
+    return engine_.can_expand_initial_candidates();
+}
+
 bool InputSession::expand_initial_candidates()
 {
     return engine_.expand_initial_candidates();

@@ -164,6 +164,11 @@ const std::vector<IInputSession::WordItem> &EngineInputSession::get_candidates()
     return session_.get_candidates();
 }
 
+bool EngineInputSession::can_expand_initial_candidates() const
+{
+    return session_.can_expand_initial_candidates();
+}
+
 bool EngineInputSession::expand_initial_candidates()
 {
     return session_.expand_initial_candidates();

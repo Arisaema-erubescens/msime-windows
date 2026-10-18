@@ -198,17 +198,30 @@ std::vector<WordItem> ShuangpinEngine::query_unfiltered(const QueryRequest &requ
                         request.fuzzy_pinyin);
 }
 
-bool ShuangpinEngine::expand_initial_candidates(const QueryRequest &request, std::vector<WordItem> &candidates)
+std::string ShuangpinEngine::expandable_initial_code(const QueryRequest &request) const
 {
     if (request.scheme != SchemeType::Shuangpin)
     {
-        return false;
+        return {};
     }
 
     const std::string segmentation = shuangpin::segment_input(request.raw_input, profile_);
     const size_t separator = segmentation.find('\'');
-    const std::string initial_code = segmentation.substr(0, separator);
-    if (initial_code.size() != 1)
+    std::string initial_code = segmentation.substr(0, separator);
+    return initial_code.size() == 1 ? initial_code : std::string{};
+}
+
+bool ShuangpinEngine::can_expand_initial_candidates(const QueryRequest &request,
+                                                    const std::vector<WordItem> &candidates) const
+{
+    const std::string initial_code = expandable_initial_code(request);
+    return !initial_code.empty() && ShuangpinDictionary::can_expand_initial_candidates(initial_code, candidates);
+}
+
+bool ShuangpinEngine::expand_initial_candidates(const QueryRequest &request, std::vector<WordItem> &candidates)
+{
+    const std::string initial_code = expandable_initial_code(request);
+    if (initial_code.empty())
     {
         return false;
     }

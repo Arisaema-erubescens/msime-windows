@@ -373,6 +373,11 @@ std::optional<WordItem> ImeSession::find_candidate(SchemeType scheme, const std:
     return provider_registry_.find_candidate(scheme, key, value);
 }
 
+bool ImeSession::can_expand_initial_candidates() const
+{
+    return provider_registry_.can_expand_initial_candidates(state_.request, state_.candidates);
+}
+
 bool ImeSession::expand_initial_candidates()
 {
     return provider_registry_.expand_initial_candidates(state_.request, state_.candidates);

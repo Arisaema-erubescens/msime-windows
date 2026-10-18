@@ -113,6 +113,8 @@ class ImeSession
         return wubi_scheme_ != nullptr && wubi_scheme_->has_complete_code();
     }
     const std::vector<WordItem> &get_candidates() const;
+    // 只判断还能不能展开首字母候选，不查库也不改候选；候选窗据此决定满页末页的下一页箭头。
+    bool can_expand_initial_candidates() const;
     bool expand_initial_candidates();
 
     void set_helpcode_keymap(HelpcodeUtils::SharedKeymap table)
