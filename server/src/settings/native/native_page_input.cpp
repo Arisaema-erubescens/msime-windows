@@ -1669,20 +1669,6 @@ VisualPtr BuildInputPage(PageContext &context)
                                false);
     }
 
-    // ---- 翻页方式 ----
-    {
-        auto list = OptionList({BindCheck(context, L"- / =", "general.paging_minus_equal"),
-                                BindCheck(context, L", / .", "general.paging_comma_period"),
-                                BindCheck(context, L"[ / ]", "general.paging_brackets"),
-                                BindCheck(context, L"Shift+Tab / Tab", "general.paging_tab"),
-                                BindCheck(context, L"PageUp / PageDown", "general.paging_page_up_down"),
-                                BindCheck(context, L"上 / 下（移动候选项）", "general.candidate_arrow_navigation"),
-                                BindCheck(context, L"鼠标滚轮", "general.paging_mouse_wheel")});
-        list->Add(
-            Description(L"滚轮翻页依赖系统设置「当我悬停在非活动窗口上方时滚动它们」，该项关闭时滚轮不会到达候选窗口"));
-        page.AddSection(Col({MakeTitle(L"翻页方式"), list}));
-    }
-
     // ---- 输入纠错 ----
     page.AddSection(
         Col({MakeTitleBlock(
@@ -1880,6 +1866,17 @@ VisualPtr BuildInputPage(PageContext &context)
             [model](const std::string &value) { model->Update("input.punctuation_lock", value); });
         page.AddSection(Col({MakeTitle(L"固定标点"), Description(L"切换中英文时的标点形态，三者互斥"),
                              OptionList({follow, chinese, english})}));
+    }
+
+    // ---- 顿号自定义 ----
+    {
+        std::vector<VisualPtr> keys;
+        for (auto &check : AtLeastOneChecks(context, {{L"\\ 反斜杠", "input.enumeration_comma_backslash"},
+                                                      {L"/ 斜杠", "input.enumeration_comma_slash"}}))
+            keys.push_back(check);
+        page.AddSection(Col({MakeTitle(L"顿号自定义"),
+                             Description(L"中文标点状态下用哪些键输出顿号「、」，至少保留一个；未勾选的键按原样输出"),
+                             OptionList(keys)}));
     }
 
     // ---- 智能标点 ----

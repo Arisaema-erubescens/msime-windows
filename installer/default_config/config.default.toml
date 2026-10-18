@@ -279,6 +279,9 @@ smart_punctuation_direct_letter = false
 smart_punctuation_repeat_to_chinese = false
 # 成对标点补全：输入左侧符号时自动补全右侧符号，并将光标置于中间
 paired_punctuation = true
+# 顿号自定义：中文标点下 \ 和 / 是否输出顿号「、」，至少保留一个；没开的键按原样输出
+enumeration_comma_backslash = true
+enumeration_comma_slash = true
 # 标点锁定，可选："follow"（随中英文切换）, "chinese"（始终中文标点）, "english"（始终英文标点）
 punctuation_lock = "follow"
 # Vim 模式：在列出的应用里，交给应用的无修饰键 Esc 同时把输入法切到英文。按可执行文件名匹配，不区分大小写，

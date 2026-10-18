@@ -33,6 +33,29 @@ TEST_CASE(radical_mode_upgrade_inherits_renamed_unicode_mode_switch)
                 .find("radical_mode = true") != std::string::npos);
 }
 
+TEST_CASE(enumeration_comma_slash_defaults_on_only_for_new_installs)
+{
+    std::ifstream input(MSIME_DEFAULT_CONFIG_PATH, std::ios::binary);
+    REQUIRE(static_cast<bool>(input));
+    const std::string installed((std::istreambuf_iterator<char>(input)), {});
+    // 新装：没有旧配置，出厂模板里 \ 和 / 都开。
+    const auto fresh = toml::parse(MergeConfigIntoTemplate(installed, "", ""));
+    REQUIRE(fresh["input"]["enumeration_comma_backslash"].value_or(false));
+    REQUIRE(fresh["input"]["enumeration_comma_slash"].value_or(false));
+    // 升级：旧配置没有这两个键，保持原来只有 \ 出顿号。
+    const std::string legacy = "[input]\npaired_punctuation = true\n";
+    const auto upgraded = toml::parse(MergeConfigIntoTemplate(installed, legacy, legacy));
+    REQUIRE(upgraded["input"]["enumeration_comma_backslash"].value_or(false));
+    REQUIRE(!upgraded["input"]["enumeration_comma_slash"].value_or(true));
+    // 已经有这个键（新装后的下一次升级，或用户在设置页改过）时以用户的值为准。
+    const std::string chosen = legacy + "enumeration_comma_slash = true\n";
+    REQUIRE(
+        toml::parse(MergeConfigIntoTemplate(installed, chosen, installed))["input"]["enumeration_comma_slash"].value_or(
+            false));
+    const auto again = MergeConfigIntoTemplate(installed, installed, installed);
+    REQUIRE(toml::parse(again)["input"]["enumeration_comma_slash"].value_or(false));
+}
+
 TEST_CASE(shortcut_config_upgrade_preserves_word_selection_and_adds_defaults)
 {
     const std::string old_config =

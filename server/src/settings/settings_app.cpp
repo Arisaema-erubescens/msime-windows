@@ -334,6 +334,8 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
             {"smart_punctuation_direct_letter", GetConfiguredSmartPunctuationDirectLetterEnabled()},
             {"smart_punctuation_repeat_to_chinese", GetConfiguredSmartPunctuationRepeatToChineseEnabled()},
             {"paired_punctuation", GetConfiguredPairedPunctuationEnabled()},
+            {"enumeration_comma_backslash", GetConfiguredEnumerationCommaBackslashEnabled()},
+            {"enumeration_comma_slash", GetConfiguredEnumerationCommaSlashEnabled()},
             {"punctuation_lock", GetConfiguredPunctuationLock()},
             {"fuzzy_pinyin", GetConfiguredFuzzyPinyinEnabled()},
             {"fuzzy_z_zh", fuzzy_rules.enabled(metasequoia::FuzzyPinyinRule::Z_ZH)},
@@ -677,6 +679,10 @@ bool ApplyConfigUpdate(const json::object &data)
         return SetConfiguredSmartPunctuationRepeatToChineseEnabled(json::value_to<bool>(data.at("value")));
     if (path == "input.paired_punctuation")
         return SetConfiguredPairedPunctuationEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "input.enumeration_comma_backslash")
+        return SetConfiguredEnumerationCommaBackslashEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "input.enumeration_comma_slash")
+        return SetConfiguredEnumerationCommaSlashEnabled(json::value_to<bool>(data.at("value")));
     if (path == "input.punctuation_lock")
         return SetConfiguredPunctuationLock(json::value_to<std::string>(data.at("value")));
     constexpr std::string_view input_section_prefix = "input.";

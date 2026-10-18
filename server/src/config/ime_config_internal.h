@@ -246,6 +246,8 @@ extern bool g_smart_punctuation_direct_digit_enabled;
 extern bool g_smart_punctuation_direct_letter_enabled;
 extern bool g_smart_punctuation_repeat_to_chinese_enabled;
 extern bool g_paired_punctuation_enabled;
+extern bool g_enumeration_comma_backslash_enabled;
+extern bool g_enumeration_comma_slash_enabled;
 extern std::string g_punctuation_lock;
 extern std::string g_candidate_window_layout;
 extern bool g_candidate_window_follow_cursor;

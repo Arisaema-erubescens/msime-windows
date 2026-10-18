@@ -700,7 +700,9 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
         return false;
     }
 
-    if (shadow.punctuationOpen && _pCompositionProcessorEngine->IsPunctuation(*classifiedWch))
+    // Same numpad '/' exception as _IsKeyEaten.
+    if (shadow.punctuationOpen && *classifiedCode != VK_DIVIDE &&
+        _pCompositionProcessorEngine->IsPunctuation(*classifiedWch))
     {
         return setKeyState(CATEGORY_COMPOSING, FUNCTION_PUNCTUATION);
     }

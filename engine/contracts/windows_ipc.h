@@ -463,7 +463,11 @@ constexpr std::uint32_t TemporaryJapanesePolicyChanged = 36;
 // AcceptsEndMarkerAt) and records them as FanyImeMidSentenceHelpcode::kEndMarker; with the uppercase bit it counts an
 // uppercase end block as no keys of the chunk. Older DLLs ignore the opcode and keep treating the keys as punctuation.
 constexpr std::uint32_t EndHelpcodeTriggersChanged = 37;
-constexpr std::uint32_t MaxKnown = EndHelpcodeTriggersChanged;
+// Which keys produce the enumeration comma 、 under Chinese punctuation. Payload one character '1'..'3', see
+// FanyImeEnumerationComma::PayloadFor: bit 1 '\', bit 2 '/'. A key whose bit is clear is not Chinese punctuation and
+// passes through as itself. Older DLLs ignore the opcode and keep '\' only.
+constexpr std::uint32_t EnumerationCommaKeysChanged = 38;
+constexpr std::uint32_t MaxKnown = EnumerationCommaKeysChanged;
 // Source compatibility for the Server's historical spellings.
 constexpr std::uint32_t SwitchToEn = SwitchToEnglish;
 constexpr std::uint32_t SwitchToCn = SwitchToChinese;

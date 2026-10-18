@@ -621,6 +621,14 @@ bool GetConfiguredSmartPunctuationRepeatToChineseEnabled();
 bool SetConfiguredSmartPunctuationRepeatToChineseEnabled(bool enabled);
 bool GetConfiguredPairedPunctuationEnabled();
 bool SetConfiguredPairedPunctuationEnabled(bool enabled);
+// 顿号自定义：中文标点下 \（input.enumeration_comma_backslash）和 /（input.enumeration_comma_slash）是否出「、」，
+// 新装默认都开（升级用户的 / 由模板合并补成关），至少留一个，关掉最后一个的写入不收。
+bool GetConfiguredEnumerationCommaBackslashEnabled();
+bool SetConfiguredEnumerationCommaBackslashEnabled(bool enabled);
+bool GetConfiguredEnumerationCommaSlashEnabled();
+bool SetConfiguredEnumerationCommaSlashEnabled(bool enabled);
+// Worker payload for EnumerationCommaKeysChanged (FanyImeEnumerationComma::PayloadFor).
+std::wstring FormatEnumerationCommaWorkerPayload();
 // "follow" | "chinese" | "english" — punctuation stays put when switching CN/EN.
 const std::string &GetConfiguredPunctuationLock();
 bool SetConfiguredPunctuationLock(const std::string &lock);

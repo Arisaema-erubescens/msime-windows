@@ -249,40 +249,6 @@ std::shared_ptr<Dropdown> SchemeDropdown(PageContext &context, std::string path)
     return dropdown;
 }
 
-// A group of config checkboxes where the last checked one cannot be unchecked.
-std::vector<std::shared_ptr<CheckOption>> AtLeastOneChecks(
-    PageContext &context, const std::vector<std::pair<std::wstring, std::string>> &items)
-{
-    auto checks = std::make_shared<std::vector<std::shared_ptr<CheckOption>>>();
-    SettingsModel *model = &context.model;
-    for (size_t i = 0; i < items.size(); ++i)
-    {
-        auto check = std::make_shared<CheckOption>(items[i].first, model->GetBool(items[i].second));
-        const std::string path = items[i].second;
-        // The group outlives none of its checks: the page and its controls live as long as
-        // the window, so the checks simply share it.
-        std::vector<std::shared_ptr<CheckOption>> *all = checks.get();
-        CheckOption *self = check.get();
-        check->SetOnChanged([checks, all, self, model, path](bool checked) {
-            const bool anyChecked =
-                std::any_of(all->begin(), all->end(), [](const auto &item) { return item->IsChecked(); });
-            if (!anyChecked)
-            {
-                self->SetChecked(true);
-                return;
-            }
-            model->Update(path, checked);
-        });
-        std::weak_ptr<CheckOption> weak = check;
-        context.OnConfig([weak, model, path]() {
-            if (auto control = weak.lock())
-                control->SetChecked(model->GetBool(path));
-        });
-        checks->push_back(check);
-    }
-    return *checks;
-}
-
 // The trigger keys of the shuangpin end helpcode (indirect) and the mid-sentence helpcode (indirect). Both
 // groups list the same keys in the same order, and a key belongs to one group at most: checking it on one
 // side unchecks it on the other, which the host does too (SetHelpcodeTrigger), even when that was the

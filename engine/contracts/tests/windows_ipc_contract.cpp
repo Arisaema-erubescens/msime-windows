@@ -1,5 +1,6 @@
 #include "../date_time_input.h"
 #include "../direct_helpcode.h"
+#include "../enumeration_comma.h"
 #include "../ipc_negotiation.h"
 #include "../mid_sentence_helpcode.h"
 #include "../trilingual_input.h"
@@ -44,7 +45,7 @@ int main()
     CHECK((FanyImeProtocol::Negotiate(FanyImeProtocol::Hello(7, 124), rCapabilities).capabilities &
            FanyImeProtocol::TemporaryJapaneseLongVowel) == 0);
     CHECK(FanyImeWorkerReplyType::TemporaryJapanesePolicyChanged == 36);
-    CHECK(FanyImeWorkerReplyType::MaxKnown == 37);
+    CHECK(FanyImeWorkerReplyType::MaxKnown == 38);
     for (wchar_t payload = L'0'; payload <= L'3'; ++payload)
     {
         CHECK(FanyImeTemporaryJapanese::IsValidPayload(payload));
@@ -239,7 +240,17 @@ int main()
     CHECK(FanyImeWorkerReplyType::UiLessCandidatesChanged == 35);
     CHECK(FanyImeWorkerReplyType::TemporaryJapanesePolicyChanged == 36);
     CHECK(FanyImeWorkerReplyType::EndHelpcodeTriggersChanged == 37);
-    CHECK(FanyImeWorkerReplyType::MaxKnown == FanyImeWorkerReplyType::EndHelpcodeTriggersChanged);
+    CHECK(FanyImeWorkerReplyType::EnumerationCommaKeysChanged == 38);
+    CHECK(FanyImeWorkerReplyType::MaxKnown == FanyImeWorkerReplyType::EnumerationCommaKeysChanged);
+    // EnumerationCommaKeysChanged 的载荷：\ 和 / 各一位，两个都没勾按只有 \ 发。
+    CHECK(FanyImeEnumerationComma::PayloadFor(true, false) == L'1' &&
+          FanyImeEnumerationComma::PayloadFor(false, true) == L'2' &&
+          FanyImeEnumerationComma::PayloadFor(true, true) == L'3' &&
+          FanyImeEnumerationComma::PayloadFor(false, false) == L'1');
+    CHECK(FanyImeEnumerationComma::KeysFromPayload(L'3') ==
+              (FanyImeEnumerationComma::kBackslash | FanyImeEnumerationComma::kSlash) &&
+          !FanyImeEnumerationComma::IsValidPayload(L'0') && !FanyImeEnumerationComma::IsValidPayload(L'4') &&
+          FanyImeEnumerationComma::KeysFromPayload(L'x') == FanyImeEnumerationComma::kBackslash);
     {
         const auto full = FanyImeUiLessPage::Parse(FanyImeUiLessPage::Format(L"ni hao", L"你好,拟好", 1, 42));
         CHECK(full.preedit == L"ni hao" && full.page == L"你好,拟好" && full.selection == 1 && full.generation == 42);

@@ -12,6 +12,7 @@
 
 #include "../../../engine/contracts/windows_ipc.h"
 #include "../../../engine/contracts/direct_helpcode.h"
+#include "../../../engine/contracts/enumeration_comma.h"
 #include "../../../engine/contracts/mid_sentence_helpcode.h"
 #include "../../../engine/contracts/v_mode_input.h"
 #include "../../../engine/contracts/temporary_japanese_input.h"
@@ -279,6 +280,9 @@ inline std::atomic_bool SmartPunctuationDirectDigitEnabled{false};
 inline std::atomic_bool SmartPunctuationDirectLetterEnabled{false};
 // Default on until the Server sends the persisted setting.
 inline std::atomic_bool PairedPunctuationEnabled{true};
+// 中文标点下出顿号的键，FanyImeEnumerationComma::kBackslash / kSlash 的组合。Server 连上之前（以及不发这个
+// 消息的旧 Server）保持历史行为：只有 \。规则见 engine/contracts/enumeration_comma.h。
+inline std::atomic<unsigned> EnumerationCommaKeys{FanyImeEnumerationComma::kLegacyKeys};
 inline std::atomic_bool MicrosoftShuangpinEnabled{false};
 // 双拼句中辅助码开着、勾了反引号且当前是双拼：组合中的反引号按
 // engine/contracts/mid_sentence_helpcode.h 的形状规则当编码键吃掉，见 CompositionProcessorEngine_KeyClassify.cpp。

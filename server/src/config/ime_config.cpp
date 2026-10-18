@@ -205,6 +205,8 @@ bool g_smart_punctuation_direct_digit_enabled = false;
 bool g_smart_punctuation_direct_letter_enabled = false;
 bool g_smart_punctuation_repeat_to_chinese_enabled = false;
 bool g_paired_punctuation_enabled = true;
+bool g_enumeration_comma_backslash_enabled = true;
+bool g_enumeration_comma_slash_enabled = true;
 std::string g_punctuation_lock = "follow";
 std::string g_candidate_window_layout = "vertical";
 bool g_candidate_window_follow_cursor = true;
@@ -693,6 +695,14 @@ bool LoadImeConfig()
         g_smart_punctuation_repeat_to_chinese_enabled =
             tbl["input"]["smart_punctuation_repeat_to_chinese"].value_or(false);
         g_paired_punctuation_enabled = tbl["input"]["paired_punctuation"].value_or(true);
+        g_enumeration_comma_backslash_enabled = tbl["input"]["enumeration_comma_backslash"].value_or(true);
+        g_enumeration_comma_slash_enabled = tbl["input"]["enumeration_comma_slash"].value_or(true);
+        // 至少留一个出顿号的键：手改成两个都关时按默认处理。
+        if (!g_enumeration_comma_backslash_enabled && !g_enumeration_comma_slash_enabled)
+        {
+            g_enumeration_comma_backslash_enabled = true;
+            g_enumeration_comma_slash_enabled = true;
+        }
         {
             const std::string punctuation_lock = tbl["input"]["punctuation_lock"].value_or(std::string("follow"));
             g_punctuation_lock =
