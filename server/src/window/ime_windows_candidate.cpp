@@ -13,6 +13,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
+#include <memory>
 #include <string>
 #include <fmt/xchar.h>
 #include "utils/window_utils.h"
@@ -767,6 +768,19 @@ LRESULT CALLBACK WndProcCandWindow(HWND hwnd, UINT message, WPARAM wParam, LPARA
                                                     ? FanyNamedPipe::CandidateUiAction::PageDown
                                                     : FanyNamedPipe::CandidateUiAction::PageUp,
                                                 static_cast<int>(lParam));
+        break;
+
+    case WM_COMMIT_CANDIDATE_AT: {
+        std::unique_ptr<std::wstring> text(reinterpret_cast<std::wstring *>(lParam));
+        if (text)
+        {
+            FanyNamedPipe::EnqueueCandidateUiCommitAt(static_cast<int>(wParam), std::move(*text));
+        }
+        break;
+    }
+
+    case WM_EXPAND_CANDIDATES:
+        FanyNamedPipe::EnqueueCandidateUiExpand();
         break;
 
     case WM_CLEAR_IME_ENGINE_CACHE: {
