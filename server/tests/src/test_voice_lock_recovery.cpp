@@ -31,6 +31,8 @@
 #include "voice-input/doubao_asr_client.h"
 #include "voice-input/voice_input_gesture.h"
 #include "voice-input/voice_input_service.h"
+#include "voice-input/voice_result_card.h"
+#include "voice-input/voice_target.h"
 #include "voice-input/wave_overlay.h"
 
 namespace
@@ -140,18 +142,18 @@ void ResetCommit()
     g_insert_text_count = 0;
 }
 
-int InsertTextCount()
+int ResultCount()
 {
     return g_insert_text_count.load();
 }
 
-std::wstring InsertedText()
+std::wstring DeliveredText()
 {
     std::lock_guard<std::mutex> lock(g_commit_mutex);
     return g_inserted_text;
 }
 
-bool WaitForInsertText()
+bool WaitForResult()
 {
     return WaitFor([] { return g_insert_text_count.load() > 0; }, milliseconds(3000));
 }
@@ -519,8 +521,8 @@ void ExpectPendingAsrCommit()
     ReleaseConfigRead();
     ReleaseDoubaoFinish();
     REQUIRE(barriered);
-    REQUIRE(WaitForInsertText());
-    REQUIRE_EQ(InsertedText(), std::wstring(kFixedAsrText));
+    REQUIRE(WaitForResult());
+    REQUIRE_EQ(DeliveredText(), std::wstring(kFixedAsrText));
 }
 
 // Public Start, no physical hold: Refresh must not find a synthetic RAlt to
@@ -642,8 +644,8 @@ void VerifyQueuedLockedStartIsRetired(QueuedStartEnd action)
     REQUIRE(!CaptureEntered());
     REQUIRE(!VoiceInput::IsRecording());
     ReleaseDoubaoFinish();
-    REQUIRE(WaitForInsertText());
-    REQUIRE_EQ(InsertedText(), std::wstring(kFixedAsrText));
+    REQUIRE(WaitForResult());
+    REQUIRE_EQ(DeliveredText(), std::wstring(kFixedAsrText));
     VerifyNextHoldStartsAndStops();
 }
 } // namespace
@@ -1060,7 +1062,7 @@ TEST_CASE(overlay_cancel_during_pending_asr_finish_discards_result)
         ReleaseDoubaoFinish();
         REQUIRE(barriered);
     }
-    REQUIRE_EQ(InsertTextCount(), 0);
+    REQUIRE_EQ(ResultCount(), 0);
 }
 
 // Cancel while capture is already running stops the device and discards the
@@ -1080,7 +1082,7 @@ TEST_CASE(cancel_during_capturing_stops_without_finish_or_commit)
     REQUIRE(CaptureStopCount() > stop_before);
     REQUIRE(!VoiceInput::IsRecording());
     REQUIRE(!DoubaoFinishEntered());
-    REQUIRE_EQ(InsertTextCount(), 0);
+    REQUIRE_EQ(ResultCount(), 0);
 }
 
 // IME deactivation while capture is running discards that recording, exactly
@@ -1097,7 +1099,7 @@ TEST_CASE(ime_deactivation_during_capturing_discards_without_finish_or_commit)
     REQUIRE(CaptureStopCount() > stop_before);
     REQUIRE(!VoiceInput::IsRecording());
     REQUIRE(!DoubaoFinishEntered());
-    REQUIRE_EQ(InsertTextCount(), 0);
+    REQUIRE_EQ(ResultCount(), 0);
 }
 
 // Disabling voice input while capturing is the legacy "Stop" path: the
@@ -1111,8 +1113,8 @@ TEST_CASE(disabled_refresh_during_capturing_stops_and_commits_result)
     REQUIRE(WaitDoubaoFinishEntered());
     REQUIRE(!VoiceInput::IsRecording());
     ReleaseDoubaoFinish();
-    REQUIRE(WaitForInsertText());
-    REQUIRE_EQ(InsertedText(), std::wstring(kFixedAsrText));
+    REQUIRE(WaitForResult());
+    REQUIRE_EQ(DeliveredText(), std::wstring(kFixedAsrText));
 }
 
 // Releasing the hold shortcut while Start is still inside GetConfig must abort
@@ -1324,6 +1326,14 @@ void Write(const std::wstring &)
 }
 } // namespace DiagnosticLog
 
+namespace mvi_utils
+{
+HMONITOR GetForegroundMonitor()
+{
+    return nullptr;
+}
+} // namespace mvi_utils
+
 namespace VoiceInput
 {
 namespace Detail
@@ -1347,6 +1357,23 @@ void MuteOtherSystemAudio()
 
 void RestoreOtherSystemAudio()
 {
+}
+// Keep this fixture independent of the desktop focus. Finished recognition
+// reaches the result card; the same delivery observations cover both routes.
+bool InitializeTargetTracking()
+{
+    return true;
+}
+void ShutdownTargetTracking()
+{
+}
+Target CaptureTarget()
+{
+    return {};
+}
+bool IsTargetCurrentFast(const Target &)
+{
+    return false;
 }
 } // namespace VoiceInput
 
@@ -1424,6 +1451,10 @@ bool WaveOverlay::init(HINSTANCE, std::function<void(Action)> action_handler)
     return true;
 }
 
+void WaveOverlay::set_anchor(const VoiceOverlayAnchor &)
+{
+}
+
 void WaveOverlay::shutdown()
 {
 }
@@ -1464,6 +1495,34 @@ void WaveOverlay::set_actions_visible(bool visible)
     g_actions_visible = visible;
     if (visible)
         ++g_actions_true_count;
+    NotifyEffects();
+}
+
+VoiceResultCard::VoiceResultCard() = default;
+VoiceResultCard::~VoiceResultCard() = default;
+bool VoiceResultCard::init(HINSTANCE)
+{
+    return true;
+}
+void VoiceResultCard::shutdown()
+{
+}
+void VoiceResultCard::set_anchor(const VoiceOverlayAnchor &)
+{
+}
+void VoiceResultCard::reset(std::uint64_t session)
+{
+    model_.reset(session);
+}
+void VoiceResultCard::show(std::uint64_t session, const std::wstring &text)
+{
+    if (!model_.show(session, text))
+        return;
+    {
+        std::lock_guard<std::mutex> lock(g_commit_mutex);
+        g_inserted_text += text;
+    }
+    ++g_insert_text_count;
     NotifyEffects();
 }
 
