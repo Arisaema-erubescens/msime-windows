@@ -1,6 +1,7 @@
 name: Nightly
 
-# The nightly channel: one installer a day, signed with a certificate pinned in the repository
+# The nightly channel: one installer on Monday, Wednesday and Saturday, signed with a certificate
+# pinned in the repository
 # secrets instead of one minted per run.
 #
 # Three channels, three different promises. Release is the only one a user should install and
@@ -18,9 +19,11 @@ name: Nightly
 # schedule has no triggerer. The notify job files or updates an issue instead.
 on:
   schedule:
-    # 20:00 UTC is 04:00 in Beijing. GitHub delays scheduled runs at peak times, so this is a
-    # target rather than a guarantee; nothing downstream depends on the hour being exact.
-    - cron: '0 20 * * *'
+    # Monday, Wednesday and Saturday at 20:00 UTC (04:00 Beijing the next morning). Hourly would
+    # spend a full runner quota on builds nobody asked for; three a week keeps the channel fresh
+    # without turning every merge into a published package. GitHub delays scheduled runs at peak
+    # times, so this is a target rather than a guarantee: nothing downstream depends on the hour.
+    - cron: '0 20 * * 1,3,6'
   workflow_dispatch:
     inputs:
       publish:
