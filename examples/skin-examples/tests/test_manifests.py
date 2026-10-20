@@ -13,7 +13,8 @@ BUILTIN_SKINS = ("fluent", "wechat", "wechat_scroll", "graphite", "willow_green"
 SHARED_BASES = ("system", "shuishan", "light", "paper", "night", "ink")
 # The full-texture base: only a base for schema_version 2 skins, never a skin of its own.
 CANVAS_BASE = "canvas"
-# Images v2 tables may reference (border_image.source, decorations.image).
+# Images v2 tables and the toolbar's image mode may reference (border_image.source, decorations.image,
+# toolbar.image, toolbar.buttons.*).
 V2_IMAGE_SUFFIXES = (".png", ".apng", ".gif", ".webp")
 
 
@@ -65,11 +66,38 @@ class ManifestTests(unittest.TestCase):
                     self.assertTrue(-1000 <= dec.get("z_index", 2) <= 1000, "z_index")
                     for key in ("offset_x_dip", "offset_y_dip"):
                         self.assertTrue(-2000 <= dec.get(key, 0) <= 2000, key)
+                # Mirrors the Server catalog: the toolbar's image mode needs a background image and its size; the
+                # images are checked only in that mode, as the catalog ignores them otherwise.
+                toolbar = data.get("toolbar", {})
+                self.assertIn(toolbar.get("mode", "bar"), ("bar", "image"), "toolbar.mode")
+                if toolbar.get("mode") == "image":
+                    assets["toolbar.image"] = toolbar["image"]
+                    v2_images.append(toolbar["image"])
+                    for key in ("image_width_dip", "image_height_dip"):
+                        self.assertTrue(0 < toolbar[key] <= 2000, f"toolbar.{key}")
+                    for name, button in toolbar.get("buttons", {}).items():
+                        for key in ("x_dip", "y_dip"):
+                            self.assertTrue(0 <= button.get(key, 0) <= 2000, f"toolbar.buttons.{name}.{key}")
+                        for key in ("width_dip", "height_dip"):
+                            self.assertTrue(0 < button.get(key, 26) <= 500, f"toolbar.buttons.{name}.{key}")
+                        if "image" in button:
+                            assets[f"toolbar.buttons.{name}.image"] = button["image"]
+                            v2_images.append(button["image"])
+                        for state, image in button.get("images", {}).items():
+                            assets[f"toolbar.buttons.{name}.images.{state}"] = image
+                            v2_images.append(image)
                 for image in v2_images:
                     self.assertTrue(image.lower().endswith(V2_IMAGE_SUFFIXES), image)
                 if "decoration" in window:
+                    decoration = window["decoration"]
                     for key in ("top_inset_dip", "width_dip"):
-                        self.assertGreater(window["decoration"][key], 0, key)
+                        self.assertGreater(decoration[key], 0, key)
+                    if decoration.get("candidate_overlay", False):
+                        for key in ("candidate_overlay_font_size_dip", "candidate_overlay_min_font_size_dip"):
+                            self.assertTrue(0 < decoration.get(key, 8) <= 200, key)
+                        self.assertIn(decoration.get("candidate_overlay_align_h", "center"), ("left", "center", "right"))
+                        self.assertIn(decoration.get("candidate_overlay_align_v", "center"), ("top", "center", "bottom"))
+                        self.assertIsInstance(decoration.get("candidate_overlay_index", 1), int)
                 for key, rel in assets.items():
                     if rel is None:
                         continue

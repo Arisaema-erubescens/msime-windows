@@ -442,6 +442,7 @@ void CandidatePreview::Set(const SettingsModel &model, const std::string &skinId
         preedit.SetHeight(0.0f);
     }
     std::vector<msimeui::CandidateList::Item> items;
+    std::vector<CandidateSkinScene::PageWord> words;
     const size_t count = std::min<size_t>(options.pageSize, std::size(kSampleWords));
     for (size_t i = 0; i < count; ++i)
     {
@@ -451,9 +452,11 @@ void CandidatePreview::Set(const SettingsModel &model, const std::string &skinId
         if (options.helpcode)
             item.annotation = kSampleCodes[i];
         items.push_back(std::move(item));
+        words.push_back({kSampleWords[i], L""});
     }
     scene_->List()->SetItems(std::move(items));
     scene_->List()->SetSelectedIndex(0);
+    scene_->SetDecorationCandidates(words, 0);
     if (const auto &pager = scene_->Pager())
         pager->SetEnabled(false, true);
     InvalidateMeasure();
