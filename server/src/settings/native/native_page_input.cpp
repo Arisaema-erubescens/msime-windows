@@ -1,5 +1,7 @@
 #include "settings/native/native_settings_pages.h"
 
+#include "config/ai_provider.h"
+
 #include "msimeui/DeviceResources.h"
 #include "msimeui/Fonts.h"
 #include "msimeui/Window.h"
@@ -1315,7 +1317,9 @@ struct InputPage
         const std::string t = trim(state["token"]);
         const bool placeholder = (!t.empty() && t.front() == '<' && t.back() == '>') || t.rfind("FAKESECRET_", 0) == 0;
         const std::string endpoint = trim(state["endpoint"]);
-        return !t.empty() && !placeholder && !trim(state["model"]).empty() &&
+        // Ollama 不用 Token，存没存、存的是什么都不影响它可不可用。
+        const bool tokenOk = !AiAssistant::ProviderUsesToken(trim(state["provider"])) || (!t.empty() && !placeholder);
+        return tokenOk && !trim(state["model"]).empty() &&
                (endpoint.rfind("http://", 0) == 0 || endpoint.rfind("https://", 0) == 0);
     }
 

@@ -36,8 +36,10 @@ AiAssistant::detail::SuggestionCache g_candidate_cache;
 std::string Fetch(const AiAssistant::Request &request, uint64_t generation, Jev::Client &jev_client)
 {
     const auto &config = request.config;
-    if (!config.enabled || config.token.empty() || config.endpoint.empty() || config.model.empty() ||
-        request.pinyin_segments.empty() || g_generation.load() != generation)
+    const std::string token = AiAssistant::RequestToken(config.provider, config.token);
+    if (!config.enabled || (AiAssistant::ProviderUsesToken(config.provider) && token.empty()) ||
+        config.endpoint.empty() || config.model.empty() || request.pinyin_segments.empty() ||
+        g_generation.load() != generation)
     {
         (void)0;
         return {};
@@ -63,7 +65,7 @@ std::string Fetch(const AiAssistant::Request &request, uint64_t generation, Jev:
         }
     }
     const nlohmann::json body = AiAssistant::detail::BuildRequestBody(request);
-    const auto content = ChatCompletions::FetchContent(config.endpoint, config.token, body.dump(),
+    const auto content = ChatCompletions::FetchContent(config.endpoint, token, body.dump(),
                                                        AiAssistant::detail::RequestTimeoutMs(config));
     if (!content || g_generation.load() != generation)
         return {};

@@ -1,6 +1,7 @@
 #include "settings/native/native_page_voice_fields.h"
 
 #include "ai/jev_client.h"
+#include "config/ai_provider.h"
 
 #include "msimeui/DeviceResources.h"
 #include "msimeui/Scene.h"
@@ -30,13 +31,15 @@ const std::map<std::string, ProviderDefaults> &Defaults()
         {"openai", {"https://api.openai.com/v1/chat/completions", "gpt-4o-mini"}},
         {"siliconflow", {"https://api.siliconflow.cn/v1/chat/completions", "Qwen/Qwen3-8B"}},
         {"groq", {"https://api.groq.com/openai/v1/chat/completions", "qwen/qwen3.8-27b"}},
+        // 本机的 Ollama 服务。装了哪些模型因人而异，不预设模型，用「查询模型」从 /v1/models 列出。
+        {"ollama", {"http://localhost:11434/v1/chat/completions", ""}},
         {"custom", {"", ""}},
         {"jev", {Jev::kEndpoint, Jev::kModel}},
     };
     return defaults;
 }
 
-const std::vector<std::string> kProviders = {"deepseek", "openai", "siliconflow", "groq", "custom", "jev"};
+const std::vector<std::string> kProviders = {"deepseek", "openai", "siliconflow", "groq", "ollama", "custom", "jev"};
 
 ProviderDefaults DefaultsOf(const std::string &provider)
 {
@@ -488,6 +491,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
     std::shared_ptr<Dropdown> providerDropdown;
     std::shared_ptr<ModelCombo> model;
     std::shared_ptr<InputBox> token;
+    std::shared_ptr<Hideable> tokenField;
     std::shared_ptr<InputBox> limit;
     std::shared_ptr<InputBox> endpoint;
     std::shared_ptr<Hideable> thinkingField;
@@ -513,7 +517,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         const std::string endpointValue = Narrow(Trim(endpoint->GetText()));
         const std::string modelValue = Narrow(Trim(model->Input()->GetText()));
         return Json{{"provider", provider},
-                    {"token", Narrow(Trim(token->GetText()))},
+                    {"token", AiAssistant::RequestToken(provider, Narrow(Trim(token->GetText())))},
                     {"endpoint", !endpointValue.empty() ? endpointValue : std::string(defaults.endpoint)},
                     {"model", !modelValue.empty() ? modelValue : std::string(defaults.model)}};
     }
@@ -538,8 +542,11 @@ struct AiPage : std::enable_shared_from_this<AiPage>
 
     void SwitchProvider(const std::string &next)
     {
-        tokens[provider] = Narrow(Trim(token->GetText()));
-        Write("ai_assistant.token_" + provider, tokens[provider]);
+        if (AiAssistant::ProviderUsesToken(provider))
+        {
+            tokens[provider] = Narrow(Trim(token->GetText()));
+            Write("ai_assistant.token_" + provider, tokens[provider]);
+        }
         endpoints[provider] = Narrow(endpoint->GetText());
         Write("ai_assistant.endpoint", endpoints[provider]);
         models[provider] = Narrow(model->Input()->GetText());
@@ -548,6 +555,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         token->SetText(Widen(tokens[provider]));
         Write("ai_assistant.provider", provider);
         ApplyProviderFields();
+        tokenField->SetVisible(AiAssistant::ProviderUsesToken(provider));
         thinkingField->SetVisible(provider == "deepseek");
         ClearModelMenu();
     }
@@ -620,6 +628,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         models = ReadProviderMap(m, "ai_assistant", "model", provider, kProviders, false);
         token->SetText(Widen(tokens[provider]));
         providerDropdown->SetValue(provider);
+        tokenField->SetVisible(AiAssistant::ProviderUsesToken(provider));
         thinkingField->SetVisible(provider == "deepseek");
         model->Input()->SetPlaceholder(Widen(DefaultsOf(provider).model));
         promptId = m.GetString("ai_assistant.prompt_id", "custom_1");
@@ -648,7 +657,8 @@ struct AiPage : std::enable_shared_from_this<AiPage>
             heading->SetMargin({0.0f, 0.0f, 0.0f, 18.0f});
             column->Add(heading);
             auto description = MakeDescription(
-                L"DeepSeek、OpenAI、SiliconFlow、Groq 均使用 OpenAI 兼容的 Chat Completions 接口。Custom "
+                L"DeepSeek、OpenAI、SiliconFlow、Groq 均使用 OpenAI 兼容的 Chat Completions 接口。Ollama "
+                L"连接本机的 Ollama 服务，不需要 API Token，模型用「查询模型」从已下载的模型里选。Custom "
                 L"用于接入兼容服务。Jev 使用 TypeSafe 官方 Choice 接口，将前文、拼音和最多 32 个本地候选发送给服务商。"
                 L"Jev 固定选择一个候选，不使用下方的候选数量、思考强度和自定义提示词。各提供商凭据分开保存。");
             description->SetMargin({0.0f, -10.0f, 0.0f, 16.0f});
@@ -659,6 +669,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
                                                      {"openai", L"OpenAI"},
                                                      {"siliconflow", L"SiliconFlow"},
                                                      {"groq", L"Groq"},
+                                                     {"ollama", L"Ollama"},
                                                      {"custom", L"Custom"},
                                                      {"jev", L"Jev (TypeSafe)"}}));
             providerDropdown->SetOnChanged(
@@ -707,7 +718,9 @@ struct AiPage : std::enable_shared_from_this<AiPage>
                 tokens[provider] = Narrow(Trim(text));
                 Write("ai_assistant.token_" + provider, tokens[provider]);
             });
-            grid->Add(std::make_shared<Field>(L"API Token", token));
+            // Ollama 不鉴权，选它时整个输入框收起来，不留一个填了也没用的框。
+            tokenField = std::make_shared<Hideable>(std::make_shared<Field>(L"API Token", token));
+            grid->Add(tokenField);
 
             limit = GridInput();
             limit->SetOnCommit([this](const std::wstring &text) {

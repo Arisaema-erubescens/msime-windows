@@ -19,9 +19,9 @@ constexpr int kSchemaVersion = 1;
 
 const std::vector<std::string_view> &BuiltinProviderIds()
 {
-    static const std::vector<std::string_view> ids{"deepseek",  "openai",     "siliconflow", "groq",
-                                                   "custom",    "minimax",    "moonshot",    "zhipu",
-                                                   "dashscope", "volcengine", "openrouter",  "jev"};
+    static const std::vector<std::string_view> ids{"deepseek",   "openai",   "siliconflow", "groq",      "custom",
+                                                   "minimax",    "moonshot", "zhipu",       "dashscope", "volcengine",
+                                                   "openrouter", "jev",      "ollama"};
     return ids;
 }
 

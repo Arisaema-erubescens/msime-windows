@@ -605,6 +605,8 @@ endpoint_dashscope = ""
 endpoint_volcengine = ""
 endpoint_openrouter = ""
 endpoint_jev = ""
+# Ollama 连本机服务，不需要 Token，所以没有 token_ollama
+endpoint_ollama = ""
 model_deepseek = ""
 model_openai = ""
 model_siliconflow = ""
@@ -617,6 +619,7 @@ model_dashscope = ""
 model_volcengine = ""
 model_openrouter = ""
 model_jev = ""
+model_ollama = ""
 candidate_limit = 3
 # DeepSeek 思考强度: disabled | low | high | max，仅 DeepSeek 生效。开启后联想明显变慢。
 thinking = "disabled"
