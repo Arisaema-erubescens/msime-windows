@@ -21,6 +21,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <thread>
 #include "skin/candidate_skin_catalog.h"
 #include "window/candidate_skin_layers.h"
 #include "utils/common_utils.h"
@@ -59,9 +60,14 @@ constexpr UINT kScanSkinCatalog = WM_APP + 3;
 constexpr UINT kWorkerCompleted = WM_APP + 4;
 // Sent by settings_launcher.cpp (the Server exiting) and by the installer: close for real.
 constexpr UINT kQuitSettings = WM_APP + 5;
+// 模型更新探测线程完成：UI 线程重新取一份快照，探测线程不碰 g_worker。
+constexpr UINT kModelUpdateChecked = WM_APP + 6;
 // Timer 1 is msimeui's caret blink in the Direct2D window, so ours start elsewhere.
 constexpr UINT_PTR kConfigReloadTimer = 0x5301;
 constexpr UINT_PTR kLingerTimer = 0x5302;
+// Server 重启后主动刷新快照的短时定时器；不重启设置进程。
+constexpr UINT_PTR kRestartRefreshTimer = 0x5303;
+constexpr int kRestartRefreshTicks = 10; // 500ms × 10 = 5s，覆盖 Watchdog 拉起 Server 的时间
 
 // The Direct2D settings window (msimeui). Null until wWinMain builds it.
 std::unique_ptr<native_settings::SettingsWindow> g_native;
@@ -77,6 +83,10 @@ bool g_lingering = false;
 bool g_reload_pending = false;
 bool g_theme_refresh_pending = false;
 bool g_settings_light = false;
+// 第一份快照真正下发给页面之后才启动更新探测；一个设置进程只探一轮。
+bool g_model_update_check_started = false;
+// restartServer 之后主动刷新的剩余次数；Server 落位 .gram.new 后提前结束。
+int g_restart_refresh_remaining = 0;
 // appearance.settings_window_linger 的 UI 线程副本，由 ConfigCompletion 更新。
 std::string g_settings_window_linger = "off";
 std::wstring g_last_config_message;
@@ -403,8 +413,11 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
             {"sentence_collocation_model_status", [] {
                  nlohmann::json statuses = nlohmann::json::object();
                  for (const auto &[model_id, status] : collocation::GetModelStatuses())
-                     statuses[model_id] = nlohmann::json{{"state", status.state}, {"progress", status.progress},
-                                                         {"error", status.error}};
+                     statuses[model_id] = nlohmann::json{{"state", status.state},
+                                                         {"progress", status.progress},
+                                                         {"error", status.error},
+                                                         {"updateAvailable", status.update_available},
+                                                         {"updatePending", status.update_pending}};
                  return statuses;
              }()},
             {"sentence_collocation_model", GetConfiguredAssocSentenceCollocationModel()},
@@ -1458,6 +1471,14 @@ void HandleClientMessage(HWND hwnd, const std::string &raw)
                 MessageBoxW(g_settings_hwnd, L"未能重启输入法进程，请稍后重试。", L"水杉输入法",
                             MB_OK | MB_ICONWARNING);
             }
+            else if (g_worker && !g_closing)
+            {
+                // Watchdog 拉起新 Server 后才会落位 .gram.new；设置进程不会因为这次重启
+                // 收到配置变化，所以在接下来几秒主动拉快照，待更新清掉或次数用完就停。
+                // 不重启设置进程：避免单实例/重开时序问题和窗口闪现。
+                g_restart_refresh_remaining = kRestartRefreshTicks;
+                SetTimer(hwnd, kRestartRefreshTimer, 500, nullptr);
+            }
         }
         else if (type == "openExternalUrl")
         {
@@ -1693,6 +1714,7 @@ void CloseSettings(HWND hwnd)
     g_lingering = false;
     KillTimer(hwnd, kLingerTimer);
     KillTimer(hwnd, kConfigReloadTimer);
+    KillTimer(hwnd, kRestartRefreshTimer);
     ReleaseMouseCapture(hwnd);
     ShowWindow(hwnd, SW_HIDE);
     if (g_worker)
@@ -1785,6 +1807,20 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_pa
             CloseSettings(hwnd);
             return 0;
         }
+        if (w_param == kRestartRefreshTimer)
+        {
+            if (g_restart_refresh_remaining > 0)
+                --g_restart_refresh_remaining;
+            bool pending = false;
+            for (const auto &entry : collocation::GetModelStatuses())
+                pending = pending || entry.second.update_pending;
+            // 待更新已经被新 Server 落位，或兜底次数用完，就停；仍刷新一次让页面恢复。
+            if (!pending || g_restart_refresh_remaining <= 0)
+                KillTimer(hwnd, kRestartRefreshTimer);
+            if (g_worker && !g_closing)
+                PostConfig(false);
+            return 0;
+        }
         if (w_param == kConfigReloadTimer && g_worker && !g_closing && !g_reload_pending)
         {
             g_reload_pending = true;
@@ -1810,6 +1846,17 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_pa
         if (g_worker)
         {
             g_worker->Drain(!g_closing);
+            // 第一份快照真正下发之后才探测：此时页面已经有模型列表，探测结果回来只需刷新
+            // 快照。线程不碰 g_worker，避免进程退出时的生命周期竞争；窗口先关掉时消息自然丢弃。
+            if (!g_model_update_check_started && !g_closing && !g_last_config_message.empty())
+            {
+                g_model_update_check_started = true;
+                const HWND target = hwnd;
+                std::thread([target] {
+                    collocation::CheckForUpdates();
+                    PostMessageW(target, kModelUpdateChecked, 0, 0);
+                }).detach();
+            }
             if (g_closing && g_worker->Stopped())
             {
                 // The settings window leaves without destroying its window: see the
@@ -1817,6 +1864,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_pa
                 PostQuitMessage(0);
             }
         }
+        return 0;
+    case kModelUpdateChecked:
+        // 探测线程只回一条消息，刷新快照仍在 worker 队列上做，UI 线程不被网络阻塞。
+        PostConfig(false);
         return 0;
     case WM_CLOSE:
         HideSettings(hwnd);
@@ -1831,6 +1882,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_pa
             g_worker->Stop();
         KillTimer(hwnd, kLingerTimer);
         KillTimer(hwnd, kConfigReloadTimer);
+        KillTimer(hwnd, kRestartRefreshTimer);
         g_native.reset();
         PostQuitMessage(0);
         return 0;
@@ -1913,6 +1965,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line, int show_
         TraceStartup("worker: InitImeConfig begin");
         InitImeConfig();
         TraceStartup("worker: InitImeConfig end");
+        // 上一次退出时没能落位的新版本在这里生效：此时还没有任何会话/映射。
+        collocation::ApplyPendingUpdates();
         initial_config->set_value(ResolveConfiguredTheme(GetConfiguredThemeSettings()) == "light");
         return ConfigCompletion();
     });
