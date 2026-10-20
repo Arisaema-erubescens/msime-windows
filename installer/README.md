@@ -77,6 +77,8 @@ pwsh -File .\import-nightly-trust.ps1
 
 看到 `有效期至：<日期>` 就说明导入成功，之后双击安装包。**这个脚本只需要跑一次**，后续新的 nightly 构建直接装就行，不会因为换了构建而失效——这正是 nightly 相对 dev build 的价值所在。脚本重复运行时按指纹跳过，不会重复导入。
 
+**不导入就直接装会怎样：** 程序能启动、能打字，但在以管理员身份运行的窗口（管理员 PowerShell、以管理员打开的记事本或终端）里候选窗不会出现，看起来像输入法坏了。原因是 Server 带 `uiAccess="true"` 清单，好让候选窗浮在被 UIPI 保护的高权限窗口之上；Windows 只对「有可信签名、且装在受信任位置」的程序承认这个权限，没签名的 uiAccess 程序会被静默降权。
+
 `nightly-signing.cer` 也提交在仓库里（`installer/nightly-signing.cer`），脚本默认从同目录找它；想直接用仓库那份可以加 `-CertificatePath`。
 
 ### 维护者换发证书

@@ -417,8 +417,19 @@ jobs:
           | 版本 | $env:TARGET_VERSION |
           | 安装包 SHA256 | ``$env:INSTALLER_SHA256`` |
 
-          安装前在管理员 PowerShell 里跑一次 ``import-nightly-trust.ps1``，之后每次新的 nightly 都不用重跑。
-          这个通道的证书是固定的，与 dev build 每次换证不同。
+          ## 装之前要先导入证书
+
+          这个包用一张自签名证书签名，Windows 默认不信任它。**不导入证书就直接装，程序能启动、能打字，但会在管理员身份运行的窗口里出问题**：以管理员权限打开的记事本、终端、任务管理器里的搜索框等，候选窗不会出现，输入法看起来像坏了。
+
+          原因在这里：为了让候选窗能浮在被 UIPI 保护的高权限窗口之上，Server 带 ``uiAccess="true"`` 清单。Windows 只对「有可信签名、且装在受信任位置」的程序承认这个权限，没有签名的 uiAccess 程序会被静默降权，于是候选窗在管理员窗口上就显示不出来。
+
+          导入方法和后果的完整说明见 [installer/README.md](https://github.com/${{ github.repository }}/blob/develop/installer/README.md#nightly-build)。简单说：解压后和安装包放同一目录，在**管理员** PowerShell 里跑一次
+
+          ``````
+          pwsh -File .\import-nightly-trust.ps1
+          ``````
+
+          看到 ``有效期至：<日期>`` 就说明成功。**只需要跑一次**，之后每次新的 nightly 都直接装，不用重导——这正是 nightly 与 dev build 的区别（dev build 每次换证，每装一次都要重导）。
 
           $($marker -f $env:CURRENT_SHA)
           "@

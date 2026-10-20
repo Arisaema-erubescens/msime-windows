@@ -89,3 +89,7 @@ if ($remaining -lt $RenewalWarningDays) {
     Write-Warning "证书只剩 $remaining 天，请联系维护者换发。"
 }
 Write-Host '现在可以安装同目录下的 nightly 安装包了。之后新的 nightly 构建不用再跑本脚本。'
+Write-Host ''
+Write-Host '如果不做这一步就直接装：程序能启动、能打字，但在以管理员身份运行的窗口'
+Write-Host '（管理员 PowerShell、以管理员打开的记事本或终端）里候选窗不会出现。'
+Write-Host 'Server 带 uiAccess 清单，Windows 只对可信签名的程序承认这个权限。'
