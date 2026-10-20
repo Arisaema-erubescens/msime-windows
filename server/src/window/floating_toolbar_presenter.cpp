@@ -469,17 +469,22 @@ struct FloatingToolbarPresenter::Impl
     bool skinAnimates = false;
     // 换了皮肤图或强制重载过，图片缓存与形状都要重读。
     std::wstring imageKey;
-    // 背景图不透明部分的区域（窗口像素），以及它是按哪张图、多大算的。
-    HRGN shape = nullptr;
+    // 背景图不透明部分的区域（窗口像素），以及它是按哪张图、多大算的；解码整张动图不便宜，只在这几项变了时重算。
+    HRGN imageShape = nullptr;
     std::wstring shapePath;
     int shapeWidthPx = 0;
     int shapeHeightPx = 0;
+    // 窗口形状：imageShape 再并上每个按钮的框。
+    HRGN shape = nullptr;
 
     ~Impl()
     {
-        if (shape)
+        for (HRGN region : {imageShape, shape})
         {
-            DeleteObject(shape);
+            if (region)
+            {
+                DeleteObject(region);
+            }
         }
     }
 };
@@ -853,7 +858,7 @@ void FloatingToolbarPresenter::RelayoutHost(FLOAT scaleOverride, const RECT *sug
     ::FTB_HOST_INSETS_VALID = true;
     // 背景图画在 (0, 0) 起、测量出的大小上；形状要和它在屏幕上的像素一一对上。
     UpdateShape(static_cast<int>(std::lround(measured.width * scale)),
-                static_cast<int>(std::lround(measured.height * scale)));
+                static_cast<int>(std::lround(measured.height * scale)), scale);
     ClipWindowToVisibleScreens(hwnd_, ScreenArea::WorkArea, ShapeRegion());
     impl_->resources.EnsureForComposition(hwnd_);
     impl_->captionRect = {};
@@ -895,29 +900,51 @@ HRGN FloatingToolbarPresenter::ShapeRegion() const
     return bound_ && impl_ && impl_->imageMode ? impl_->shape : nullptr;
 }
 
-void FloatingToolbarPresenter::UpdateShape(int imageWidthPx, int imageHeightPx)
+void FloatingToolbarPresenter::UpdateShape(int imageWidthPx, int imageHeightPx, float scale)
 {
     if (!impl_->imageMode || imageWidthPx <= 0 || imageHeightPx <= 0)
     {
         return;
     }
-    if (impl_->shapePath == impl_->imagePath && impl_->shapeWidthPx == imageWidthPx &&
-        impl_->shapeHeightPx == imageHeightPx)
+    if (impl_->shapePath != impl_->imagePath || impl_->shapeWidthPx != imageWidthPx ||
+        impl_->shapeHeightPx != imageHeightPx)
     {
-        return;
+        if (impl_->imageShape)
+        {
+            DeleteObject(impl_->imageShape);
+        }
+        // 窗口区域连画面一起裁，所以动图按所有帧合起来的轮廓裁，哪一帧画到的地方都留在窗口里。
+        // 半透明的抗锯齿边缘也算在窗口里，边缘才不会被裁出锯齿。
+        impl_->imageShape = msimeui::CreateAlphaMaskRegion(impl_->imagePath, static_cast<UINT>(imageWidthPx),
+                                                           static_cast<UINT>(imageHeightPx));
+        impl_->shapePath = impl_->imagePath;
+        impl_->shapeWidthPx = imageWidthPx;
+        impl_->shapeHeightPx = imageHeightPx;
+        FTB_DIAG_LOGF(L"ftb-d2d image shape {}x{} region={}", imageWidthPx, imageHeightPx, impl_->imageShape ? 1 : 0);
     }
     if (impl_->shape)
     {
         DeleteObject(impl_->shape);
+        impl_->shape = nullptr;
     }
-    // 窗口区域连画面一起裁，所以动图按所有帧合起来的轮廓裁，哪一帧画到的地方都留在窗口里。
-    // 半透明的抗锯齿边缘也算在窗口里，边缘才不会被裁出锯齿。读不出图时就是矩形窗口。
-    impl_->shape = msimeui::CreateAlphaMaskRegion(impl_->imagePath, static_cast<UINT>(imageWidthPx),
-                                                  static_cast<UINT>(imageHeightPx));
-    impl_->shapePath = impl_->imagePath;
-    impl_->shapeWidthPx = imageWidthPx;
-    impl_->shapeHeightPx = imageHeightPx;
-    FTB_DIAG_LOGF(L"ftb-d2d image shape {}x{} region={}", imageWidthPx, imageHeightPx, impl_->shape ? 1 : 0);
+    // 读不出图时就是矩形窗口。
+    if (!impl_->imageShape)
+    {
+        return;
+    }
+    // 皮肤摆出来的按钮整个算在窗口里：落在背景图透明处的按钮也不会被裁掉、点不到。
+    impl_->shape = CreateRectRgn(0, 0, 0, 0);
+    CombineRgn(impl_->shape, impl_->imageShape, nullptr, RGN_COPY);
+    for (const auto &button : impl_->imageButtons)
+    {
+        const RectF box = button->GetBounds();
+        HRGN rect =
+            CreateRectRgn(static_cast<int>(std::floor(box.x * scale)), static_cast<int>(std::floor(box.y * scale)),
+                          static_cast<int>(std::ceil((box.x + box.width) * scale)),
+                          static_cast<int>(std::ceil((box.y + box.height) * scale)));
+        CombineRgn(impl_->shape, impl_->shape, rect, RGN_OR);
+        DeleteObject(rect);
+    }
 }
 
 RECT FloatingToolbarPresenter::ShadowInsetsPx(int hostWidthPx, int hostHeightPx, FLOAT scale) const
