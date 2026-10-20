@@ -1,3 +1,4 @@
+#include "settings/native/native_page_voice_fields.h"
 #include "settings/native/native_settings_pages.h"
 
 #include "msimeui/DeviceResources.h"
@@ -1311,29 +1312,11 @@ struct InputPage
     std::shared_ptr<ToggleSwitch> collocationToggle;
     UINT_PTR collocationPoll = 0;
 
-    std::map<std::string, std::string> AiState() const
+    // 与「AI 与云联想」页共用同一份解析：分槽优先、单值键只在它就是当前服务商时作数，
+    // 可用性判定与后端 AiTranslation::IsUsableConfig 同一口径。
+    voice_fields::ActiveAiConfig AiState() const
     {
-        SettingsModel &model = context->model;
-        return {{"provider", model.GetString("ai_assistant.provider")},
-                {"endpoint", model.GetString("ai_assistant.endpoint")},
-                {"model", model.GetString("ai_assistant.model")},
-                {"token", model.GetString("ai_assistant.token")}};
-    }
-
-    // isUsableAiAssistantState
-    bool AiUsable() const
-    {
-        auto state = AiState();
-        const auto trim = [](std::string text) {
-            const auto first = text.find_first_not_of(" \t\r\n");
-            const auto last = text.find_last_not_of(" \t\r\n");
-            return first == std::string::npos ? std::string() : text.substr(first, last - first + 1);
-        };
-        const std::string t = trim(state["token"]);
-        const bool placeholder = (!t.empty() && t.front() == '<' && t.back() == '>') || t.rfind("FAKESECRET_", 0) == 0;
-        const std::string endpoint = trim(state["endpoint"]);
-        return !t.empty() && !placeholder && !trim(state["model"]).empty() &&
-               (endpoint.rfind("http://", 0) == 0 || endpoint.rfind("https://", 0) == 0);
+        return voice_fields::ReadActiveAiConfig(context->model);
     }
 
     std::string Field(const char *key) const
@@ -1364,8 +1347,13 @@ struct InputPage
         bool ok = false;
         if (provider == "ai")
         {
-            text = L"请先在「AI 与云联想」页面填写接口地址、Token 和模型";
-            ok = AiUsable();
+            const voice_fields::ActiveAiConfig state = AiState();
+            // Jev 只从候选中选，不能当翻译服务；AI 联想总开关与这里无关，只要凭据齐就能用。
+            if (voice_fields::AiProviderIsJev(state.provider))
+                text = L"Jev 只从已有候选中挑选，不能用于翻译；请在「AI 与云联想」页换成生成式服务商";
+            else
+                text = L"请先在「AI 与云联想」页面填写当前服务商的接口地址、Token 和模型";
+            ok = state.usable;
         }
         else if (provider == "custom")
         {
@@ -1391,8 +1379,16 @@ struct InputPage
     {
         for (auto &[name, box] : providerFields)
             box->SetVisible(name == provider);
-        auto state = AiState();
-        aiSummary->SetText(AiUsable() ? Widen(state["provider"] + " · " + state["model"]) : std::wstring());
+        const voice_fields::ActiveAiConfig state = AiState();
+        // 摘要用显示名而不是内部 id；Jev 单独标明它不能用作翻译。
+        if (voice_fields::AiProviderIsJev(state.provider))
+            aiSummary->SetText(L"Jev · 只能从候选中挑选，不能用于翻译");
+        else if (state.usable)
+            aiSummary->SetText(
+                voice_fields::AiProviderLabel(state.provider, context->model.Find("ai_assistant.providers")) + L" · " +
+                Widen(state.model));
+        else
+            aiSummary->SetText(std::wstring());
         SyncWarning();
     }
 
@@ -1806,7 +1802,8 @@ VisualPtr BuildInputPage(PageContext &context)
                                              true}}))});
         s->aiSummary = std::make_shared<ApiField>(L"当前服务商与模型", L"未配置", false, true);
         auto ai = Col(
-            {heading(L"复用 AI 辅助配置", L"使用「AI 与云联想」页当前服务商的接口地址、Token 与模型，无需在此重复填写"),
+            {heading(L"复用 AI 辅助配置", L"使用「AI 与云联想」页当前服务商的接口地址、Token 与模型，无需在此重复填写。"
+                                          L"不依赖那边的「启用 AI 联想」开关，凭据填好就能用于翻译。"),
              blockInput(grid({{s->aiSummary, true}}))});
         s->providerFields["tencent"] = std::make_shared<Hideable>(tencent, true);
         s->providerFields["niutrans"] = std::make_shared<Hideable>(niutrans, false);
@@ -1821,7 +1818,17 @@ VisualPtr BuildInputPage(PageContext &context)
         s->warningBox = std::make_shared<Hideable>(s->warning, true);
         s->credentialTest = std::make_unique<CredentialTest>(
             context, [s]() { return "translation." + s->provider; }, [s]() { return s->TestConfig(); },
-            [s]() { return s->provider == "ai" ? s->AiState() : s->TestConfig(); });
+            [s]() -> Json {
+                if (s->provider != "ai")
+                    return s->TestConfig();
+                // 把当前生效的服务商配置摊平成页面字段，凭据测试据此判断「测试期间配置是否改过」，
+                // 宿主再用同一份字段去发请求。
+                const voice_fields::ActiveAiConfig state = s->AiState();
+                return Json{{"provider", state.provider},
+                            {"endpoint", state.endpoint},
+                            {"token", state.token},
+                            {"model", state.model}};
+            });
 
         auto options = Col(
             {std::make_shared<Divider>(Divider::Kind::Option),

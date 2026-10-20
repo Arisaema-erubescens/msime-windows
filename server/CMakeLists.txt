@@ -514,6 +514,8 @@ add_executable(${SETTINGS_EXECUTABLE_NAME} WIN32
     "./src/settings/native/native_settings_model.cpp"
     "./src/settings/native/native_settings_model.h"
     "./src/settings/native/native_settings_pages.h"
+    "./src/settings/native/native_settings_pill.cpp"
+    "./src/settings/native/native_settings_pill.h"
     "./src/settings/native/native_settings_theme.cpp"
     "./src/settings/native/native_settings_theme.h"
     "./src/settings/native/native_settings_window.cpp"

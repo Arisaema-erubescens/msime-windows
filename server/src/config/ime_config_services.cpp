@@ -475,10 +475,9 @@ bool SetConfiguredNetworkString(const std::string &key, const std::string &value
 // 这样以后调整默认值，没改过的用户能跟着更新，而不是被切换提供商时顺手写进去的旧默认值钉住。
 static std::string AiAssistantDefaultValue(const std::string &key, const std::string &provider)
 {
-    static const AiAssistantConfig defaults;
-    const auto &slots = key == "endpoint" ? defaults.endpoints : defaults.models;
-    const auto found = slots.find(provider);
-    return found != slots.end() ? found->second : std::string();
+    // 唯一来源在 ai_provider_store.cpp 的 BuiltinDefaults()；设置页的占位符也读同一份。
+    return key == "endpoint" ? AiAssistant::ProviderStore::BuiltinDefaultEndpoint(provider)
+                             : AiAssistant::ProviderStore::BuiltinDefaultModel(provider);
 }
 
 static std::string AiAssistantStoredValue(const std::string &key, const std::string &provider, const std::string &value)
@@ -632,6 +631,46 @@ bool SetConfiguredAiAssistantString(const std::string &key, const std::string &v
     // 候选词翻译选了 AI 辅助时复用这里的服务商、地址、Token 与模型。
     PublishTranslationConfig();
     return true;
+}
+
+bool SetConfiguredAiAssistantProviderValue(std::string_view provider, std::string_view field, const std::string &value)
+{
+    const std::string id = VoiceInput::NormalizeProviderId(provider);
+    if (field != "endpoint" && field != "model")
+        return false;
+    const bool builtin = !AiAssistantTokenSlotKey(id).empty();
+    const auto registered = std::find_if(g_ai_assistant.providers.begin(), g_ai_assistant.providers.end(),
+                                         [&id](const AiAssistant::AiProvider &entry) { return entry.id == id; });
+    if (!builtin && registered == g_ai_assistant.providers.end())
+        return false;
+    const std::string key(field);
+    // 空值与默认值都存空串，读回时再补默认值；这样以后调整默认值，没改过的用户能跟着更新。
+    const std::string escaped = EscapeTomlBasicString(AiAssistantStoredValue(key, id, value));
+    std::vector<ConfigValueUpdate> writes{{"ai_assistant", key + "_" + id, escaped}};
+    const bool active = g_ai_assistant.provider == id;
+    if (active)
+        writes.push_back({"ai_assistant", key, escaped});
+    if (!WriteConfiguredValues(writes))
+        return false;
+    auto &slots = key == "endpoint" ? g_ai_assistant.endpoints : g_ai_assistant.models;
+    slots[id] = value.empty() ? AiAssistantDefaultValue(key, id) : value;
+    if (active)
+        (key == "endpoint" ? g_ai_assistant.endpoint : g_ai_assistant.model) = slots[id];
+    // 自定义服务商的槽位键活不过模板合并，值以注册表为准，这里同步改回去。
+    if (!builtin)
+    {
+        if (key == "endpoint")
+            registered->endpoint = slots[id];
+        else
+            registered->model = slots[id];
+    }
+    // 与 ApplyAiAssistantString 的 endpoint/model 分支保持一致：active 与单值键都跟随注册表解析。
+    AiAssistant::ProviderStore::ResolveActive(g_ai_assistant.active, g_ai_assistant.endpoint, g_ai_assistant.model,
+                                              g_ai_assistant.provider, g_ai_assistant.providers);
+    // 注册表写失败时内存与 config.toml 已经改过，翻译快照仍要跟着更新，否则两边各说各话。
+    const bool saved = builtin || SaveAiProviderStore();
+    PublishTranslationConfig();
+    return saved;
 }
 
 bool SetConfiguredAiAssistantBool(const std::string &key, bool value)

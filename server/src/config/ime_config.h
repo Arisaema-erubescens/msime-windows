@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 struct VoiceInputConfig
@@ -79,6 +80,9 @@ struct AiAssistantConfig
     // slots alive for rollback; requests resolve through `active`.
     std::vector<AiAssistant::AiProvider> providers;
     AiAssistant::AiProvider active;
+    // 这两份默认值的唯一权威在 ai_provider_store.cpp 的 BuiltinDefaults()，设置页也从那里取。
+    // 结构体默认成员初始化器没法调用函数，只能在这里再写一遍；tests/src/test_ai_provider_store.cpp
+    // 的 ai_provider_store_defaults_match_the_config_struct 用例钉住两份一致。
     std::map<std::string, std::string> endpoints{
         {"deepseek", "https://api.deepseek.com/chat/completions"},
         {"openai", "https://api.openai.com/v1/chat/completions"},
@@ -726,5 +730,8 @@ const FrequencyAdjustmentConfig &GetConfiguredFrequencyAdjustment();
 bool SetConfiguredFrequencyAdjustmentString(const std::string &key, const std::string &value);
 bool SetConfiguredFrequencyAdjustmentInt(const std::string &key, int value);
 bool SetConfiguredAiAssistantString(const std::string &key, const std::string &value);
+// 按服务商写 endpoint / model：落槽位键 endpoint_<id> / model_<id>，单值键只在目标就是活动服务商时改写。
+// 设置页在多提供商之间切换时用它，免得"写单值键"被当成写给后端此刻的活动服务商。
+bool SetConfiguredAiAssistantProviderValue(std::string_view provider, std::string_view field, const std::string &value);
 bool SetConfiguredAiAssistantBool(const std::string &key, bool value);
 bool SetConfiguredAiAssistantInt(const std::string &key, int value);
