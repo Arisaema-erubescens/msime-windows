@@ -910,7 +910,7 @@ void FloatingToolbarPresenter::UpdateShape(int imageWidthPx, int imageHeightPx)
     {
         DeleteObject(impl_->shape);
     }
-    // 动图按静止的那一帧（APNG 的默认图、GIF 的首帧）裁形状：动画画到轮廓之外的部分看得见、点不到。
+    // 窗口区域连画面一起裁，所以动图按所有帧合起来的轮廓裁，哪一帧画到的地方都留在窗口里。
     // 半透明的抗锯齿边缘也算在窗口里，边缘才不会被裁出锯齿。读不出图时就是矩形窗口。
     impl_->shape = msimeui::CreateAlphaMaskRegion(impl_->imagePath, static_cast<UINT>(imageWidthPx),
                                                   static_cast<UINT>(imageHeightPx));

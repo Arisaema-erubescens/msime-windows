@@ -1,7 +1,10 @@
 // ImageMask: turns the alpha channel of an image into rectangles / a GDI region for shaped windows.
 #include "msimeui/ImageMask.h"
 
+#include "msimeui/AnimatedImage.h"
+
 #include <algorithm>
+#include <optional>
 #include <utility>
 #include <wincodec.h>
 #include <wrl/client.h>
@@ -76,27 +79,41 @@ HRGN CreateAlphaMaskRegion(const std::wstring &filePath, UINT width, UINT height
         return nullptr;
     }
     ComPtr<IWICImagingFactory> factory;
-    ComPtr<IWICBitmapDecoder> decoder;
-    ComPtr<IWICBitmapFrameDecode> frame;
-    ComPtr<IWICBitmapScaler> scaler;
-    ComPtr<IWICFormatConverter> converter;
-    // Cache on load so the file is not held open once the frame is decoded.
     if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                                IID_PPV_ARGS(factory.GetAddressOf()))) ||
-        FAILED(factory->CreateDecoderFromFilename(filePath.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnLoad,
-                                                  decoder.GetAddressOf())) ||
-        FAILED(decoder->GetFrame(0, frame.GetAddressOf())) ||
+                                IID_PPV_ARGS(factory.GetAddressOf()))))
+    {
+        return nullptr;
+    }
+    const std::optional<AnimatedImage> image = AnimatedImage::DecodeFile(factory.Get(), filePath);
+    if (!image || image->Width() == 0 || image->Height() == 0)
+    {
+        return nullptr;
+    }
+    // A window region clips what is drawn, not just clicks, so an animation is shaped by every
+    // frame at once: whatever any frame covers stays inside the window.
+    const UINT sourceStride = image->Width() * 4;
+    std::vector<BYTE> coverage(static_cast<size_t>(sourceStride) * image->Height(), 0);
+    for (size_t frame = 0; frame < image->FrameCount(); ++frame)
+    {
+        const std::vector<uint8_t> &pixels = image->FramePixels(frame);
+        for (size_t alpha = 3; alpha < coverage.size() && alpha < pixels.size(); alpha += 4)
+        {
+            coverage[alpha] = (std::max)(coverage[alpha], pixels[alpha]);
+        }
+    }
+    ComPtr<IWICBitmap> source;
+    ComPtr<IWICBitmapScaler> scaler;
+    if (FAILED(factory->CreateBitmapFromMemory(image->Width(), image->Height(), GUID_WICPixelFormat32bppPBGRA,
+                                               sourceStride, static_cast<UINT>(coverage.size()), coverage.data(),
+                                               source.GetAddressOf())) ||
         FAILED(factory->CreateBitmapScaler(scaler.GetAddressOf())) ||
-        FAILED(scaler->Initialize(frame.Get(), width, height, WICBitmapInterpolationModeFant)) ||
-        FAILED(factory->CreateFormatConverter(converter.GetAddressOf())) ||
-        FAILED(converter->Initialize(scaler.Get(), GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr, 0.0,
-                                     WICBitmapPaletteTypeCustom)))
+        FAILED(scaler->Initialize(source.Get(), width, height, WICBitmapInterpolationModeFant)))
     {
         return nullptr;
     }
     const UINT stride = width * 4;
     std::vector<BYTE> pixels(static_cast<size_t>(stride) * height);
-    if (FAILED(converter->CopyPixels(nullptr, stride, static_cast<UINT>(pixels.size()), pixels.data())))
+    if (FAILED(scaler->CopyPixels(nullptr, stride, static_cast<UINT>(pixels.size()), pixels.data())))
     {
         return nullptr;
     }
