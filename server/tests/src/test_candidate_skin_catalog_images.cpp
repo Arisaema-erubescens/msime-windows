@@ -435,6 +435,10 @@ z_index = "high"
         REQUIRE(package.has_value());
         REQUIRE_EQ(package->schemaVersion, 1);
         REQUIRE_EQ(package->notices.size(), size_t{1});
+        // line_gap_dip above sits inside [candidate_window.border_image], so it is not one of the window's keys.
+        REQUIRE_EQ(package->notices.front(),
+                   std::string("candidate_window.border_image、candidate_window.outer_insets_dip、candidate_window."
+                               "decorations 只在 base = \"canvas\" 时生效，已忽略"));
         REQUIRE(!package->borderImage.has_value());
         REQUIRE(!package->lineGapDip.has_value());
         REQUIRE(!package->outerInsetsDip.has_value());
@@ -445,6 +449,44 @@ z_index = "high"
         REQUIRE_EQ(catalog.issues.size(), size_t{1});
         REQUIRE_EQ(catalog.issues.front().folder, std::string("art"));
         REQUIRE_EQ(catalog.issues.front().reason, package->notices.front());
+        RemoveSkin(root);
+    }
+}
+
+TEST_CASE(candidate_skin_catalog_v2_motion_without_canvas_loads_static_without_an_issue)
+{
+    // [animation] and decoration motion are valid on any base in the shared schema; Windows draws such a skin still.
+    const std::string window = R"toml(min_width_dip = 176
+
+[candidate_window.decoration]
+image = "assets/photo.jpg"
+top_inset_dip = 40
+width_dip = 40
+align = "right"
+motion = "float"
+motion_period_ms = 3000
+
+[animation]
+enter = "slide_up"
+exit = "fade"
+selection = "spring"
+duration_ms = 200
+stagger_ms = 14
+)toml";
+    for (const char *base : {"fluent", "system", "paper"})
+    {
+        const auto root = WriteV2Skin(L"v2-motion", base, window);
+        std::string error;
+        const auto package = CandidateSkinCatalog::Load(root, "art", &error);
+        REQUIRE(error.empty());
+        REQUIRE(package.has_value());
+        REQUIRE_EQ(package->schemaVersion, 1);
+        REQUIRE(package->notices.empty());
+        REQUIRE_EQ(package->decorationImage, std::string("assets/photo.jpg"));
+
+        const auto catalog = CandidateSkinCatalog::Scan(root);
+        REQUIRE_EQ(catalog.packages.size(), size_t{1});
+        REQUIRE(catalog.issues.empty());
         RemoveSkin(root);
     }
 }

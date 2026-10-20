@@ -869,12 +869,14 @@ std::optional<Package> Load(const std::filesystem::path &skinsRoot, const std::s
             SetError(error, "base = \"canvas\" 只能用于 schema_version = 2 的皮肤");
             return std::nullopt;
         }
-        // v2 字段只在 canvas 上生效：其他 base 的卡片几何与九宫格/挂件互相打架。这种皮肤仍可使用，按 v1 处理。
+        // 九宫格、挂件和几处内边距只在 canvas 上生效，其他 base 的卡片几何与它们互相打架：这种皮肤仍可使用，按 v1
+        // 处理，写了这些键时读出 candidate_window 后再提示。
+        //
+        // [animation] 和装饰图 motion 是各平台共用的 v2 键，对任何 base 都合法；Windows 不播放它们、按静态显示，
+        // 属于正常降级，不提示。
         if (schemaVersion >= 2 && !IsCanvasBase(package.base))
         {
             package.schemaVersion = 1;
-            package.notices.push_back("schema_version = 2 需要 base = \"canvas\"，已按 schema_version = 1 "
-                                      "加载，九宫格、挂件等 v2 字段被忽略");
         }
         const auto *supports = root["supports"].as_table();
         if (!supports || !ReadEnumArray(*supports, "layouts", {"horizontal", "vertical"}, package.layouts) ||
@@ -888,6 +890,23 @@ std::optional<Package> Load(const std::filesystem::path &skinsRoot, const std::s
         {
             SetError(error, "缺少 candidate_window");
             return std::nullopt;
+        }
+        if (schemaVersion >= 2 && !IsCanvasBase(package.base))
+        {
+            std::string ignored;
+            for (const char *key :
+                 {"border_image", "content_insets_dip", "outer_insets_dip", "line_gap_dip", "decorations"})
+            {
+                if (window->contains(key))
+                {
+                    ignored += ignored.empty() ? "candidate_window." : "、candidate_window.";
+                    ignored += key;
+                }
+            }
+            if (!ignored.empty())
+            {
+                package.notices.push_back(ignored + " 只在 base = \"canvas\" 时生效，已忽略");
+            }
         }
         package.minWidthDip = BoundedNumber(*window, "min_width_dip", 1000.0);
         if (package.minWidthDip < 0.0)
