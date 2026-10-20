@@ -1137,11 +1137,23 @@ bool IsBusy(const std::string &state)
     return state == "downloading" || state == "importing";
 }
 
+bool UpdatePending(const Json *status)
+{
+    return status && status->is_object() && status->value("updatePending", false);
+}
+
+bool UpdateAvailable(const Json *status)
+{
+    return status && status->is_object() && status->value("updateAvailable", false);
+}
+
 std::wstring StatusText(const Json *status)
 {
+    if (UpdatePending(status))
+        return L"新版本已下载，点「重启输入法」生效";
     const std::string state = status && status->is_object() ? status->value("state", std::string("absent")) : "absent";
     if (state == "ready")
-        return L"模型已就绪";
+        return UpdateAvailable(status) ? L"有新版本可用" : L"模型已就绪";
     if (state == "downloading")
     {
         const int progress =
@@ -1171,6 +1183,8 @@ struct ModelRow
     std::shared_ptr<Label> status;
     std::shared_ptr<BareRadio> radio;
     std::shared_ptr<Button> download;
+    std::function<void()> downloadAction;
+    std::function<void()> restartAction;
     std::shared_ptr<Hideable> importBox;
     std::shared_ptr<Button> import;
     std::shared_ptr<Hideable> removeBox;
@@ -1220,7 +1234,10 @@ ModelRow MakeModelRow(PageContext &context, const std::string &id, const std::ws
         actions->Add(row.radio);
     }
     row.download = std::make_shared<Button>(L"下载", ButtonKind::Secondary);
-    row.download->SetOnClick([model, downloadType, data]() { model->Post(downloadType, data); });
+    row.downloadAction = [model, downloadType, data]() { model->Post(downloadType, data); };
+    // 待重启时同一个按钮换成「重启」，直接走设置页已有的 restartServer 动作。
+    row.restartAction = [model]() { model->Post("restartServer"); };
+    row.download->SetOnClick(row.downloadAction);
     actions->Add(row.download);
     row.import = std::make_shared<Button>(L"导入", ButtonKind::Secondary);
     row.import->SetOnClick([model, importType, data]() { model->Post(importType, data); });
@@ -2150,18 +2167,28 @@ VisualPtr BuildInputPage(PageContext &context)
             const Json *statuses = model->Find("association.sentence_collocation_model_status");
             const std::string active = model->GetString("association.sentence_collocation_model");
             bool anyBusy = false;
+            bool anyPending = false;
             if (statuses && statuses->is_object())
             {
                 for (const auto &item : statuses->items())
+                {
                     anyBusy = anyBusy || IsBusy(StateOf(&item.value()));
+                    anyPending = anyPending || UpdatePending(&item.value());
+                }
             }
             for (ModelRow &row : s->collocationRows)
             {
                 const Json *status =
                     statuses && statuses->is_object() && statuses->contains(row.id) ? &(*statuses)[row.id] : nullptr;
                 const std::string stateName = StateOf(status);
+                const bool pending = UpdatePending(status);
+                const bool update_available = UpdateAvailable(status);
                 row.status->SetText(StatusText(status));
-                row.download->SetDisabled(stateName == "ready" || anyBusy);
+                // 每次快照都重设按钮文本和动作，避免上一次的「更新 / 重启」残留到别的状态。
+                // 待重启时按钮直接变成可点的「重启」，点下去走设置页已有的 restartServer。
+                row.download->SetText(pending ? L"重启输入法" : (update_available ? L"更新" : L"下载"));
+                row.download->SetOnClick(pending ? row.restartAction : row.downloadAction);
+                row.download->SetDisabled(pending ? false : ((stateName == "ready" && !update_available) || anyBusy));
                 row.importBox->SetVisible(stateName != "ready");
                 row.import->SetDisabled(anyBusy);
                 row.removeBox->SetVisible(stateName == "ready");
@@ -2170,10 +2197,11 @@ VisualPtr BuildInputPage(PageContext &context)
             const Json *activeStatus =
                 statuses && statuses->is_object() && statuses->contains(active) ? &(*statuses)[active] : nullptr;
             s->collocationToggle->SetDisabled(StateOf(activeStatus) != "ready");
-            if (anyBusy && s->collocationPoll == 0)
+            // 待重启期间也轮询：点「重启」后 Server 落位完，下一份快照就能把按钮恢复成「下载」。
+            if ((anyBusy || anyPending) && s->collocationPoll == 0)
                 s->collocationPoll = PageTimers::Start(host->Hwnd(), 2000, true,
                                                        [model]() { model->Post("collocationModelStatusRequest"); });
-            else if (!anyBusy)
+            else if (!anyBusy && !anyPending)
                 PageTimers::Stop(s->collocationPoll);
         }
     });

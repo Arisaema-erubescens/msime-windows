@@ -26,6 +26,7 @@
 #include "utils/hanzi_pinyin.h"
 #include "utils/single_instance.h"
 #include "session/session_factory.h"
+#include "settings/collocation_model.h"
 #include "statistics/stats_pipe.h"
 #include "voice-input/voice_input_service.h"
 
@@ -120,6 +121,8 @@ int CALLBACK WinMain(_In_ HINSTANCE hInstance, _In_ HINSTANCE /*hPrevInstance*/,
 
     // Initialize config
     InitImeConfig();
+    // 上一次退出时未能落位的模型更新在这里生效：必须早于任何会话创建（此时还没有 .gram 映射）。
+    collocation::ApplyPendingUpdates();
     VoiceInput::Initialize();
     Global::candidate_ui.page_size = GetConfiguredCandidatePageSize();
 
