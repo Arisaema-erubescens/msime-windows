@@ -193,8 +193,8 @@ x_dip = 40
     REQUIRE(HasNotice(*package, "toolbar.buttons.voice"));
     REQUIRE(HasNotice(*package, "kana"));
     REQUIRE(HasNotice(*package, "toolbar.buttons.punctuation"));
-    // 150 + the default 26 runs past the 160 DIP image.
-    REQUIRE(HasNotice(*package, "超出了背景图"));
+    // A button past the image widens the window instead of being cut off, so it is not noticed.
+    REQUIRE(!HasNotice(*package, "背景图"));
     RemoveSkin(root);
 
     const auto bar = WriteSkin(L"bar-buttons", "[candidate_window]\n[toolbar.buttons.status]\nx_dip = 0\ny_dip = 0\n");
@@ -203,6 +203,63 @@ x_dip = 40
     REQUIRE_EQ(barPackage->toolbarMode, std::string("bar"));
     REQUIRE(HasNotice(*barPackage, "mode = \"image\""));
     RemoveSkin(bar);
+}
+
+TEST_CASE(candidate_skin_catalog_reads_toolbar_button_defaults_and_flow)
+{
+    const auto root = WriteSkin(L"flow", std::string(kImageToolbar) + R"(
+[toolbar.button_defaults]
+width_dip = 30
+height_dip = 30
+icon_size_dip = 20
+background = "assets/cn.png"
+
+[toolbar.button_flow]
+x_dip = 170
+y_dip = 2
+direction = "vertical"
+gap_dip = 2.5
+
+[toolbar.buttons.settings]
+background = "assets/en.png"
+
+[toolbar.buttons.punctuation]
+x_dip = 40
+)");
+    std::string error;
+    const auto package = CandidateSkinCatalog::Load(root, "art", &error);
+    REQUIRE(error.empty());
+    REQUIRE(package.has_value());
+    const auto &defaults = package->toolbarButtonDefaults;
+    REQUIRE_EQ(*defaults.widthDip, 30.0);
+    REQUIRE_EQ(*defaults.heightDip, 30.0);
+    REQUIRE_EQ(*defaults.iconSizeDip, 20.0);
+    REQUIRE_EQ(defaults.background, std::string("assets/cn.png"));
+    REQUIRE(package->toolbarButtonFlow.has_value());
+    REQUIRE_EQ(package->toolbarButtonFlow->xDip, 170.0);
+    REQUIRE_EQ(package->toolbarButtonFlow->yDip, 2.0);
+    REQUIRE(package->toolbarButtonFlow->vertical);
+    REQUIRE_EQ(package->toolbarButtonFlow->gapDip, 2.5);
+    REQUIRE_EQ(package->toolbarButtons.at("settings").background, std::string("assets/en.png"));
+    // With a flow, a button with only one coordinate is laid out by the flow instead of dropped.
+    REQUIRE(!HasNotice(*package, "toolbar.buttons.punctuation"));
+    RemoveSkin(root);
+}
+
+TEST_CASE(candidate_skin_catalog_rejects_invalid_toolbar_button_defaults_and_flow)
+{
+    REQUIRE(LoadFails(L"flow-not-table", std::string(kImageToolbar) + "button_flow = 1\n"));
+    REQUIRE(
+        LoadFails(L"flow-direction", std::string(kImageToolbar) + "[toolbar.button_flow]\ndirection = \"diagonal\"\n"));
+    REQUIRE(LoadFails(L"flow-negative", std::string(kImageToolbar) + "[toolbar.button_flow]\nx_dip = -1\n"));
+    REQUIRE(LoadFails(L"flow-gap", std::string(kImageToolbar) + "[toolbar.button_flow]\ngap_dip = -2\n"));
+    REQUIRE(LoadFails(L"defaults-not-table", std::string(kImageToolbar) + "button_defaults = \"round\"\n"));
+    REQUIRE(
+        LoadFails(L"defaults-zero-size", std::string(kImageToolbar) + "[toolbar.button_defaults]\nwidth_dip = 0\n"));
+    REQUIRE(LoadFails(L"defaults-missing-background",
+                      std::string(kImageToolbar) + "[toolbar.button_defaults]\nbackground = \"assets/none.png\"\n"));
+    REQUIRE(LoadFails(L"button-missing-background",
+                      std::string(kImageToolbar) + "[toolbar.buttons.emoji]\nbackground = \"assets/none.png\"\n"));
 }
 
 TEST_CASE(candidate_skin_catalog_reads_decoration_candidate_overlay)

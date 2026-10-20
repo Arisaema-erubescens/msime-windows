@@ -11,6 +11,7 @@
 #include "utils/common_utils.h"
 #include "utils/window_utils.h"
 #include "window/small_windows.h"
+#include "window/floating_toolbar_image_layout.h"
 #include "window/floating_toolbar_skin.h"
 
 #include "msimeui/Controls.h"
@@ -126,6 +127,18 @@ class ToolbarIconButton : public msimeui::Visual
         InvalidateVisual();
     }
 
+    // 皮肤给的按钮底图（如圆底），拉满按钮框，画在按钮图或图标下面；空路径不画。
+    void SetBackground(const std::wstring &path)
+    {
+        background_.reset();
+        if (!path.empty())
+        {
+            background_ = std::make_shared<msimeui::Image>(path);
+            background_->SetStretch(msimeui::ImageStretch::Fill);
+        }
+        InvalidateVisual();
+    }
+
     void SetOnClick(ClickHandler handler)
     {
         onClick_ = std::move(handler);
@@ -154,9 +167,12 @@ class ToolbarIconButton : public msimeui::Visual
     void Arrange(const msimeui::RectF &finalRect) override
     {
         bounds_ = finalRect;
-        if (image_)
+        for (const auto &layer : {background_, image_})
         {
-            image_->Arrange(finalRect);
+            if (layer)
+            {
+                layer->Arrange(finalRect);
+            }
         }
     }
 
@@ -166,6 +182,10 @@ class ToolbarIconButton : public msimeui::Visual
         if (!target)
         {
             return;
+        }
+        if (background_)
+        {
+            background_->Render(deviceResources);
         }
         if (image_)
         {
@@ -296,6 +316,7 @@ class ToolbarIconButton : public msimeui::Visual
     float hoverRadius_ = 6.0f;
     ClickHandler onClick_;
     std::shared_ptr<msimeui::Image> image_;
+    std::shared_ptr<msimeui::Image> background_;
 };
 
 class ToolbarDragHandle : public msimeui::Visual
@@ -471,7 +492,8 @@ struct FloatingToolbarPresenter::Impl
     std::wstring imagePath;
     float imageWidthDip = 0.0f;
     float imageHeightDip = 0.0f;
-    std::map<std::string, CandidateSkinCatalog::ToolbarButton> buttons;
+    // 皮肤清单，按钮怎么摆由 LayoutToolbarImageButtons 按它算。
+    CandidateSkinCatalog::Package imagePackage;
     // 图片模式下摆出来的按钮：落在它们上面的点不算拖动区。
     std::vector<std::shared_ptr<ToolbarIconButton>> imageButtons;
     // v2 皮肤的动图才播放，与候选窗一致。
@@ -640,46 +662,42 @@ void FloatingToolbarPresenter::RebuildScene()
     impl_->imageButtons.clear();
     if (impl_->imageMode)
     {
-        // 背景图铺满，按钮按皮肤的坐标摆在图上；皮肤没给坐标或把它藏起来的按钮不画。
+        // 背景图铺满，按钮按 LayoutToolbarImageButtons 摆在上面（与设置页的预览同一份规则）。窗口按背景图与
+        // 按钮合起来的范围开，按钮排到图外也不会被裁掉。
         auto root = std::make_shared<msimeui::OverlayPanel>();
-        const float width = impl_->imageWidthDip * s;
-        const float height = impl_->imageHeightDip * s;
-        root->SetWidth(width);
-        root->SetHeight(height);
         auto background = std::make_shared<msimeui::Image>(impl_->imagePath);
         background->SetStretch(msimeui::ImageStretch::Fill);
-        background->SetWidth(width);
-        background->SetHeight(height);
+        background->SetWidth(impl_->imageWidthDip * s);
+        background->SetHeight(impl_->imageHeightDip * s);
         root->AddChildAt(background, 0.0f, 0.0f);
-        for (ToolbarButtonSpec &spec : specs)
+        std::vector<ToolbarImageButtonRequest> shown;
+        shown.reserve(specs.size());
+        for (const ToolbarButtonSpec &spec : specs)
         {
-            const auto found = impl_->buttons.find(spec.key);
-            if (found == impl_->buttons.end())
-            {
-                continue;
-            }
-            const CandidateSkinCatalog::ToolbarButton &placement = found->second;
-            if (!placement.visible.value_or(true) || !placement.xDip || !placement.yDip)
-            {
-                continue;
-            }
-            const auto dip = [s](std::optional<double> value) {
-                return static_cast<float>(value.value_or(CandidateSkinCatalog::kDefaultToolbarButtonSizeDip)) * s;
-            };
-            auto button = MakeToolbarButton(spec, dip(placement.widthDip), dip(placement.heightDip));
+            shown.push_back({spec.key, spec.state});
+        }
+        for (const ToolbarImageButtonSlot &slot : LayoutToolbarImageButtons(impl_->imagePackage, shown))
+        {
+            const auto spec = std::find_if(specs.begin(), specs.end(), [&](const ToolbarButtonSpec &candidate) {
+                return candidate.key == slot.key;
+            });
+            auto button =
+                MakeToolbarButton(*spec, static_cast<float>(slot.widthDip) * s, static_cast<float>(slot.heightDip) * s);
             button->SetColors(impl_->glyph, impl_->hover, iconRadius);
-            button->SetOnClick(std::move(spec.click));
-            if (placement.iconSizeDip)
+            button->SetOnClick(std::move(spec->click));
+            if (slot.iconSizeDip > 0.0)
             {
-                button->SetGlyphSize(static_cast<float>(*placement.iconSizeDip) * s);
+                button->SetGlyphSize(static_cast<float>(slot.iconSizeDip) * s);
             }
-            const auto stateImage = placement.images.find(spec.state);
-            const std::string &image = stateImage != placement.images.end() ? stateImage->second : placement.image;
-            if (!image.empty())
+            if (!slot.background.empty())
             {
-                button->SetImage(impl_->packageRoot + string_to_wstring(image));
+                button->SetBackground(impl_->packageRoot + string_to_wstring(slot.background));
             }
-            root->AddChildAt(button, static_cast<float>(*placement.xDip) * s, static_cast<float>(*placement.yDip) * s);
+            if (!slot.image.empty())
+            {
+                button->SetImage(impl_->packageRoot + string_to_wstring(slot.image));
+            }
+            root->AddChildAt(button, static_cast<float>(slot.xDip) * s, static_cast<float>(slot.yDip) * s);
             impl_->imageButtons.push_back(button);
         }
         impl_->card.reset();
@@ -786,7 +804,7 @@ void FloatingToolbarPresenter::ApplyTheme()
     }
     impl_->imageMode = package && package->toolbarMode == "image";
     impl_->skinAnimates = impl_->imageMode && package->schemaVersion >= 2;
-    impl_->buttons.clear();
+    impl_->imagePackage = {};
     std::wstring imageKey;
     if (impl_->imageMode)
     {
@@ -794,7 +812,7 @@ void FloatingToolbarPresenter::ApplyTheme()
         impl_->imagePath = impl_->packageRoot + string_to_wstring(package->toolbarImage);
         impl_->imageWidthDip = static_cast<float>(package->toolbarImageWidthDip);
         impl_->imageHeightDip = static_cast<float>(package->toolbarImageHeightDip);
-        impl_->buttons = package->toolbarButtons;
+        impl_->imagePackage = *package;
         imageKey = impl_->imagePath + L"|" + std::to_wstring(GetCandidateSkinReloadRevision());
     }
     if (imageKey != impl_->imageKey)
@@ -869,9 +887,10 @@ void FloatingToolbarPresenter::RelayoutHost(FLOAT scaleOverride, const RECT *sug
     SetWindowPos(hwnd_, nullptr, pos.x, pos.y, widthPx, heightPx, SWP_NOZORDER | SWP_NOACTIVATE);
     ::FTB_HOST_INSETS_PX = insets;
     ::FTB_HOST_INSETS_VALID = true;
-    // 背景图画在 (0, 0) 起、测量出的大小上；形状要和它在屏幕上的像素一一对上。
-    UpdateShape(static_cast<int>(std::lround(measured.width * scale)),
-                static_cast<int>(std::lround(measured.height * scale)), scale);
+    // 背景图画在 (0, 0) 起、皮肤声明的大小上（窗口可能因按钮排到图外而更大）；形状要和它在屏幕上的像素一一对上。
+    const float userScale = ToolbarUserScale();
+    UpdateShape(static_cast<int>(std::lround(impl_->imageWidthDip * userScale * scale)),
+                static_cast<int>(std::lround(impl_->imageHeightDip * userScale * scale)), scale);
     ClipWindowToVisibleScreens(hwnd_, ScreenArea::WorkArea, ShapeRegion());
     impl_->resources.EnsureForComposition(hwnd_);
     impl_->captionRect = {};

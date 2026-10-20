@@ -71,14 +71,19 @@ struct ToolbarButton
 {
     // false 时皮肤把它藏起来；皮肤不能让用户在设置页关掉的按钮重新出现。
     std::optional<bool> visible;
-    // 按钮框左上角相对背景图左上角的位置（DIP）。两个都写了按钮才会出现，没写坐标的按钮不画。
+    // 按钮框左上角相对背景图左上角的位置（DIP）。两个都写了就固定在这里；否则按 [toolbar.button_flow]
+    // 排，皮肤没写 button_flow 时这个按钮不画。
     std::optional<double> xDip;
     std::optional<double> yDip;
-    // 按钮框的宽高（DIP）；没写时为 kDefaultToolbarButtonSizeDip。
+    // 按钮框的宽高（DIP）；没写时取 [toolbar.button_defaults]，再没有为 kDefaultToolbarButtonSizeDip。
     std::optional<double> widthDip;
     std::optional<double> heightDip;
-    // 没有贴图时画的内置图标（Segoe Fluent Icons）的字号（DIP）；没写时为按钮框短边的 0.82 倍。
+    // 没有贴图时画的内置图标（Segoe Fluent Icons）的字号（DIP）；没写时取 button_defaults，
+    // 再没有为按钮框短边的 0.82 倍。
     std::optional<double> iconSizeDip;
+    // 按钮自己的底图（如圆底），铺满按钮框、画在图标或按钮图下面，随按钮一起显示和隐藏；
+    // 没写时取 button_defaults。
+    std::string background;
     // 各状态共用的图；images 里没有当前状态的图时也用它。两者都没有就画内置的矢量图标。
     std::string image;
     // 状态名 → 图，只对有状态的按钮有效，状态名见 ToolbarButtonStates。
@@ -86,6 +91,16 @@ struct ToolbarButton
 };
 
 inline constexpr double kDefaultToolbarButtonSizeDip = 26.0;
+
+// [toolbar.button_flow]：没写坐标的按钮从 (x_dip, y_dip) 起按工具栏的顺序依次排开，只排当前显示的按钮，
+// 所以设置页关掉一个按钮后面的就往前补，打开一个就排进队里。写了坐标的按钮不参与排列。
+struct ToolbarButtonFlow
+{
+    double xDip = 0.0;
+    double yDip = 0.0;
+    bool vertical = false;
+    double gapDip = 0.0;
+};
 
 // 装饰图上叠加一个候选词（[candidate_window.decoration] 的 candidate_overlay_* 一组键）。
 struct DecorationCandidate
@@ -269,6 +284,9 @@ struct Package
     double toolbarImageHeightDip = 0.0;
     // 按钮键 → 摆法与贴图，只在 image 模式生效。键见 ToolbarButtonStates。
     std::map<std::string, ToolbarButton> toolbarButtons;
+    // [toolbar.button_defaults]：各按钮没写的 width_dip、height_dip、icon_size_dip、background 取这里的。
+    ToolbarButton toolbarButtonDefaults;
+    std::optional<ToolbarButtonFlow> toolbarButtonFlow;
     // v2 专有特性：九宫格贴图边框
     std::optional<BorderImage> borderImage;
     // v2 专有特性：面板内容/文字安全内边距，从面板外缘量起；某一边小于九宫格边框宽度时按边框宽度算。
