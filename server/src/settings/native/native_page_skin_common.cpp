@@ -190,6 +190,46 @@ ToolbarLook ResolveToolbarLook(const SettingsModel &model, const std::string &sk
     t.iconRadius = skin.iconRadius;
     // The toolbar's own shadow pair (8px 10px 24px, 2px 3px 8px), light α .18/.10, dark α .34/.22.
     t.shadows = {{8.0f, 10.0f, 24.0f, light ? 0.18f : 0.34f}, {2.0f, 3.0f, 8.0f, light ? 0.10f : 0.22f}};
+    if (!package || package->toolbarMode != "image")
+        return t;
+    // The image mode, placed as FloatingToolbarPresenter::RebuildScene places it. The preview shows
+    // the toolbar in its usual state: Chinese input, half width, Chinese punctuation, simplified.
+    const std::filesystem::path directory = root / std::filesystem::u8path(package->id);
+    const auto path = [&](const std::string &relative) {
+        return (directory / std::filesystem::u8path(relative)).lexically_normal().wstring();
+    };
+    t.imageMode = true;
+    t.animated = package->schemaVersion >= 2;
+    t.image = path(package->toolbarImage);
+    t.imageSize = {static_cast<float>(package->toolbarImageWidthDip),
+                   static_cast<float>(package->toolbarImageHeightDip)};
+    const struct
+    {
+        const char *key;
+        const char *state;
+    } kButtons[] = {{"status", "cn"}, {"fullwidth", "half"},   {"punctuation", "cn"}, {"character_set", "simplified"},
+                    {"emoji", ""},    {"screen_keyboard", ""}, {"settings", ""}};
+    for (int icon = 0; icon < static_cast<int>(std::size(kButtons)); ++icon)
+    {
+        const auto found = package->toolbarButtons.find(kButtons[icon].key);
+        if (found == package->toolbarButtons.end())
+            continue;
+        const CandidateSkinCatalog::ToolbarButton &placement = found->second;
+        if (!placement.visible.value_or(true) || !placement.xDip || !placement.yDip)
+            continue;
+        ToolbarLook::ImageButton button;
+        button.icon = icon;
+        button.box = {
+            static_cast<float>(*placement.xDip), static_cast<float>(*placement.yDip),
+            static_cast<float>(placement.widthDip.value_or(CandidateSkinCatalog::kDefaultToolbarButtonSizeDip)),
+            static_cast<float>(placement.heightDip.value_or(CandidateSkinCatalog::kDefaultToolbarButtonSizeDip))};
+        const auto stateImage = placement.images.find(kButtons[icon].state);
+        const std::string &image = stateImage != placement.images.end() ? stateImage->second : placement.image;
+        if (!image.empty())
+            button.image = path(image);
+        button.iconSize = static_cast<float>(placement.iconSizeDip.value_or(0.0));
+        t.buttons.push_back(std::move(button));
+    }
     return t;
 }
 

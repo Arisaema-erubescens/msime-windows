@@ -76,6 +76,26 @@ struct ToolbarLook
         float x, y, blur, alpha;
     };
     std::vector<Shadow> shadows;
+
+    // A skin's image mode ([toolbar] mode = "image"): one background image with the buttons
+    // placed on it, as FloatingToolbarPresenter draws it. Sizes are in DIPs before scaling.
+    struct ImageButton
+    {
+        // Index into the toolbar icons: status, fullwidth, punctuation, character_set, emoji,
+        // screen_keyboard, settings.
+        int icon = 0;
+        RectF box{};
+        // Empty draws the built-in vector icon.
+        std::wstring image;
+        // 0 takes 0.82 of the box's shorter side.
+        float iconSize = 0.0f;
+    };
+    bool imageMode = false;
+    // Only schema_version 2 skins play their animated images.
+    bool animated = false;
+    std::wstring image;
+    SizeF imageSize{};
+    std::vector<ImageButton> buttons;
 };
 ToolbarLook ResolveToolbarLook(const SettingsModel &model, const std::string &skinId, bool light);
 
@@ -146,6 +166,9 @@ class ToolbarPreview : public msimeui::Visual
 
   private:
     float BarWidth() const;
+    // The image mode's own scale: the toolbar multiplies the skin's DIPs by scale * iconSize / 24.
+    float ImageScale() const;
+    void RenderImage(msimeui::DeviceResources &dr);
 
     ToolbarLook look_;
     Options options_;
