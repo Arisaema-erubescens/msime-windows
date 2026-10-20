@@ -44,7 +44,7 @@
 ; Pascal Script 里访问 {sys} 就是真正的 System32，没有 WOW64 重定向可绕。
 ; 不要在这里用 ApplyPathRedirRulesForCurrentProcess：那是 Inno Setup 7 的 support
 ; function，windows-2025 runner 的 6.7.1 没有它，ISCC 直接报 Unknown identifier
-; （#434 的告诫，见 installer/README.md）。
+; （#925 引入后第一次在 hosted runner 上编安装包就炸了，见 installer/README.md）。
 #define MyTsfRoot64    "{sys}\IME\MetasequoiaIME"
 #define MyTsfRoot32    "{syswow64}\IME\MetasequoiaIME"
 #ifdef LightPackage

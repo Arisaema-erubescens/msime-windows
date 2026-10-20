@@ -20,7 +20,6 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $CertificateSubject = 'CN=Metasequoia IME Dev Build Code Signing'
-$CodeSigningEku = '1.3.6.1.5.5.7.3.3'
 
 function Find-SignTool {
     $kitsBin = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
@@ -36,23 +35,34 @@ function Find-SignTool {
 }
 
 # 同一次运行里重复调用本脚本时复用签名步骤生成的证书，保持包内二进制与安装包同一签名。
+#
+# 复用的判断必须来自「本次运行写入的标记」，不能只靠「证书看起来像 dev 证书」：改了 subject
+# 之后，任何一台没被重置的机器上都会留下上次构建的证书，有效期 30 天，subject 和 EKU 全都
+# 对得上。只按属性筛就会把上一个任务生成的私钥拿来签名，产出的包属于别的流水线。标记文件
+# 放在 RUNNER_TEMP 下（托管 runner 每次都是新的临时目录），内容就是本次要复用的指纹。
+function Get-RunMarkerPath {
+    $root = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
+    return Join-Path $root 'msime-dev-build-certificate.thumbprint'
+}
+
 function Get-RunCertificate {
-    $now = Get-Date
-    $candidates = @(
-        Get-ChildItem -Path 'Cert:\CurrentUser\My' |
-            Where-Object {
-                $_.Subject -eq $CertificateSubject -and
-                $_.HasPrivateKey -and
-                $_.NotBefore -le $now -and
-                $_.NotAfter -gt $now -and
-                ($_.EnhancedKeyUsageList.ObjectId -contains $CodeSigningEku)
-            } |
-            Sort-Object NotAfter -Descending
-    )
-    if ($candidates.Count -eq 0) {
+    $marker = Get-RunMarkerPath
+    if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
         return $null
     }
-    return $candidates[0]
+    $thumbprint = (Get-Content -LiteralPath $marker -Raw -ErrorAction SilentlyContinue)
+    if ($thumbprint) { $thumbprint = $thumbprint.Trim() }
+    if (-not $thumbprint) {
+        return $null
+    }
+    $certificate = Get-ChildItem -Path 'Cert:\CurrentUser\My' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Thumbprint -eq $thumbprint -and $_.HasPrivateKey } |
+        Select-Object -First 1
+    if (-not $certificate) {
+        # 标记在但证书没了（比如被清理）：当作本次没有证书，重新生成并覆盖标记。
+        Write-Host "The certificate recorded for this run is gone from the store: $thumbprint"
+    }
+    return $certificate
 }
 
 function New-RunCertificate {
@@ -78,6 +88,8 @@ if ($certificate) {
 }
 else {
     $certificate = New-RunCertificate
+    # 先落标记再往下走：后面任何一步失败重跑，都应该复用这一张而不是再生成一张。
+    Set-Content -LiteralPath (Get-RunMarkerPath) -Value $certificate.Thumbprint -NoNewline -Encoding utf8NoBOM
     Write-Host "Created the dev-build signing certificate: $($certificate.Thumbprint)"
 }
 
