@@ -33,6 +33,7 @@ add_library(msimeui STATIC
     src/DeviceResources.cpp
     src/Fonts.cpp
     src/Image.cpp
+    src/ImageMask.cpp
     src/ListView.cpp
     src/Menu.cpp
     src/PagerArrows.cpp
@@ -63,6 +64,7 @@ add_library(msimeui STATIC
     include/msimeui/Controls.h
     include/msimeui/DeviceResources.h
     include/msimeui/Fonts.h
+    include/msimeui/ImageMask.h
     include/msimeui/Layout.h
     include/msimeui/Scene.h
     include/msimeui/Theme.h

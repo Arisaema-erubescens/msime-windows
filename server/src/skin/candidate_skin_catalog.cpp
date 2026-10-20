@@ -428,6 +428,243 @@ bool ReadToolbarColors(const toml::node *node, ToolbarColors &out)
            ReadCssColor(*table, "icon", out.icon) && ReadCssColor(*table, "hover", out.hover);
 }
 
+// [candidate_window.decoration] 里的 candidate_overlay_* 一组键；candidate_overlay 不是 true 时其余键不读。
+bool ReadDecorationCandidate(const toml::table &decoration, Package &package, std::string *error)
+{
+    std::optional<bool> enabled;
+    if (!ReadOptionalBool(decoration, "candidate_overlay", enabled))
+    {
+        SetError(error, "candidate_window.decoration.candidate_overlay 必须是 true 或 false");
+        return false;
+    }
+    if (!enabled.value_or(false))
+    {
+        return true;
+    }
+    DecorationCandidate overlay;
+    std::optional<double> fontSize;
+    std::optional<double> minFontSize;
+    std::optional<double> maxWidth;
+    if (!ReadOptionalBounded(decoration, "candidate_overlay_font_size_dip", 200.0, fontSize) ||
+        !ReadOptionalBounded(decoration, "candidate_overlay_min_font_size_dip", 200.0, minFontSize) ||
+        (fontSize && *fontSize <= 0.0) || (minFontSize && *minFontSize <= 0.0))
+    {
+        SetError(error, "candidate_window.decoration 的 candidate_overlay_font_size_dip 与 "
+                        "candidate_overlay_min_font_size_dip 必须是大于 0、不超过 200 的数值");
+        return false;
+    }
+    if (!ReadOptionalBounded(decoration, "candidate_overlay_max_width_dip", 2000.0, maxWidth))
+    {
+        SetError(error, "candidate_window.decoration.candidate_overlay_max_width_dip 必须是 0–2000 的数值");
+        return false;
+    }
+    if (!ReadCssColor(decoration, "candidate_overlay_color", overlay.color))
+    {
+        SetError(error, "candidate_window.decoration.candidate_overlay_color 无效");
+        return false;
+    }
+    if (!ReadEnum(decoration, "candidate_overlay_align_h", {"left", "center", "right"}, overlay.alignH) ||
+        !ReadEnum(decoration, "candidate_overlay_align_v", {"top", "center", "bottom"}, overlay.alignV))
+    {
+        SetError(error, "candidate_window.decoration 的 candidate_overlay_align_h 只能是 left、center 或 right，"
+                        "candidate_overlay_align_v 只能是 top、center 或 bottom");
+        return false;
+    }
+    if (!ReadSignedNumber(decoration, "candidate_overlay_offset_x_dip", kDecorationOffsetLimitDip,
+                          overlay.offsetXDip) ||
+        !ReadSignedNumber(decoration, "candidate_overlay_offset_y_dip", kDecorationOffsetLimitDip, overlay.offsetYDip))
+    {
+        SetError(error,
+                 "candidate_window.decoration 的 candidate_overlay_offset_x_dip / candidate_overlay_offset_y_dip "
+                 "必须在 -2000–2000 之间");
+        return false;
+    }
+    std::optional<bool> stripBadge;
+    if (!ReadOptionalBool(decoration, "candidate_overlay_strip_badge", stripBadge))
+    {
+        SetError(error, "candidate_window.decoration.candidate_overlay_strip_badge 必须是 true 或 false");
+        return false;
+    }
+    if (const toml::node *indexNode = decoration.get("candidate_overlay_index"))
+    {
+        const auto *index = indexNode->as_integer();
+        if (!index || index->get() < 0 || index->get() > 100)
+        {
+            SetError(error, "candidate_window.decoration.candidate_overlay_index 必须是 0–100 的整数");
+            return false;
+        }
+        overlay.index = static_cast<int>(index->get());
+    }
+    overlay.fontSizeDip = fontSize.value_or(overlay.fontSizeDip);
+    overlay.minFontSizeDip = minFontSize.value_or(overlay.minFontSizeDip);
+    overlay.maxWidthDip = maxWidth.value_or(overlay.maxWidthDip);
+    overlay.stripBadge = stripBadge.value_or(true);
+    package.decorationCandidate = overlay;
+    return true;
+}
+
+bool IsToolbarImagePath(const std::string &path)
+{
+    return IsSafeRelativeResource(path) && IsAnimatableImagePath(path);
+}
+
+// [toolbar.buttons.<key>] 的一项。未知的状态名记一条提示后忽略，不让整份皮肤读不出来。
+bool ReadToolbarButton(const toml::node &node, const std::string &key, const std::vector<std::string> &states,
+                       Package &package, std::string *error)
+{
+    const std::string where = "toolbar.buttons." + key;
+    const auto *table = node.as_table();
+    if (!table)
+    {
+        SetError(error, where + " 必须是表");
+        return false;
+    }
+    ToolbarButton button;
+    if (!ReadOptionalBool(*table, "visible", button.visible))
+    {
+        SetError(error, where + ".visible 必须是 true 或 false");
+        return false;
+    }
+    if (!ReadOptionalBounded(*table, "x_dip", 2000.0, button.xDip) ||
+        !ReadOptionalBounded(*table, "y_dip", 2000.0, button.yDip))
+    {
+        SetError(error, where + " 的 x_dip / y_dip 必须是 0–2000 的数值");
+        return false;
+    }
+    if (!ReadOptionalBounded(*table, "width_dip", 500.0, button.widthDip) ||
+        !ReadOptionalBounded(*table, "height_dip", 500.0, button.heightDip) ||
+        (button.widthDip && *button.widthDip <= 0.0) || (button.heightDip && *button.heightDip <= 0.0))
+    {
+        SetError(error, where + " 的 width_dip / height_dip 必须是大于 0、不超过 500 的数值");
+        return false;
+    }
+    if (!ReadOptionalBounded(*table, "icon_size_dip", 500.0, button.iconSizeDip) ||
+        (button.iconSizeDip && *button.iconSizeDip <= 0.0))
+    {
+        SetError(error, where + ".icon_size_dip 必须是大于 0、不超过 500 的数值");
+        return false;
+    }
+    if (table->contains("image") &&
+        (!ReadString(*table, "image", button.image, 256, true) || !IsToolbarImagePath(button.image)))
+    {
+        SetError(error, where + ".image 无效（需为皮肤目录里的 .png、.apng、.gif 或 .webp）");
+        return false;
+    }
+    if (const toml::node *imagesNode = table->get("images"))
+    {
+        const auto *images = imagesNode->as_table();
+        if (!images)
+        {
+            SetError(error, where + ".images 必须是表");
+            return false;
+        }
+        if (states.empty())
+        {
+            SetError(error, where + " 没有状态之分，只能写 image，不能写 images");
+            return false;
+        }
+        for (const auto &[stateKey, pathNode] : *images)
+        {
+            const std::string state(stateKey.str());
+            const auto *path = pathNode.as_string();
+            if (!path || !IsToolbarImagePath(path->get()))
+            {
+                SetError(error, where + ".images." + state + " 无效（需为皮肤目录里的 .png、.apng、.gif 或 .webp）");
+                return false;
+            }
+            if (std::find(states.begin(), states.end(), state) == states.end())
+            {
+                package.notices.push_back(where + ".images 里的 " + state + " 不是这个按钮的状态，已忽略");
+                continue;
+            }
+            button.images[state] = path->get();
+        }
+    }
+    if (button.xDip.has_value() != button.yDip.has_value())
+    {
+        package.notices.push_back(where + " 只写了 x_dip、y_dip 其中一个，这个按钮不会显示");
+    }
+    package.toolbarButtons[key] = std::move(button);
+    return true;
+}
+
+// [toolbar] 的图片模式：mode、image、image_width_dip、image_height_dip 与 [toolbar.buttons.<key>]。
+bool ReadToolbarImageMode(const toml::table &toolbar, Package &package, std::string *error)
+{
+    if (!ReadEnum(toolbar, "mode", {"bar", "image"}, package.toolbarMode))
+    {
+        SetError(error, "toolbar.mode 只能是 bar 或 image");
+        return false;
+    }
+    if (toolbar.contains("image") &&
+        (!ReadString(toolbar, "image", package.toolbarImage, 256, true) || !IsToolbarImagePath(package.toolbarImage)))
+    {
+        SetError(error, "toolbar.image 无效（需为皮肤目录里的 .png、.apng、.gif 或 .webp）");
+        return false;
+    }
+    std::optional<double> width;
+    std::optional<double> height;
+    if (!ReadOptionalBounded(toolbar, "image_width_dip", 2000.0, width) ||
+        !ReadOptionalBounded(toolbar, "image_height_dip", 2000.0, height))
+    {
+        SetError(error, "toolbar.image_width_dip / image_height_dip 必须是 0–2000 的数值");
+        return false;
+    }
+    package.toolbarImageWidthDip = width.value_or(0.0);
+    package.toolbarImageHeightDip = height.value_or(0.0);
+    if (const toml::node *buttonsNode = toolbar.get("buttons"))
+    {
+        const auto *buttons = buttonsNode->as_table();
+        if (!buttons)
+        {
+            SetError(error, "toolbar.buttons 必须是表");
+            return false;
+        }
+        for (const auto &[keyNode, value] : *buttons)
+        {
+            const std::string key(keyNode.str());
+            const std::vector<std::string> *states = ToolbarButtonStates(key);
+            if (!states)
+            {
+                package.notices.push_back("没有 toolbar.buttons." + key + " 这个按钮，已忽略");
+                continue;
+            }
+            if (!ReadToolbarButton(value, key, *states, package, error))
+            {
+                return false;
+            }
+        }
+    }
+    if (package.toolbarMode != "image")
+    {
+        if (!package.toolbarImage.empty() || !package.toolbarButtons.empty())
+        {
+            package.notices.push_back("toolbar 的 image 与 buttons 只在 mode = \"image\" 时生效，已忽略");
+        }
+        return true;
+    }
+    // 渲染端按这两个尺寸开窗口，不去读图片的像素大小。
+    if (package.toolbarImage.empty() || package.toolbarImageWidthDip <= 0.0 || package.toolbarImageHeightDip <= 0.0)
+    {
+        SetError(error, "toolbar.mode = \"image\" 需要同时写 image、image_width_dip 与 image_height_dip");
+        return false;
+    }
+    for (const auto &[key, button] : package.toolbarButtons)
+    {
+        if (!button.xDip || !button.yDip)
+        {
+            continue;
+        }
+        const double right = *button.xDip + button.widthDip.value_or(kDefaultToolbarButtonSizeDip);
+        const double bottom = *button.yDip + button.heightDip.value_or(kDefaultToolbarButtonSizeDip);
+        if (right > package.toolbarImageWidthDip || bottom > package.toolbarImageHeightDip)
+        {
+            package.notices.push_back("toolbar.buttons." + key + " 超出了背景图，超出的部分既画不出来也点不到");
+        }
+    }
+    return true;
+}
+
 // 长度：0–maximum 的 DIP 数值，或 "<数值>em"（0–maximumEm 倍字号）。键不存在时什么也不做。
 bool ReadLength(const toml::table &table, const char *key, double maximum, double maximumEm, std::optional<Length> &out)
 {
@@ -781,6 +1018,26 @@ bool IsAnimatableImagePath(const std::string &path)
     return extension == ".png" || extension == ".apng" || extension == ".gif" || extension == ".webp";
 }
 
+const std::vector<std::string> *ToolbarButtonStates(const std::string &key)
+{
+    static const std::vector<std::string> status = {"cn", "en", "ja", "caps", "en-candidate"};
+    static const std::vector<std::string> fullwidth = {"full", "half"};
+    static const std::vector<std::string> punctuation = {"cn", "en"};
+    static const std::vector<std::string> characterSet = {"simplified", "traditional"};
+    static const std::vector<std::string> stateless;
+    if (key == "status")
+        return &status;
+    if (key == "fullwidth")
+        return &fullwidth;
+    if (key == "punctuation")
+        return &punctuation;
+    if (key == "character_set")
+        return &characterSet;
+    if (key == "emoji" || key == "screen_keyboard" || key == "settings")
+        return &stateless;
+    return nullptr;
+}
+
 bool IsBuiltIn(const std::string &id)
 {
     const auto &ids = BuiltInIds();
@@ -911,6 +1168,10 @@ std::optional<Package> Load(const std::filesystem::path &skinsRoot, const std::s
             if (package.decorationTopDip <= 0.0 || package.decorationWidthDip <= 0.0)
             {
                 SetError(error, "candidate_window.decoration 尺寸无效");
+                return std::nullopt;
+            }
+            if (!ReadDecorationCandidate(*decoration, package, error))
+            {
                 return std::nullopt;
             }
         }
@@ -1120,6 +1381,14 @@ std::optional<Package> Load(const std::filesystem::path &skinsRoot, const std::s
         {
             return std::nullopt;
         }
+        // 工具栏图片模式的贴图都在皮肤目录里，所以只有外部皮肤能用，不放进内置清单共用的 ReadLook。
+        if (const auto *toolbar = root["toolbar"].as_table())
+        {
+            if (!ReadToolbarImageMode(*toolbar, package, error))
+            {
+                return std::nullopt;
+            }
+        }
         std::error_code ec;
         if (!package.decorationImage.empty() &&
             !std::filesystem::is_regular_file(directory / std::filesystem::u8path(package.decorationImage), ec))
@@ -1153,6 +1422,34 @@ std::optional<Package> Load(const std::filesystem::path &skinsRoot, const std::s
             {
                 SetError(error, "找不到 candidate_window.decorations.image 文件");
                 return std::nullopt;
+            }
+        }
+        // bar 模式用不到这些图，不去检查。
+        if (package.toolbarMode == "image")
+        {
+            const auto exists = [&](const std::string &path) {
+                return std::filesystem::is_regular_file(directory / std::filesystem::u8path(path), ec);
+            };
+            if (!exists(package.toolbarImage))
+            {
+                SetError(error, "找不到 toolbar.image 文件");
+                return std::nullopt;
+            }
+            for (const auto &[key, button] : package.toolbarButtons)
+            {
+                if (!button.image.empty() && !exists(button.image))
+                {
+                    SetError(error, "找不到 toolbar.buttons." + key + ".image 文件");
+                    return std::nullopt;
+                }
+                for (const auto &[state, path] : button.images)
+                {
+                    if (!exists(path))
+                    {
+                        SetError(error, "找不到 toolbar.buttons." + key + ".images." + state + " 文件");
+                        return std::nullopt;
+                    }
+                }
             }
         }
         AdaptSharedBase(package);

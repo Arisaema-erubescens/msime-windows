@@ -89,8 +89,20 @@ float ToolbarPreview::BarWidth() const
            std::max(count - 1, 0) * 6.0f * s + 4.0f * s + b;
 }
 
+float ToolbarPreview::ImageScale() const
+{
+    return options_.scale * options_.iconSize / 24.0f;
+}
+
 SizeF ToolbarPreview::Measure(const SizeF &availableSize)
 {
+    if (look_.imageMode)
+    {
+        const float s = ImageScale();
+        const float width = look_.imageSize.width * s;
+        return {options_.centered ? availableSize.width : std::min(width, availableSize.width),
+                look_.imageSize.height * s};
+    }
     const float height = 35.0f * options_.scale;
     return {options_.centered ? availableSize.width : std::min(BarWidth(), availableSize.width), height};
 }
@@ -105,6 +117,11 @@ void ToolbarPreview::Render(msimeui::DeviceResources &dr)
     ID2D1RenderTarget *target = dr.GetRenderTarget();
     if (!target)
         return;
+    if (look_.imageMode)
+    {
+        RenderImage(dr);
+        return;
+    }
     const float s = options_.scale;
     const float width = BarWidth();
     const float height = 35.0f * s;
@@ -157,6 +174,63 @@ void ToolbarPreview::Render(msimeui::DeviceResources &dr)
             DrawCentered(dr, entry.fallback, style, box, look_.icon);
         }
         cx += icon;
+    }
+}
+
+void ToolbarPreview::RenderImage(msimeui::DeviceResources &dr)
+{
+    ID2D1RenderTarget *target = dr.GetRenderTarget();
+    ComPtr<ID2D1DeviceContext> context;
+    target->QueryInterface(IID_PPV_ARGS(context.GetAddressOf()));
+    const auto draw = [&](ID2D1Bitmap *bitmap, const RectF &box) {
+        if (context)
+            context->DrawBitmap(bitmap, ToD2D(box), 1.0f, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC);
+        else
+            target->DrawBitmap(bitmap, ToD2D(box));
+    };
+
+    // The background stretched to its declared size, the buttons where the skin puts them; a
+    // button the user switched off in the settings is left out, as on the real toolbar.
+    const float s = ImageScale();
+    const float width = look_.imageSize.width * s;
+    const float x = options_.centered ? std::round(bounds_.x + (bounds_.width - width) * 0.5f) : bounds_.x;
+    const float y = bounds_.y;
+    if (ID2D1Bitmap *background = PreviewFrame(dr, look_.image, look_.animated))
+        draw(background, {x, y, width, look_.imageSize.height * s});
+    for (const auto &button : look_.buttons)
+    {
+        const ToolbarIcon &entry = kToolbarIcons[button.icon];
+        if (entry.item >= 0 && !options_.items[entry.item])
+            continue;
+        const RectF box = {x + button.box.x * s, y + button.box.y * s, button.box.width * s, button.box.height * s};
+        if (!button.image.empty())
+        {
+            // Fitted into the box keeping its aspect, as the toolbar's Uniform stretch does.
+            D2D1_SIZE_F size{};
+            ID2D1Bitmap *bitmap = PreviewFrame(dr, button.image, look_.animated, &size);
+            if (bitmap && size.width > 0.0f && size.height > 0.0f)
+            {
+                const float fit = std::min(box.width / size.width, box.height / size.height);
+                const SizeF fitted = {size.width * fit, size.height * fit};
+                draw(bitmap, {box.x + (box.width - fitted.width) * 0.5f, box.y + (box.height - fitted.height) * 0.5f,
+                              fitted.width, fitted.height});
+            }
+            continue;
+        }
+        const float shorter = std::min(box.width, box.height);
+        const msimeui::IconGlyph glyph = msimeui::ResolveIconGlyph(entry.codepoint);
+        TextStyle style;
+        style.lineHeight = 1.0f;
+        style.size = button.iconSize > 0.0f ? button.iconSize * s : shorter * 0.82f;
+        if (glyph.family)
+        {
+            style.family = glyph.family;
+            DrawCentered(dr, std::wstring(1, glyph.codepoint), style, box, look_.icon);
+        }
+        else
+        {
+            DrawCentered(dr, entry.fallback, style, box, look_.icon);
+        }
     }
 }
 

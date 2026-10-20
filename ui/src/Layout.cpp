@@ -1160,6 +1160,80 @@ void WrapPanel::Render(DeviceResources &deviceResources)
     }
 }
 
+void OverlayPanel::AddChildAt(std::shared_ptr<Visual> child, float x, float y)
+{
+    if (!child)
+    {
+        return;
+    }
+    Panel::AddChild(std::move(child));
+    positions_.push_back({x, y});
+}
+
+void OverlayPanel::SetChildPosition(const Visual *child, float x, float y)
+{
+    for (size_t index = 0; index < children_.size(); ++index)
+    {
+        if (children_[index].get() == child)
+        {
+            positions_[index] = {x, y};
+            InvalidateMeasure();
+            return;
+        }
+    }
+}
+
+PointF OverlayPanel::GetChildPosition(const Visual *child) const
+{
+    for (size_t index = 0; index < children_.size(); ++index)
+    {
+        if (children_[index].get() == child)
+        {
+            return positions_[index];
+        }
+    }
+    return {};
+}
+
+SizeF OverlayPanel::Measure(const SizeF &availableSize)
+{
+    measuredChildren_.clear();
+    const SizeF innerAvailable = DeflateSize(availableSize, padding_);
+    float width = 0.0f;
+    float height = 0.0f;
+    for (size_t index = 0; index < children_.size(); ++index)
+    {
+        const SizeF measured = children_[index]->MeasureInLayout(innerAvailable);
+        measuredChildren_.push_back(measured);
+        width = std::max(width, positions_[index].x + measured.width);
+        height = std::max(height, positions_[index].y + measured.height);
+    }
+    return {std::min(width + padding_.left + padding_.right, availableSize.width),
+            std::min(height + padding_.top + padding_.bottom, availableSize.height)};
+}
+
+void OverlayPanel::Arrange(const RectF &finalRect)
+{
+    bounds_ = finalRect;
+    const RectF inner = DeflateRect(finalRect, padding_);
+    for (size_t index = 0; index < children_.size() && index < measuredChildren_.size(); ++index)
+    {
+        children_[index]->ArrangeInLayout({inner.x + positions_[index].x, inner.y + positions_[index].y,
+                                           measuredChildren_[index].width, measuredChildren_[index].height});
+    }
+}
+
+void OverlayPanel::Render(DeviceResources &deviceResources)
+{
+    for (const auto &child : children_)
+    {
+        if (ShouldRenderChild(deviceResources, *child))
+        {
+            child->Render(deviceResources);
+        }
+    }
+}
+
 ScrollViewer::ScrollViewer(std::shared_ptr<Visual> content) : content_(std::move(content))
 {
     AdoptChild(content_);

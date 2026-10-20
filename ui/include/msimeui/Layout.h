@@ -228,6 +228,29 @@ class WrapPanel : public Panel
     std::vector<RowItem> rowItems_;
 };
 
+// Absolute placement: each child sits at the (x, y) given to AddChildAt, in DIPs from the
+// panel's padded top-left corner, at its own measured size. The panel measures to the
+// smallest box that holds every child. Later children draw on top and win hit tests.
+class OverlayPanel : public Panel
+{
+  public:
+    void AddChildAt(std::shared_ptr<Visual> child, float x, float y);
+    // Moves a child already in the panel; does nothing for any other visual.
+    void SetChildPosition(const Visual *child, float x, float y);
+    PointF GetChildPosition(const Visual *child) const;
+
+    SizeF Measure(const SizeF &availableSize) override;
+    void Arrange(const RectF &finalRect) override;
+    void Render(DeviceResources &deviceResources) override;
+
+  private:
+    // Every child needs a position, so AddChildAt is the only way in.
+    using Panel::AddChild;
+
+    std::vector<PointF> positions_;
+    std::vector<SizeF> measuredChildren_;
+};
+
 class ScrollViewer : public Visual
 {
   public:
