@@ -16,7 +16,8 @@
 
 `dev-build.yml` workflow 给没有本地工具链的贡献者出可安装的包。触发见 [CONTRIBUTING.md](../CONTRIBUTING.md#没有本地工具链时dev-build-workflow)。签名证书由 `sign-dev-build.ps1` 在 runner 上现场生成，subject 固定为 `CN=Metasequoia IME Dev Build Code Signing`，私钥只在 runner 内存里存在一次构建；公钥 `.cer` 随 artifact 分发，用户用 `import-dev-trust.ps1` 导入本机受信任存储（按 subject 清旧导新，重复构建不会膨胀存储）。
 
-- `sign-dev-build.ps1` 复用同一次运行早先创建的证书，所以包内二进制和安装包总在同一签名下；`DEV_CERT_PATH` 指出 `.cer` 的导出位置
+- `sign-dev-build.ps1` 复用同一次运行早先创建的证书，所以包内二进制和安装包总在同一签名下；复用的依据是本次运行写在 `RUNNER_TEMP` 里的指纹标记，不按 subject 猜，机器上残留的旧证书不会被误用。`DEV_CERT_PATH` 指出 `.cer` 的导出位置
+- 证书有效期 90 天：artifact 只留 7 天，但用户可能下载到本地后放很久才装，而安装器校验的是签名时刻证书是否有效；`import-dev-trust.ps1` 会打印这张 `.cer` 自带的到期时间，发现已过期就直接退出，不往受信任存储里写
 - `import-dev-trust.ps1` 也随 artifact 分发，用户解压后在管理员 PowerShell 里直接跑
 - 版本号带 `-dev.<日期>.<commit>`，由 `scripts/dev-build-version.py` 从 `version.txt` 派生；设置页的更新检查会剥掉 `-dev` 后缀做数字比较，dev 包不会提示升级
 - 不要把这两个脚本接进 release 路径：正式发布的签名在 `scripts/ci/sign-binaries.ps1` 或 SignPath，两套互不相干

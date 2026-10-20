@@ -66,8 +66,10 @@ function Get-RunCertificate {
 }
 
 function New-RunCertificate {
-    # -Type CodeSigningCert 负责代码签名 EKU。有效期对齐 artifact 的 7 天保留期再放宽，
-    # 避免 runner 时钟略慢导致证书尚未生效。
+    # -Type CodeSigningCert 负责代码签名 EKU。有效期权衡的是两件事：artifact 只留 7 天，
+    # 但用户可能下载到本地后放很久才装，而安装器检查的是签名时刻证书是否有效；拉得太长又会
+    # 让一张随构建轮换的证书变成长期可信身份。90 天覆盖到拖延的安装，又不至于成为长期凭据。
+    # import-dev-trust.ps1 会打印实际的到期时间，安装器发现包内证书过期时也会明确报出来。
     $certificate = New-SelfSignedCertificate `
         -Type CodeSigningCert `
         -Subject $CertificateSubject `
@@ -78,7 +80,7 @@ function New-RunCertificate {
         -KeyUsage DigitalSignature `
         -CertStoreLocation 'Cert:\CurrentUser\My' `
         -NotBefore (Get-Date).AddHours(-1) `
-        -NotAfter (Get-Date).AddDays(30)
+        -NotAfter (Get-Date).AddDays(90)
     return $certificate
 }
 

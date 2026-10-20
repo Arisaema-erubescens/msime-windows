@@ -28,10 +28,6 @@ function Test-Administrator {
     return $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-if (-not (Test-Administrator)) {
-    throw '需要管理员 PowerShell：写入 LocalMachine 受信任存储必须提升权限。'
-}
-
 if (-not $CertificatePath) {
     $candidates = @(
         Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.cer' -File -ErrorAction SilentlyContinue
@@ -51,6 +47,20 @@ if (-not (Test-Path -LiteralPath $CertificatePath -PathType Leaf)) {
 $certificate = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($CertificatePath)
 if ($certificate.Subject -ne $Subject) {
     throw "这不是 dev-build 签名证书（subject：$($certificate.Subject)）。预期：$Subject"
+}
+
+# 到期时间读的是这张 .cer 自带的字段，不靠「构建过了几天」去推。签名在证书有效期内完成才能
+# 通过校验，所以证书过期后这份包就装不上了，导入得再干净也没用，必须换新构建。
+# 这一步必须排在写受信任存储之前：过期证书导入进去只会让本机多一条无用的信任记录。
+if ($certificate.NotAfter -le (Get-Date)) {
+    Write-Warning "这张证书已经过期（$($certificate.NotAfter.ToString('yyyy-MM-dd HH:mm'))），包内签名无法通过校验。"
+    Write-Warning '请重新下载最新的 dev build，用它的证书和安装包；不要继续安装当前这份。'
+    exit 1
+}
+
+# 权限检查放在体检之后：先让没提升权限的用户知道包本身已经过期，再告诉他去开管理员。
+if (-not (Test-Administrator)) {
+    throw '需要管理员 PowerShell：写入 LocalMachine 受信任存储必须提升权限。'
 }
 
 # 按固定 subject 清理所有旧证书，再导入新的一张。跳过与本次导入指纹相同的那份。
@@ -80,4 +90,5 @@ finally {
 Write-Host ''
 Write-Host "Dev 证书已就绪：$($certificate.Subject)"
 Write-Host "指纹：$($certificate.Thumbprint)（本次构建专有，换新 build 需重跑本脚本）"
+Write-Host "有效期至：$($certificate.NotAfter.ToString('yyyy-MM-dd HH:mm'))（本机时间）"
 Write-Host '现在可以安装同目录下的 dev 安装包了。'
