@@ -77,6 +77,8 @@ struct ToolbarButton
     // 按钮框的宽高（DIP）；没写时为 kDefaultToolbarButtonSizeDip。
     std::optional<double> widthDip;
     std::optional<double> heightDip;
+    // 没有贴图时画的内置图标（Segoe Fluent Icons）的字号（DIP）；没写时为按钮框短边的 0.82 倍。
+    std::optional<double> iconSizeDip;
     // 各状态共用的图；images 里没有当前状态的图时也用它。两者都没有就画内置的矢量图标。
     std::string image;
     // 状态名 → 图，只对有状态的按钮有效，状态名见 ToolbarButtonStates。

@@ -78,7 +78,7 @@ class ManifestTests(unittest.TestCase):
                     for name, button in toolbar.get("buttons", {}).items():
                         for key in ("x_dip", "y_dip"):
                             self.assertTrue(0 <= button.get(key, 0) <= 2000, f"toolbar.buttons.{name}.{key}")
-                        for key in ("width_dip", "height_dip"):
+                        for key in ("width_dip", "height_dip", "icon_size_dip"):
                             self.assertTrue(0 < button.get(key, 26) <= 500, f"toolbar.buttons.{name}.{key}")
                         if "image" in button:
                             assets[f"toolbar.buttons.{name}.image"] = button["image"]

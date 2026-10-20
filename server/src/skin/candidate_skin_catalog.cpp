@@ -538,6 +538,12 @@ bool ReadToolbarButton(const toml::node &node, const std::string &key, const std
         SetError(error, where + " 的 width_dip / height_dip 必须是大于 0、不超过 500 的数值");
         return false;
     }
+    if (!ReadOptionalBounded(*table, "icon_size_dip", 500.0, button.iconSizeDip) ||
+        (button.iconSizeDip && *button.iconSizeDip <= 0.0))
+    {
+        SetError(error, where + ".icon_size_dip 必须是大于 0、不超过 500 的数值");
+        return false;
+    }
     if (table->contains("image") &&
         (!ReadString(*table, "image", button.image, 256, true) || !IsToolbarImagePath(button.image)))
     {

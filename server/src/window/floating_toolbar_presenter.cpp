@@ -101,10 +101,17 @@ class ToolbarIconButton : public msimeui::Visual
 
     ToolbarIconButton(wchar_t glyph, std::wstring glyphFamily, std::wstring text, float width, float height)
         : glyph_(glyph), glyphFamily_(std::move(glyphFamily)), text_(std::move(text)), width_(width), height_(height),
-          size_((std::min)(width, height))
+          size_((std::min)(width, height)), glyphSize_(size_ * kToolbarGlyphFontSizeFactor)
     {
         SetWidth(width_);
         SetHeight(height_);
+    }
+
+    // 皮肤单独指定的图标字号，不跟按钮框走。
+    void SetGlyphSize(float size)
+    {
+        glyphSize_ = size;
+        InvalidateVisual();
     }
 
     // 皮肤给的按钮图，铺在按钮框里（等比）；空路径画回矢量图标。
@@ -178,8 +185,9 @@ class ToolbarIconButton : public msimeui::Visual
 
         const bool useGlyph = glyph_ != 0 && !glyphFamily_.empty();
         const std::wstring family = useGlyph ? glyphFamily_ : std::wstring(msimeui::UiFontFamily());
+        // 带下划线的 "En" 比图标字形小一号，比例跟着图标字号走。
         const float fontSize =
-            size_ * (underline_ ? kToolbarUnderlinedTextFontSizeFactor : kToolbarGlyphFontSizeFactor);
+            underline_ ? glyphSize_ * (kToolbarUnderlinedTextFontSizeFactor / kToolbarGlyphFontSizeFactor) : glyphSize_;
         IDWriteTextFormat *format =
             deviceResources.GetTextFormat(family, fontSize, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER,
                                           DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_WORD_WRAPPING_NO_WRAP);
@@ -277,8 +285,9 @@ class ToolbarIconButton : public msimeui::Visual
     std::wstring text_;
     float width_ = 24.0f;
     float height_ = 24.0f;
-    // 图标字号按按钮框的短边算。
+    // 按钮框的短边；悬停底色的圆角与下划线粗细按它算。
     float size_ = 24.0f;
+    float glyphSize_ = 24.0f * kToolbarGlyphFontSizeFactor;
     bool underline_ = false;
     bool hovered_ = false;
     bool pressed_ = false;
@@ -660,6 +669,10 @@ void FloatingToolbarPresenter::RebuildScene()
             auto button = MakeToolbarButton(spec, dip(placement.widthDip), dip(placement.heightDip));
             button->SetColors(impl_->glyph, impl_->hover, iconRadius);
             button->SetOnClick(std::move(spec.click));
+            if (placement.iconSizeDip)
+            {
+                button->SetGlyphSize(static_cast<float>(*placement.iconSizeDip) * s);
+            }
             const auto stateImage = placement.images.find(spec.state);
             const std::string &image = stateImage != placement.images.end() ? stateImage->second : placement.image;
             if (!image.empty())

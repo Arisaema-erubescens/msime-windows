@@ -86,6 +86,7 @@ x_dip = 8
 y_dip = 6
 width_dip = 30
 height_dip = 28
+icon_size_dip = 18.5
 image = "assets/cn.png"
 
 [toolbar.buttons.status.images]
@@ -113,12 +114,14 @@ visible = false
     REQUIRE_EQ(*status.yDip, 6.0);
     REQUIRE_EQ(*status.widthDip, 30.0);
     REQUIRE_EQ(*status.heightDip, 28.0);
+    REQUIRE_EQ(*status.iconSizeDip, 18.5);
     REQUIRE_EQ(status.image, std::string("assets/cn.png"));
     REQUIRE_EQ(status.images.at("en"), std::string("assets/en.png"));
 
     const auto &settings = package->toolbarButtons.at("settings");
     REQUIRE_EQ(*settings.xDip, 120.5);
     REQUIRE(!settings.widthDip.has_value());
+    REQUIRE(!settings.iconSizeDip.has_value());
     REQUIRE_EQ(settings.image, std::string("assets/gear.apng"));
 
     REQUIRE(!*package->toolbarButtons.at("emoji").visible);
@@ -154,6 +157,8 @@ TEST_CASE(candidate_skin_catalog_rejects_invalid_toolbar_image_mode)
     REQUIRE(LoadFails(L"button-zero-size",
                       std::string(kImageToolbar) + "[toolbar.buttons.status]\nx_dip = 0\ny_dip = 0\nwidth_dip = 0\n"));
     REQUIRE(LoadFails(L"button-negative", std::string(kImageToolbar) + "[toolbar.buttons.status]\nx_dip = -4\n"));
+    REQUIRE(
+        LoadFails(L"button-zero-icon", std::string(kImageToolbar) + "[toolbar.buttons.status]\nicon_size_dip = 0\n"));
     // A stateless button has nothing to key the images by.
     REQUIRE(LoadFails(L"stateless-images",
                       std::string(kImageToolbar) + "[toolbar.buttons.settings.images]\ncn = \"assets/cn.png\"\n"));
