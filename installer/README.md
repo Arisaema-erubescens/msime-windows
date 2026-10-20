@@ -22,6 +22,19 @@
 - 版本号带 `-dev.<日期>.<commit>`，由 `scripts/dev-build-version.py` 从 `version.txt` 派生；设置页的更新检查会剥掉 `-dev` 后缀做数字比较，dev 包不会提示升级
 - 不要把这两个脚本接进 release 路径：正式发布的签名在 `scripts/ci/sign-binaries.ps1` 或 SignPath，两套互不相干
 
+## Nightly build
+
+`nightly.yml` 每天 UTC 20:00 从 `develop` 的 HEAD 出一份安装包，发布到固定的预发布 `nightly` tag。它和 dev build 的差别只在签名与发布方式：
+
+- **证书固定**：不是现场生成，而是仓库 secrets 里的 `NIGHTLY_CERTIFICATE_BASE64` / `NIGHTLY_CERTIFICATE_PASSWORD`，subject 为 `CN=Metasequoia IME Windows Nightly Build Code Signing`。公钥 `nightly-signing.cer` 提交在仓库里，同时随 Release 和 artifact 分发。用户跑一次 `import-nightly-trust.ps1` 即可长期验证后续所有 nightly 构建
+- **签名走 `scripts/ci/sign-binaries.ps1`**，与正式发布同一套，只是证书不同；缺少 secret 时直接失败，不会降级成未签名包
+- **发布前逐个核对签名**：用仓库里的 `.cer` 作为信任锚验证包内每个 EXE/DLL 和安装包，签错证书会被拦下
+- **tag 固定为字面量 `nightly` 且标为 prerelease**，所以永远进不了 GitHub 的 Latest，设置页的更新检查也不会指向它；每次运行用 `--clobber` 覆盖同名附件，Release 上始终只有一份
+- **版本号带 `-nightly.<日期>.<commit>`**，与 `-dev.` 区分
+- 失败时 `notify` job 会开一个 `bug` + `nightly-failure` 标签的 issue；已有未关闭的就追加评论，不重复开。成功不自动关 issue，由人确认后手动关
+
+换发证书时用 `scripts/ci/new-nightly-certificate.ps1` 生成新的 PFX/cer，更新两个 secret，把新的 `nightly-signing.cer` 提交覆盖旧文件，然后重新发布一次 nightly。
+
 ## CI 契约
 
 根 `.github/workflows/release.yml` **不加修改地调用本目录的 `Prepare-PackageFiles.ps1` 和 `Compile-Installer.ps1`**。源目录名是 `Prepare-PackageFiles.ps1` 的参数，不是写死在脚本里的字面量：默认值为 `windows/`、`server/` 和仓根授权文件；旧目录或自定义布局通过参数覆盖。回归检查同时执行默认路径和显式参数的打包。辅助码默认读取 `engine/helpcode/`，词库缓存位于 `MetasequoiaImeDict/out/`。
