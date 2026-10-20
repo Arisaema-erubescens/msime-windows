@@ -296,6 +296,8 @@ bool IsValidCandidateAiBadgeStyle(const std::string &style);
 bool IsValidSettingsWindowLinger(const std::string &linger);
 bool IsValidTranslationTargetLanguage(const std::string &language);
 std::string AiAssistantTokenSlotKey(std::string_view provider);
+// 实现在 ime_config_services.cpp；声明与注释见 ime_config.h 的同名条目。
+bool SetConfiguredAiAssistantProviderValue(std::string_view provider, std::string_view field, const std::string &value);
 // ime_config_services.cpp：按当前各段全局配置重建候选词翻译快照。改动 provider、腾讯云、
 // 自定义翻译、小牛翻译或 AI 辅助服务商配置的地方，改完都要调一次。
 void PublishTranslationConfig();

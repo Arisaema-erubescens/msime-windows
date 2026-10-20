@@ -264,10 +264,20 @@ ApiCredentialTest::Result TestTranslation(const ApiCredentialTest::Request &requ
     std::vector<std::string> translated;
     if (request.service == "translation.ai")
     {
-        // 复用 AI 辅助当前服务商的配置，页面上没有独立的地址与密钥输入框。
-        const auto config = AiTranslation::FromConfiguredTranslation(*GetConfiguredTranslation());
+        // 页面把当前生效的服务商、地址、Token 与模型原样传上来，测的就是用户眼前这一份。
+        // 字段全空说明是只发 service 的旧客户端，才回落到已保存的配置。
+        const auto configured = GetConfiguredTranslation();
+        const auto config = Value(request, "provider").empty() && Value(request, "endpoint").empty() &&
+                                    Value(request, "token").empty() && Value(request, "model").empty()
+                                ? AiTranslation::FromConfiguredTranslation(*configured)
+                                : AiTranslation::FromFields(Value(request, "provider"), Value(request, "endpoint"),
+                                                            Value(request, "token"), Value(request, "model"));
         if (!AiTranslation::IsUsableConfig(config))
+        {
+            if (config.provider == "jev")
+                return {false, "Jev 只能从已有候选中挑选，不能用于翻译；请在「AI 与云联想」页换成生成式服务商。"};
             return {false, "请先在「AI 与云联想」页面填写有效的接口地址、Token 和模型。"};
+        }
         translated = AiTranslation::TextTranslateBatch(config, {"测试"}, "zh", "en");
     }
     else if (request.service == "translation.tencent")

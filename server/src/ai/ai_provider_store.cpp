@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <utility>
 
 namespace AiAssistant::ProviderStore
@@ -29,6 +30,40 @@ bool IsBuiltinProvider(std::string_view id)
 {
     const auto &ids = BuiltinProviderIds();
     return std::find(ids.begin(), ids.end(), id) != ids.end();
+}
+
+namespace
+{
+const std::map<std::string_view, std::pair<std::string_view, std::string_view>> &BuiltinDefaults()
+{
+    // endpoint, model。custom 不预设，全部由用户填写。
+    static const std::map<std::string_view, std::pair<std::string_view, std::string_view>> defaults{
+        {"deepseek", {"https://api.deepseek.com/chat/completions", "deepseek-v4-flash"}},
+        {"openai", {"https://api.openai.com/v1/chat/completions", "gpt-4o-mini"}},
+        {"siliconflow", {"https://api.siliconflow.cn/v1/chat/completions", "Qwen/Qwen3-8B"}},
+        {"groq", {"https://api.groq.com/openai/v1/chat/completions", "qwen/qwen3.8-27b"}},
+        {"minimax", {"https://api.minimax.cn/v1/chat/completions", "MiniMax-M3.1-Flash-Preview"}},
+        {"moonshot", {"https://api.moonshot.cn/v1/chat/completions", "kimi-k2-0905-preview"}},
+        {"zhipu", {"https://open.bigmodel.cn/api/paas/v4/chat/completions", "glm-4-flash"}},
+        {"dashscope", {"https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", "qwen-plus"}},
+        {"volcengine", {"https://ark.cn-beijing.volces.com/api/v3/chat/completions", "doubao-seed-1.6-flash"}},
+        {"openrouter", {"https://openrouter.ai/api/v1/chat/completions", "openrouter/auto"}},
+        {"jev", {"https://api.typesafe.ai/v1/systemone", "jev-1.13.0"}},
+    };
+    return defaults;
+}
+} // namespace
+
+std::string BuiltinDefaultEndpoint(std::string_view id)
+{
+    const auto found = BuiltinDefaults().find(id);
+    return found == BuiltinDefaults().end() ? std::string() : std::string(found->second.first);
+}
+
+std::string BuiltinDefaultModel(std::string_view id)
+{
+    const auto found = BuiltinDefaults().find(id);
+    return found == BuiltinDefaults().end() ? std::string() : std::string(found->second.second);
 }
 
 std::filesystem::path StorePath()

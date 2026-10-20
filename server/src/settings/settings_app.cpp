@@ -932,8 +932,20 @@ bool ApplyConfigUpdate(const json::object &data)
     }
     if (path.rfind("ai_assistant.", 0) == 0)
     {
-        const std::string key = path.substr(13);
+        std::string key = path.substr(13);
         const json::value &value = data.at("value");
+        // `endpoint@<id>` / `model@<id>`：设置页按服务商写槽位。@ 不会出现在任何配置键名里，
+        // 用它在一条 configUpdate 里指明目标服务商，宿主据此判断单值键要不要跟着改，
+        // 不必拿后端此刻的活动服务商去猜页面在说哪一家。
+        const size_t at = key.find('@');
+        if (at != std::string::npos)
+        {
+            const std::string field = key.substr(0, at);
+            const std::string provider = key.substr(at + 1);
+            if ((field != "endpoint" && field != "model") || provider.empty() || !value.is_string())
+                return false;
+            return SetConfiguredAiAssistantProviderValue(provider, field, json::value_to<std::string>(value));
+        }
         if (value.is_bool())
             return SetConfiguredAiAssistantBool(key, json::value_to<bool>(value));
         if (value.is_string())
