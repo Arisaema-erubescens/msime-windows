@@ -57,6 +57,7 @@
 - **发布前逐个核对签名**：用仓库里的 `.cer` 作为信任锚验证包内每个 EXE/DLL 和安装包，签错证书会被拦下
 - **tag 固定为字面量 `nightly` 且标为 prerelease**，所以永远进不了 GitHub 的 Latest，设置页的更新检查也不会指向它；每次运行用 `--clobber` 覆盖同名附件，Release 上始终只有一份
 - **版本号带 `-nightly.<日期>.<commit>`**，与 `-dev.` 区分
+- **正文列出相较上一次构建的提交**：用 `git log --no-merges <上次 sha>..HEAD` 生成，最多展示 25 条，超出部分给完整对比链接。上次的 sha 记在正文末尾 `<!-- nightly-sha: ... -->` 这个隐藏注释里，而不是从 tag 读——tag 永远指向第一次构建的 commit，用它比较会一直拿今天的 HEAD 对第一次 nightly
 - 失败时 `notify` job 会开一个 `bug` + `nightly-failure` 标签的 issue；已有未关闭的就追加评论，不重复开。成功不自动关 issue，由人确认后手动关
 
 ### 用户怎么装 nightly
