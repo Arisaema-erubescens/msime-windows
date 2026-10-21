@@ -873,7 +873,10 @@ class ModalLayer : public msimeui::Visual
         if (!dialog_)
             return;
         if (window_)
+        {
+            window_->DispatchImportedMessage(WM_MOUSELEAVE, 0, 0);
             window_->FocusVisual(nullptr);
+        }
         ReleaseChild(dialog_);
         dialog_.reset();
         onDismiss_ = nullptr;

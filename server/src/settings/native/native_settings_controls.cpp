@@ -2677,7 +2677,10 @@ bool Button::OnMouseUp(const POINT &point, WPARAM)
     pressed_ = false;
     InvalidateVisual();
     if (HitSelf(window_, *this, point) && onClick_)
-        onClick_();
+    {
+        const auto handler = onClick_;
+        handler();
+    }
     return true;
 }
 
@@ -2698,7 +2701,8 @@ bool Button::OnKeyDown(WPARAM key, LPARAM)
 {
     if (!disabled_ && (key == VK_RETURN || key == VK_SPACE) && onClick_)
     {
-        onClick_();
+        const auto handler = onClick_;
+        handler();
         return true;
     }
     return false;
