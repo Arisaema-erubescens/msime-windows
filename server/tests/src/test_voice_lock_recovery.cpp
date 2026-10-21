@@ -127,6 +127,15 @@ template <typename Predicate> bool WaitFor(Predicate predicate, milliseconds tim
     return predicate();
 }
 
+template <typename Predicate> bool WaitWithoutPumping(Predicate predicate)
+{
+    const auto deadline = std::chrono::steady_clock::now() + milliseconds(5000);
+    std::unique_lock<std::mutex> lock(g_effect_mutex);
+    while (!predicate() && std::chrono::steady_clock::now() < deadline)
+        g_effect_cv.wait_for(lock, milliseconds(5));
+    return predicate();
+}
+
 constexpr wchar_t kFixedAsrText[] = L"asr-fixed-result";
 
 std::mutex g_commit_mutex;
@@ -648,7 +657,71 @@ void VerifyQueuedLockedStartIsRetired(QueuedStartEnd action)
     REQUIRE_EQ(DeliveredText(), std::wstring(kFixedAsrText));
     VerifyNextHoldStartsAndStops();
 }
+
+void VerifyDelayedRecordingMessage(bool toggle, bool during_startup)
+{
+    ServiceFixture fixture;
+    StartGesture(Gesture::RAlt);
+    AllowCaptureStart();
+    REQUIRE(WaitRecording());
+    const int before_cancel = CaptureStopCount();
+    if (toggle)
+        PressCtrlF9();
+    else
+        EndGesture(Gesture::RAlt);
+    // Leave A's window message pending while direct API calls cancel A and
+    // start B. None of the waits below dispatch that message early.
+    VoiceInput::CancelRecording();
+    REQUIRE(WaitWithoutPumping(
+        [before_cancel] { return CaptureStopCount() > before_cancel && !VoiceInput::IsRecording(); }));
+    ResetCapture();
+    VoiceInput::StartRecording();
+    REQUIRE(WaitWithoutPumping(CaptureEntered));
+    const int before_delivery = CaptureStopCount();
+    if (!during_startup)
+    {
+        PauseNextIdleQueue();
+        AllowCaptureStart();
+        REQUIRE(WaitQueuePaused());
+    }
+
+    PumpMessages();
+    // A harmless Start supplies a queue checkpoint even when the stale
+    // message is rejected without waking the control thread.
+    VoiceInput::StartRecording();
+    if (during_startup)
+    {
+        PauseNextIdleQueue();
+        AllowCaptureStart();
+        REQUIRE(WaitQueuePaused());
+    }
+    else
+        REQUIRE(ReleaseQueueAndWaitIdle());
+    REQUIRE(VoiceInput::IsRecording());
+    REQUIRE_EQ(CaptureStopCount(), before_delivery);
+    ReleaseQueue();
+}
 } // namespace
+
+TEST_CASE(delayed_stop_message_does_not_stop_new_recording)
+{
+    VerifyDelayedRecordingMessage(false, false);
+}
+
+TEST_CASE(delayed_toggle_message_does_not_stop_new_recording)
+{
+    VerifyDelayedRecordingMessage(true, false);
+}
+
+TEST_CASE(delayed_stop_message_does_not_abort_new_start)
+{
+    VerifyDelayedRecordingMessage(false, true);
+}
+
+TEST_CASE(delayed_toggle_message_does_not_abort_new_start)
+{
+    VerifyDelayedRecordingMessage(true, true);
+}
 
 TEST_CASE(queued_start_lock_stop_retires_start_and_preserves_asr)
 {

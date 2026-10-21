@@ -196,11 +196,24 @@ void ClearRecordingLock(std::uintptr_t lock_ticket)
     }
 }
 
-void EnqueueControlCommand(ControlCommand command, std::uintptr_t lock_ticket = 0)
+void EnqueueControlCommand(ControlCommand command, std::uintptr_t lock_ticket = 0, std::uint64_t posted_session = 0)
 {
     bool notify = false;
     {
         std::lock_guard<std::mutex> lock(g_control_mutex);
+        // Recording-time window messages retain their original session. Check
+        // before queue policy can remove Starts or abort a newer startup. Use
+        // the same lock order as UI cancellation, fencing recording changes too.
+        std::unique_lock<std::mutex> send_lock(g_send_mutex, std::defer_lock);
+        if (posted_session != 0)
+        {
+            send_lock.lock();
+            if (!g_recording || g_voice_session != posted_session)
+            {
+                ClearLockForRequest(lock_ticket);
+                return;
+            }
+        }
         if ((command == ControlCommand::Stop || command == ControlCommand::Cancel) && !g_recording && !g_starting)
         {
             // Retire queued starts and this ticket while preserving a finished ASR.
@@ -213,7 +226,8 @@ void EnqueueControlCommand(ControlCommand command, std::uintptr_t lock_ticket = 
         // Bind a stop (including a stop-type Toggle) before a UI cancel can
         // advance the session. UI cancellation queues under this same lock.
         const std::uint64_t session_cookie =
-            command == ControlCommand::Stop || (command == ControlCommand::Toggle && g_recording.load())
+            posted_session != 0 ? posted_session
+            : command == ControlCommand::Stop || (command == ControlCommand::Toggle && g_recording.load())
                 ? g_voice_session.load()
                 : 0;
         const auto result =
@@ -361,6 +375,16 @@ bool IsHoldShortcutPressed(HoldShortcut shortcut)
     }
 }
 
+// Keep the full 64-bit cookie on both x86 and x64. Startup/idle messages keep
+// their existing queue semantics; only an already recording session is bound.
+void PostRecordingControlMessage(UINT message, std::uintptr_t lock_ticket)
+{
+    const std::uint64_t session = g_voice_session.load();
+    auto posted_session = std::make_unique<std::uint64_t>(g_recording.load() ? session : 0);
+    if (PostMessageW(g_message_window, message, lock_ticket, reinterpret_cast<LPARAM>(posted_session.get())))
+        posted_session.release();
+}
+
 void ActivateHoldShortcut(HoldShortcut shortcut)
 {
     g_active_hold_shortcut = shortcut;
@@ -369,8 +393,10 @@ void ActivateHoldShortcut(HoldShortcut shortcut)
     else if (shortcut == HoldShortcut::CtrlWin)
         g_suppress_win_until_up = true;
     const std::uintptr_t lock_state = g_lock_state.load(std::memory_order_acquire);
-    PostMessageW(g_message_window, lock_state != 0 ? kStopRecordingMessage : kStartRecordingMessage,
-                 LockTicketOf(lock_state), 0);
+    if (lock_state != 0)
+        PostRecordingControlMessage(kStopRecordingMessage, LockTicketOf(lock_state));
+    else
+        PostMessageW(g_message_window, kStartRecordingMessage, 0, 0);
 }
 
 void RequestLock()
@@ -391,7 +417,7 @@ void ReleaseHoldShortcut()
     // Do not cancel a pending lock here; its Lock command decides whether the
     // recording exists to apply it to. Only a truly unlocked hold stops now.
     if (g_lock_state.load(std::memory_order_acquire) == 0)
-        PostMessageW(g_message_window, kStopRecordingMessage, 0, 0);
+        PostRecordingControlMessage(kStopRecordingMessage, 0);
 }
 
 void ForceReleaseRAlt()
@@ -411,17 +437,25 @@ LRESULT CALLBACK VoiceMessageWindowProc(HWND hwnd, UINT message, WPARAM wparam, 
         EnqueueControlCommand(ControlCommand::Start);
         return 0;
     case kStopRecordingMessage:
-        EnqueueControlCommand(ControlCommand::Stop, static_cast<std::uintptr_t>(wparam));
+    case kToggleRecordingMessage: {
+        const std::unique_ptr<std::uint64_t> posted_session(reinterpret_cast<std::uint64_t *>(lparam));
+        EnqueueControlCommand(message == kStopRecordingMessage ? ControlCommand::Stop : ControlCommand::Toggle,
+                              static_cast<std::uintptr_t>(wparam), *posted_session);
         return 0;
-    case kToggleRecordingMessage:
-        EnqueueControlCommand(ControlCommand::Toggle, static_cast<std::uintptr_t>(wparam));
-        return 0;
+    }
     case kLockRecordingMessage:
         EnqueueControlCommand(ControlCommand::Lock, static_cast<std::uintptr_t>(wparam));
         return 0;
     case kCancelRecordingMessage:
         EnqueueControlCommand(ControlCommand::Cancel, static_cast<std::uintptr_t>(wparam));
         return 0;
+    case WM_NCDESTROY: {
+        // Undispatched messages still own their cookie when the window closes.
+        MSG pending{};
+        while (PeekMessageW(&pending, hwnd, kStopRecordingMessage, kToggleRecordingMessage, PM_REMOVE))
+            delete reinterpret_cast<std::uint64_t *>(pending.lParam);
+        return DefWindowProcW(hwnd, message, wparam, lparam);
+    }
     default:
         return DefWindowProcW(hwnd, message, wparam, lparam);
     }
@@ -495,7 +529,7 @@ LRESULT CALLBACK HandleKeyboardHook(int code, WPARAM wparam, LPARAM lparam)
         if (down && !g_f9_pressed.exchange(true) && IsCtrlPressed())
         {
             g_ctrl_f9_consumed = true;
-            PostMessageW(g_message_window, kToggleRecordingMessage, CurrentLockTicket(), 0);
+            PostRecordingControlMessage(kToggleRecordingMessage, CurrentLockTicket());
             return 1;
         }
         if (up)
@@ -1850,7 +1884,7 @@ bool VoiceInput::Initialize()
             if (g_recording)
             {
                 if (g_message_window)
-                    PostMessageW(g_message_window, kStopRecordingMessage, CurrentLockTicket(), 0);
+                    PostRecordingControlMessage(kStopRecordingMessage, CurrentLockTicket());
                 return;
             }
             g_dismissed_overlay_session = g_voice_session.load();
