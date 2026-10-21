@@ -1690,7 +1690,7 @@ VisualPtr BuildInputPage(PageContext &context)
         Col({MakeTitleBlock(
                  L"输入纠错",
                  L"全拼输错时按误键类型给出纠正候选，默认关闭；开启后预编辑始终显示原始输入，纠正结果仅出现在候选中"),
-             ItemSetting(L"乱序纠错", L"相邻字母顺序打错时纠正，如 sahng → shang（上）",
+             ItemSetting(L"乱序纠错", L"相邻字母顺序打错时纠正，如 sahng → shang（上）；默认关闭",
                          Toggle(context, "quanpin.autocorrect_transposition"), true, false),
              ItemSetting(L"邻键纠错", L"误触相邻按键时纠正，如 shabg → shang（上）；默认关闭",
                          Toggle(context, "quanpin.autocorrect_neighbor"), false, false),

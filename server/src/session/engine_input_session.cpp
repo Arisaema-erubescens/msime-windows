@@ -79,9 +79,11 @@ void EngineInputSession::ApplyConfiguration()
                                          GetConfiguredShuangpinDirectHelpcodeUppercase());
     session_.set_mid_sentence_uppercase_trigger_enabled(GetConfiguredShuangpinMidSentenceHelpcodeUppercase());
     session_.set_quanpin_helpcode_enabled(GetConfiguredQuanpinHelpcodeEnabled());
-    const unsigned autocorrect_types =
-        (GetConfiguredQuanpinAutocorrectTransposition() ? quanpin::kAutocorrectTransposition : 0u) |
-        (GetConfiguredQuanpinAutocorrectNeighbor() ? quanpin::kAutocorrectNeighbor : 0u);
+    // Either correction switch on also enables the deletion and insertion bits, so the
+    // server-side session carries the same mask the engine and the preedit rebuild derive
+    // (product-reachable masks are only 0xd / 0xe / 0xf). Rule: quanpin_utils.h.
+    const unsigned autocorrect_types = quanpin::autocorrect_types_from_switches(
+        GetConfiguredQuanpinAutocorrectTransposition(), GetConfiguredQuanpinAutocorrectNeighbor());
     session_.set_quanpin_autocorrect_types(autocorrect_types);
     // Fuzzy pinyin applies to both quanpin and shuangpin; the engine fuzzes on the
     // converted quanpin syllables for shuangpin. Re-read on every key so setting

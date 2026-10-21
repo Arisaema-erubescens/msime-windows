@@ -70,9 +70,24 @@ inline constexpr unsigned kAutocorrectDeletion = 1u << 2;
 // insertion task); the bit stays independent for a future config key.
 inline constexpr unsigned kAutocorrectInsertion = 1u << 3;
 
+// 开关 -> 掩码的唯一实现。用户可见的开关只有换位与邻键两个，但产品语义是「任一开关
+// 打开即开启整套纠错」：设计 D2 让打开纠错也带上漏字位（用户的意图是「修手误」，漏字
+// 同属手误），D4 再把多字位一并带上。两个开关都关时恒为 0，绝不返回只带后两位的掩码。
+//
+// 调用点（都只是适配，不再各写一份规则）：`engine.cpp` 的
+// autocorrect_types_from_request 把 QueryRequest 的两个 bool 传进来；
+// `input_session_composition.cpp` 的 QuanpinAutocorrectTypes 同理给预编辑用；
+// `server/src/session/engine_input_session.cpp` 把两个配置项传进来再下发给会话。
+// 产品可达的非零掩码因此只有 0xd / 0xe / 0xf。
+inline constexpr unsigned autocorrect_types_from_switches(const bool transposition, const bool neighbor)
+{
+    const unsigned legacy = (transposition ? kAutocorrectTransposition : 0u) | (neighbor ? kAutocorrectNeighbor : 0u);
+    return legacy == 0 ? 0u : legacy | kAutocorrectDeletion | kAutocorrectInsertion;
+}
+
 // 掩码下手误别名层（cut_pinyin_by_mode 的 include_correction_aliases）是否生效。
-// 用户可见的开关只有换位与邻键两位，删除 / 插入位只随它们联动（见 engine.cpp 的
-// autocorrect_types_from_request），所以只带后两位的掩码按「关」处理。方案、词典、
+// 用户可见的开关只有换位与邻键两位，删除 / 插入位只随它们联动（见
+// autocorrect_types_from_switches），所以只带后两位的掩码按「关」处理。方案、词典、
 // 辅助码与排序上下文 key 都按这一条判断，避免各层对同一个掩码给出不同的切分。
 inline constexpr bool correction_aliases_enabled(unsigned autocorrect_types)
 {
@@ -107,10 +122,11 @@ inline constexpr int kAutocorrectNeighborWeight = 13;
 // 句中简拼展开（单字母声母 -> 它开头的全拼音节，shu'r'fa 的 r -> ru）。这是意图性
 // 规则展开，不是有限错拼对：单字母属于简拼空间，autocorrect_table.h 的准入规则
 // （key 为 >=3 字母的非合法拼音串）不收它，运行时按 intact_pinyin_list() 现算，
-// 不进表也不动生成器。权重定在 insertion(12)/neighbor(13) 与 generated(15) 之间：
-// 展开不是手误（用户就是想打简拼），但它一次引入整组候选，噪声面比任何单字母
+// 不进表也不动生成器。排序价位定在 insertion(12)/neighbor(13) 与 generated(15)
+// 之间：展开不是手误（用户就是想打简拼），但它一次引入整组候选，噪声面比任何单字母
 // 手误都宽，比邻键贵一档；又比生成式远键便宜（首字母是用户敲的，意图明确）。
-inline constexpr int kAutocorrectJianpinExpandWeight = 14;
+// 这个价位只作序数说明：容错词格里的展开代价不走 kAutocorrect*Weight，按
+// quanpin_dictionary.cpp 的 kJianpinExpandPenaltyLog 单独折算。
 
 // Out-of-table generated shapes (non-neighbor substitutions, see
 // CorrectionTarget::generated): fixed expensive-tier weight.

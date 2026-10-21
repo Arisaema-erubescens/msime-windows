@@ -766,9 +766,10 @@ struct GeneratedPair
 
 // Enumerate the out-of-table shapes over every legal syllable: non-neighbor
 // substitutions only. Transpositions, deletions and all insertions are
-// exhaustive in the static tables -- an inserted letter is always the QWERTY
-// neighbor of an adjacent key (see the generator's insertion rule), so there is
-// nothing left to add here. Wrong forms must be
+// exhaustive in the static tables -- an inserted letter is always a QWERTY
+// neighbor of an adjacent key (see the generator's insertion rule; a double tap
+// is deliberately not an insertion key), so there is nothing left to add here.
+// Wrong forms must be
 // non-legal, at least three letters (shorter strings belong to the jianpin
 // space) and at most six (the k-best piece scan never looks at longer pieces) --
 // the same window as the static tables and the evaluation filter.

@@ -1,4 +1,5 @@
 #include "tests/includes/test_framework.h"
+#include "tests/includes/test_utf8_path.h"
 
 #include "config/credential_protection.h"
 #include "config/ime_config.h"
@@ -62,7 +63,7 @@ class ScopedConfigLocation
 
 std::filesystem::path MakeProfileRoot()
 {
-    return std::filesystem::temp_directory_path() / (L"msime-配置测试-" + std::to_wstring(GetCurrentProcessId()));
+    return test::TempRoot() / (L"msime-配置测试-" + std::to_wstring(GetCurrentProcessId()));
 }
 
 void SeedTemplate(const std::filesystem::path &data_dir)
@@ -809,8 +810,7 @@ TEST_CASE(config_migrates_legacy_acp_mangled_path)
 TEST_CASE(quanpin_autocorrect_keys_persist_and_legacy_key_stays_ignored)
 {
     namespace fs = std::filesystem;
-    const fs::path unique_root =
-        fs::temp_directory_path() / (L"msime-纠错配置测试-" + std::to_wstring(GetCurrentProcessId()));
+    const fs::path unique_root = test::TempRoot() / (L"msime-纠错配置测试-" + std::to_wstring(GetCurrentProcessId()));
     const fs::path local_app_data = unique_root / L"profile";
     const fs::path data_dir = local_app_data / L"metasequoiaime";
 
@@ -885,8 +885,7 @@ constexpr FuzzyRuleKeyFixture kFuzzyRuleKeyFixtures[] = {
 TEST_CASE(fuzzy_pinyin_rules_default_to_all_off)
 {
     namespace fs = std::filesystem;
-    const fs::path unique_root =
-        fs::temp_directory_path() / (L"msime-模糊音默认测试-" + std::to_wstring(GetCurrentProcessId()));
+    const fs::path unique_root = test::TempRoot() / (L"msime-模糊音默认测试-" + std::to_wstring(GetCurrentProcessId()));
     const fs::path local_app_data = unique_root / L"profile";
     const fs::path data_dir = local_app_data / L"metasequoiaime";
 
@@ -940,8 +939,7 @@ TEST_CASE(fuzzy_pinyin_rules_default_to_all_off)
 TEST_CASE(fuzzy_pinyin_rule_keys_round_trip)
 {
     namespace fs = std::filesystem;
-    const fs::path unique_root =
-        fs::temp_directory_path() / (L"msime-模糊音往返测试-" + std::to_wstring(GetCurrentProcessId()));
+    const fs::path unique_root = test::TempRoot() / (L"msime-模糊音往返测试-" + std::to_wstring(GetCurrentProcessId()));
     const fs::path local_app_data = unique_root / L"profile";
     const fs::path data_dir = local_app_data / L"metasequoiaime";
 
@@ -988,8 +986,7 @@ TEST_CASE(fuzzy_pinyin_rule_keys_round_trip)
 TEST_CASE(fuzzy_pinyin_master_switch_gates_aggregate_only)
 {
     namespace fs = std::filesystem;
-    const fs::path unique_root =
-        fs::temp_directory_path() / (L"msime-模糊音门控测试-" + std::to_wstring(GetCurrentProcessId()));
+    const fs::path unique_root = test::TempRoot() / (L"msime-模糊音门控测试-" + std::to_wstring(GetCurrentProcessId()));
     const fs::path local_app_data = unique_root / L"profile";
     const fs::path data_dir = local_app_data / L"metasequoiaime";
 
@@ -1037,8 +1034,7 @@ TEST_CASE(fuzzy_pinyin_master_switch_gates_aggregate_only)
 TEST_CASE(fuzzy_pinyin_first_enable_seeds_rules_once)
 {
     namespace fs = std::filesystem;
-    const fs::path unique_root =
-        fs::temp_directory_path() / (L"msime-模糊音播种测试-" + std::to_wstring(GetCurrentProcessId()));
+    const fs::path unique_root = test::TempRoot() / (L"msime-模糊音播种测试-" + std::to_wstring(GetCurrentProcessId()));
     const fs::path local_app_data = unique_root / L"profile";
     const fs::path data_dir = local_app_data / L"metasequoiaime";
 
@@ -1122,8 +1118,7 @@ TEST_CASE(fuzzy_pinyin_first_enable_seeds_rules_once)
 TEST_CASE(smart_punctuation_conversion_keys_default_and_round_trip)
 {
     namespace fs = std::filesystem;
-    const fs::path unique_root =
-        fs::temp_directory_path() / (L"msime-智能标点测试-" + std::to_wstring(GetCurrentProcessId()));
+    const fs::path unique_root = test::TempRoot() / (L"msime-智能标点测试-" + std::to_wstring(GetCurrentProcessId()));
     const fs::path local_app_data = unique_root / L"profile";
     const fs::path data_dir = local_app_data / L"metasequoiaime";
 
@@ -1222,8 +1217,7 @@ TEST_CASE(shipped_template_carries_smart_punctuation_conversion_keys)
 TEST_CASE(enumeration_comma_keys_default_and_keep_at_least_one)
 {
     namespace fs = std::filesystem;
-    const fs::path unique_root =
-        fs::temp_directory_path() / (L"msime-顿号键测试-" + std::to_wstring(GetCurrentProcessId()));
+    const fs::path unique_root = test::TempRoot() / (L"msime-顿号键测试-" + std::to_wstring(GetCurrentProcessId()));
     const fs::path local_app_data = unique_root / L"profile";
     const fs::path data_dir = local_app_data / L"metasequoiaime";
 
@@ -1279,8 +1273,7 @@ TEST_CASE(enumeration_comma_keys_default_and_keep_at_least_one)
 TEST_CASE(statistics_enabled_defaults_off_and_round_trips)
 {
     namespace fs = std::filesystem;
-    const fs::path unique_root =
-        fs::temp_directory_path() / (L"msime-统计开关测试-" + std::to_wstring(GetCurrentProcessId()));
+    const fs::path unique_root = test::TempRoot() / (L"msime-统计开关测试-" + std::to_wstring(GetCurrentProcessId()));
     const fs::path local_app_data = unique_root / L"profile";
     const fs::path data_dir = local_app_data / L"metasequoiaime";
 

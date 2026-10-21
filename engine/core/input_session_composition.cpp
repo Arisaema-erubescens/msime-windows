@@ -209,16 +209,14 @@ std::string ResolveQuanpinCloudCacheKey(const QueryRequest &request)
     return quanpin::strip_active_helpcodes(request.raw_input, request.raw_input_with_cases);
 }
 
-// Same four-bit mapping as autocorrect_types_from_request (engine.cpp): the
-// request only carries the two legacy bools, and either one on also enables
-// deletion and insertion so the preedit rebuild sees the same correction space
-// as the query.
+// Adapter over the request fields: the switch -> mask rule itself lives in
+// quanpin::autocorrect_types_from_switches (quanpin_utils.h), shared with
+// engine.cpp and the server session so the preedit rebuild always sees the same
+// correction space as the query.
 unsigned QuanpinAutocorrectTypes(const QueryRequest &request)
 {
-    const unsigned legacy =
-        (request.enable_quanpin_autocorrect_transposition ? quanpin::kAutocorrectTransposition : 0u) |
-        (request.enable_quanpin_autocorrect_neighbor ? quanpin::kAutocorrectNeighbor : 0u);
-    return legacy == 0 ? 0u : legacy | quanpin::kAutocorrectDeletion | quanpin::kAutocorrectInsertion;
+    return quanpin::autocorrect_types_from_switches(request.enable_quanpin_autocorrect_transposition,
+                                                    request.enable_quanpin_autocorrect_neighbor);
 }
 
 std::string QuanpinLettersWithoutDelimiters(const std::string &text)

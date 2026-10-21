@@ -7,6 +7,7 @@
 #include "ai/ai_provider_store.h"
 #include "config/ime_config.h"
 #include "tests/includes/test_framework.h"
+#include "tests/includes/test_utf8_path.h"
 
 #include <filesystem>
 #include <fstream>
@@ -15,7 +16,7 @@ namespace
 {
 std::filesystem::path TempStorePath()
 {
-    const auto base = std::filesystem::temp_directory_path();
+    const auto base = test::TempRoot();
     static int counter = 0;
     return base / ("ai-provider-store-test-" + std::to_string(++counter) + ".json");
 }

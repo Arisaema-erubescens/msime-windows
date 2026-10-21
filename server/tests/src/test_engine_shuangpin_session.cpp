@@ -1,4 +1,5 @@
 #include "tests/includes/test_framework.h"
+#include "tests/includes/test_utf8_path.h"
 #include "src/session/engine_input_session.h"
 #include "src/config/ime_config.h"
 #include "src/config/ime_config_internal.h"
@@ -53,8 +54,7 @@ class ScopedConfigRoot
         const DWORD length = GetEnvironmentVariableW(L"METASEQUOIA_IME_CONFIG_DIR", buffer, 32768);
         had_previous_ = length != 0 || GetLastError() != ERROR_ENVVAR_NOT_FOUND;
         previous_.assign(buffer, length);
-        root_ = std::filesystem::temp_directory_path() /
-                (L"msime-模糊音注入测试-" + std::to_wstring(GetCurrentProcessId()));
+        root_ = test::TempRoot() / (L"msime-模糊音注入测试-" + std::to_wstring(GetCurrentProcessId()));
         const auto data_dir = root_ / L"metasequoiaime";
         std::error_code ec;
         std::filesystem::remove_all(root_, ec);

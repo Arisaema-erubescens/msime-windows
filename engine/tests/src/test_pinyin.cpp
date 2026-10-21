@@ -35,6 +35,18 @@ namespace
 {
 namespace fs = std::filesystem;
 
+// 系统临时目录在加固过的机器上会拒绝新建文件（TEMP 的 ACL），所有造库的用例都会因为与
+// 被测代码无关的原因失败。METASEQUOIA_IME_TEST_TEMP 把回归目录改到可写位置；CI 不设它。
+fs::path regression_temp_root()
+{
+    if (const auto override_dir = metasequoia::detail::wide_environment_variable(L"METASEQUOIA_IME_TEST_TEMP");
+        override_dir && !override_dir->empty())
+    {
+        return fs::path(*override_dir);
+    }
+    return fs::temp_directory_path();
+}
+
 class ScopedLocalAppDataOverride
 {
   public:
@@ -48,7 +60,7 @@ class ScopedLocalAppDataOverride
         const auto current = metasequoia::detail::wide_environment_variable(kDataDirectoryVariable);
         original_ = current.value_or(L"");
 
-        root_ = fs::temp_directory_path() / "msime-regression" / suffix;
+        root_ = regression_temp_root() / "msime-regression" / suffix;
         app_dir_ = root_ / "metasequoiaime";
         fs::remove_all(root_);
         fs::create_directories(app_dir_);
@@ -910,7 +922,7 @@ namespace
 // corrected key 'shang', so a leading 上 proves the corrected path actually ran.
 std::filesystem::path create_autocorrect_probe_database()
 {
-    const fs::path path = fs::temp_directory_path() / "msime-quanpin-autocorrect-mask-test.db";
+    const fs::path path = regression_temp_root() / "msime-quanpin-autocorrect-mask-test.db";
     std::error_code ec;
     fs::remove(path, ec);
     sqlite3 *db = nullptr;
@@ -1333,7 +1345,7 @@ namespace
 { // 显示/标记用例的独立探针库：shang、shang'hao、ke'neng、nv、sa'huang'na'ge 最小键集。
 std::filesystem::path create_autocorrect_display_probe_database()
 {
-    const fs::path path = fs::temp_directory_path() / "msime-quanpin-autocorrect-display-test.db";
+    const fs::path path = regression_temp_root() / "msime-quanpin-autocorrect-display-test.db";
     std::error_code ec;
     fs::remove(path, ec);
     sqlite3 *db = nullptr;
@@ -1550,7 +1562,7 @@ void test_quanpin_autocorrect_display()
     }
 
     // 会话级 preedit：get_pinyin_segmentation_with_cases 必须画原始字母。
-    const fs::path session_dir = fs::temp_directory_path() / "msime-quanpin-autocorrect-display-session";
+    const fs::path session_dir = regression_temp_root() / "msime-quanpin-autocorrect-display-session";
     std::error_code cleanup_ec;
     fs::remove_all(session_dir, cleanup_ec);
     fs::create_directories(session_dir / "helpcodes");

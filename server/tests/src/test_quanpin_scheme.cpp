@@ -25,7 +25,7 @@ void InputKey(QuanpinScheme &scheme, UINT vk, WCHAR wch, UINT modifiers_down = 0
 
 std::filesystem::path CreatePinyinCacheDatabase()
 {
-    const auto path = std::filesystem::temp_directory_path() / "msime-pinyin-cache-refresh-test.db";
+    const auto path = test::TempRoot() / "msime-pinyin-cache-refresh-test.db";
     std::filesystem::remove(path);
     sqlite3 *db = nullptr;
     if (sqlite3_open(test::Utf8(path).c_str(), &db) != SQLITE_OK)
@@ -973,7 +973,7 @@ namespace
 {
 std::filesystem::path CreateAutocorrectDatabase()
 {
-    const auto path = std::filesystem::temp_directory_path() / "msime-quanpin-autocorrect-test.db";
+    const auto path = test::TempRoot() / "msime-quanpin-autocorrect-test.db";
     std::filesystem::remove(path);
     sqlite3 *db = nullptr;
     if (sqlite3_open(test::Utf8(path).c_str(), &db) != SQLITE_OK)
@@ -1136,7 +1136,7 @@ TEST_CASE(QuanpinDictionaryAutocorrectAmbiguousDisambiguation)
     // 不用派发指令中的 ahan：ahan = a + han 是全合法拼读，被简拼形状守卫
     // （AC3 既有语义）挡在纠错门外；chn 无任何合法切分，是真实可达的歧义键。
     const auto create_database = [](long chan_weight, long chen_weight) {
-        const auto path = std::filesystem::temp_directory_path() / "msime-quanpin-autocorrect-ambiguous-test.db";
+        const auto path = test::TempRoot() / "msime-quanpin-autocorrect-ambiguous-test.db";
         std::filesystem::remove(path);
         sqlite3 *db = nullptr;
         if (sqlite3_open(test::Utf8(path).c_str(), &db) != SQLITE_OK)
@@ -1279,7 +1279,7 @@ namespace
 // 同表另放真实音节 nu/lu 供隔离断言。
 std::filesystem::path CreateUmlautAliasDatabase()
 {
-    const auto path = std::filesystem::temp_directory_path() / "msime-quanpin-umlaut-alias-test.db";
+    const auto path = test::TempRoot() / "msime-quanpin-umlaut-alias-test.db";
     std::filesystem::remove(path);
     sqlite3 *db = nullptr;
     if (sqlite3_open(test::Utf8(path).c_str(), &db) != SQLITE_OK)
