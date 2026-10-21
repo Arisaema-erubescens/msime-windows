@@ -41,8 +41,10 @@ class ModelList : public msimeui::Visual
     void SetItems(std::vector<std::wstring> items)
     {
         items_ = std::move(items);
-        scroll_ = 0.0f;
         hovered_ = kNone;
+        pressed_ = kNone;
+        scrollbar_.Reset();
+        LayoutScrollbar();
         InvalidateMeasure();
     }
 
@@ -68,7 +70,7 @@ class ModelList : public msimeui::Visual
     void Arrange(const RectF &finalRect) override
     {
         bounds_ = finalRect;
-        Clamp();
+        LayoutScrollbar();
     }
 
     void Render(msimeui::DeviceResources &dr) override
@@ -104,38 +106,55 @@ class ModelList : public msimeui::Visual
             }
         }
         target->PopAxisAlignedClip();
-        const float overflow = ContentHeight() - bounds_.height;
-        if (overflow > 0.5f)
-        {
-            const float track = bounds_.height - 8.0f;
-            const float thumb = std::max(24.0f, track * bounds_.height / ContentHeight());
-            FillRounded(dr,
-                        {bounds_.x + bounds_.width - 6.0f, bounds_.y + 4.0f + (track - thumb) * (scroll_ / overflow),
-                         4.0f, thumb},
-                        2.0f, p.scrollbarThumb);
-        }
+        // This list's thumb does not light up under the pointer.
+        scrollbar_.Render(dr, p.scrollbarThumb, p.scrollbarThumb);
     }
 
-    bool OnMouseMove(const POINT &point, WPARAM) override
+    // The list takes no keyboard focus, but a press on it must not reach a focusable
+    // field the popup covers: Window sends the press to whatever FindFocusableAt returns.
+    msimeui::Visual *FindFocusableAt(const PointF &point) override
     {
-        const size_t hit = window_ ? HitRow(window_->ClientPixelsToDips(point)) : kNone;
-        if (hit != hovered_)
+        return HitTest(point) ? this : nullptr;
+    }
+
+    bool OnMouseMove(const POINT &point, WPARAM keyState) override
+    {
+        if (!window_)
+            return true;
+        const PointF dip = window_->ClientPixelsToDips(point);
+        bool changed = scrollbar_.Move(dip, keyState);
+        if (!scrollbar_.IsDragging())
         {
+            const size_t hit = scrollbar_.IsOnScrollbar(dip) ? kNone : HitRow(dip);
+            changed = changed || hit != hovered_;
             hovered_ = hit;
-            InvalidateVisual();
         }
+        if (changed)
+            InvalidateVisual();
         return true;
     }
 
     void OnMouseLeave() override
     {
+        scrollbar_.Leave();
         hovered_ = kNone;
         InvalidateVisual();
     }
 
     bool OnMouseDown(const POINT &point, WPARAM) override
     {
-        pressed_ = window_ ? HitRow(window_->ClientPixelsToDips(point)) : kNone;
+        pressed_ = kNone;
+        if (!window_)
+            return true;
+        const PointF dip = window_->ClientPixelsToDips(point);
+        if (scrollbar_.IsOnScrollbar(dip))
+        {
+            scrollbar_.Press(dip);
+            hovered_ = kNone;
+            InvalidateVisual();
+            return true;
+        }
+        pressed_ = HitRow(dip);
         return true;
     }
 
@@ -143,9 +162,8 @@ class ModelList : public msimeui::Visual
 
     bool OnMouseWheel(const POINT &, short delta, WPARAM) override
     {
-        scroll_ -= static_cast<float>(delta) / WHEEL_DELTA * (kItem + kGap) * 2.0f;
-        Clamp();
-        InvalidateVisual();
+        if (scrollbar_.Wheel(delta))
+            InvalidateVisual();
         return true;
     }
 
@@ -154,7 +172,8 @@ class ModelList : public msimeui::Visual
 
     RectF ItemRect(size_t i) const
     {
-        return {bounds_.x + kInset, bounds_.y + kInset + static_cast<float>(i) * (kItem + kGap) - scroll_,
+        const float scroll = scrollbar_.GetPlacedOffset(window_ ? window_->GetDpi() : 96.0f);
+        return {bounds_.x + kInset, bounds_.y + kInset + static_cast<float>(i) * (kItem + kGap) - scroll,
                 bounds_.width - kInset * 2.0f, kItem};
     }
 
@@ -170,16 +189,16 @@ class ModelList : public msimeui::Visual
         return kNone;
     }
 
-    void Clamp()
+    void LayoutScrollbar()
     {
-        scroll_ = std::clamp(scroll_, 0.0f, std::max(0.0f, ContentHeight() - bounds_.height));
+        scrollbar_.Layout(ContentHeight(), bounds_.height, bounds_);
     }
 
     ModelCombo *owner_ = nullptr;
     std::vector<std::wstring> items_;
     size_t hovered_ = kNone;
     size_t pressed_ = kNone;
-    float scroll_ = 0.0f;
+    CompactMenuScrollbar scrollbar_;
 };
 
 class ModelPopup : public msimeui::Popup
@@ -420,6 +439,13 @@ class ModelCombo : public msimeui::Visual
 
 bool ModelList::OnMouseUp(const POINT &point, WPARAM)
 {
+    if (scrollbar_.IsDragging())
+    {
+        // The press belonged to the scrollbar, so releasing over a row picks nothing.
+        scrollbar_.Release(window_ ? window_->ClientPixelsToDips(point) : PointF{});
+        pressed_ = kNone;
+        return true;
+    }
     const size_t hit = window_ ? HitRow(window_->ClientPixelsToDips(point)) : kNone;
     if (hit != kNone && hit == pressed_)
         owner_->Pick(items_[hit]);
