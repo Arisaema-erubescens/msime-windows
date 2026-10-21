@@ -356,7 +356,7 @@ if ($versionInfo -notmatch '^[0-9]+(\.[0-9]+)*$') {
 $updatedIss = [regex]::Replace(
     $updatedIss,
     '(?m)^#define\s+MyVersionInfo\s+"[^"]+"\s*$',
-    "#define MyVersionInfo   `"$versionInfo`""
+    "#define MyVersionInfo  `"$versionInfo`""
 )
 # .gitattributes pins this repo to eol=lf; emit LF so packaging does not leave the file as a
 # CRLF-only diff that git flags as modified while `git diff` shows no textual change.

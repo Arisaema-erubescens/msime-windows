@@ -270,6 +270,7 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
     const AiAssistantConfig &ai = GetConfiguredAiAssistant();
     const TencentTmtConfig &tencent_tmt = GetConfiguredTencentTmt();
     const CustomTranslationConfig &custom_translation = GetConfiguredCustomTranslation();
+    const AliyunMtConfig &aliyun_mt = GetConfiguredAliyunMt();
     const NiuTransConfig &niutrans = GetConfiguredNiuTrans();
     const auto translation = GetConfiguredTranslation();
     const NetworkProxyConfig network_proxy = GetConfiguredNetworkProxy();
@@ -550,6 +551,7 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
           {"ai_assistant",
            {{"enabled", ai.enabled},
             {"provider", ai.provider},
+            {"generate_provider", ai.generate_provider},
             {"token", ai.token},
             {"tokens", ai.tokens},
             {"endpoint", ai.endpoint},
@@ -569,6 +571,8 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
             {"secret_key", tencent_tmt.secret_key},
             {"region", tencent_tmt.region},
             {"target_language", tencent_tmt.target_language}}},
+          {"aliyun_mt", {{"enabled", aliyun_mt.enabled}, {"secret_id", aliyun_mt.secret_id},
+                         {"secret_key", aliyun_mt.secret_key}}},
           {"custom_translation",
            {{"enabled", custom_translation.enabled},
             {"endpoint", custom_translation.endpoint},
@@ -932,8 +936,20 @@ bool ApplyConfigUpdate(const json::object &data)
     }
     if (path.rfind("ai_assistant.", 0) == 0)
     {
-        const std::string key = path.substr(13);
+        std::string key = path.substr(13);
         const json::value &value = data.at("value");
+        // `endpoint@<id>` / `model@<id>`：设置页按服务商写槽位。@ 不会出现在任何配置键名里，
+        // 用它在一条 configUpdate 里指明目标服务商，宿主据此判断单值键要不要跟着改，
+        // 不必拿后端此刻的活动服务商去猜页面在说哪一家。
+        const size_t at = key.find('@');
+        if (at != std::string::npos)
+        {
+            const std::string field = key.substr(0, at);
+            const std::string provider = key.substr(at + 1);
+            if ((field != "endpoint" && field != "model") || provider.empty() || !value.is_string())
+                return false;
+            return SetConfiguredAiAssistantProviderValue(provider, field, json::value_to<std::string>(value));
+        }
         if (value.is_bool())
             return SetConfiguredAiAssistantBool(key, json::value_to<bool>(value));
         if (value.is_string())
@@ -947,6 +963,14 @@ bool ApplyConfigUpdate(const json::object &data)
         const json::value &value = data.at("value");
         return value.is_string() && SetConfiguredTencentTmtString(path.substr(std::string("tencent_tmt.").size()),
                                                                   json::value_to<std::string>(value));
+    }
+    if (path == "aliyun_mt.enabled")
+        return SetConfiguredAliyunMtBool("enabled", json::value_to<bool>(data.at("value")));
+    if (path.rfind("aliyun_mt.", 0) == 0)
+    {
+        const json::value &value = data.at("value");
+        return value.is_string() && SetConfiguredAliyunMtString(path.substr(std::string("aliyun_mt.").size()),
+                                                                json::value_to<std::string>(value));
     }
     if (path == "custom_translation.enabled")
         return SetConfiguredCustomTranslationBool("enabled", json::value_to<bool>(data.at("value")));

@@ -75,7 +75,20 @@ class ManifestTests(unittest.TestCase):
                     v2_images.append(toolbar["image"])
                     for key in ("image_width_dip", "image_height_dip"):
                         self.assertTrue(0 < toolbar[key] <= 2000, f"toolbar.{key}")
+                    defaults = toolbar.get("button_defaults", {})
+                    for key in ("width_dip", "height_dip", "icon_size_dip"):
+                        self.assertTrue(0 < defaults.get(key, 26) <= 500, f"toolbar.button_defaults.{key}")
+                    if "background" in defaults:
+                        assets["toolbar.button_defaults.background"] = defaults["background"]
+                        v2_images.append(defaults["background"])
+                    flow = toolbar.get("button_flow", {})
+                    self.assertIn(flow.get("direction", "horizontal"), ("horizontal", "vertical"), "button_flow")
+                    for key, limit in (("x_dip", 2000), ("y_dip", 2000), ("gap_dip", 500)):
+                        self.assertTrue(0 <= flow.get(key, 0) <= limit, f"toolbar.button_flow.{key}")
                     for name, button in toolbar.get("buttons", {}).items():
+                        if "background" in button:
+                            assets[f"toolbar.buttons.{name}.background"] = button["background"]
+                            v2_images.append(button["background"])
                         for key in ("x_dip", "y_dip"):
                             self.assertTrue(0 <= button.get(key, 0) <= 2000, f"toolbar.buttons.{name}.{key}")
                         for key in ("width_dip", "height_dip", "icon_size_dip"):

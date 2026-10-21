@@ -172,6 +172,17 @@ bool IsUsableConfig(const Config &config)
            (config.endpoint.rfind("https://", 0) == 0 || config.endpoint.rfind("http://", 0) == 0);
 }
 
+Config FromFields(const std::string &provider, const std::string &endpoint, const std::string &token,
+                  const std::string &model)
+{
+    std::string url = CloudTranslation::TrimSecret(endpoint);
+    // 设置页输入框里允许只写主机名：补 https，其余原样交给 IsUsableConfig 判断。
+    if (!url.empty() && url.find("://") == std::string::npos)
+        url = "https://" + url;
+    return {CloudTranslation::TrimSecret(provider), std::move(url), CloudTranslation::TrimSecret(token),
+            CloudTranslation::TrimSecret(model)};
+}
+
 namespace detail
 {
 nlohmann::json BuildRequestBody(const Config &config, const std::vector<std::string> &texts, const std::string &source,

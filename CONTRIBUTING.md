@@ -65,6 +65,17 @@ pwsh -File .\import-dev-trust.ps1
 
 推送 `win7*` 开头的分支不会触发，那些分支属于 Windows 7 移植的工作。
 
+#### 注意事项
+只想看设置窗口的界面、不想为一个页面改动装整套输入法时，同一次构建还会出一个 `dev-settings-portable` 压缩包：
+
+```powershell
+gh run download <runId> -n dev-settings-portable
+```
+
+解压到普通目录（不要放 `Program Files`），双击 `run-settings.cmd` 即可。它不写注册表、不装 TSF、不需要管理员权限，也不需要导入证书；数据目录指向包内的 `data\`，实例名加了后缀，可以和已安装的正式版同时开着。改动写进包内的 `data\config.toml`，删掉整个目录就是卸载。代价是看不到真实输入效果（候选窗、上屏、皮肤在实际输入时的样子），那些仍然要靠安装包。
+
+几个边界：`workflow_dispatch` 需要仓库写权限；fork PR 的构建用 `pull_request` 触发（只读 token，无 secrets），首个 run 要维护者点一次批准；`component=tip` 或 `server` 只编译单个组件出裸二进制；这个 workflow 不出 release、不碰更新清单，合并门槛仍然由 PR 上的 CI 把守。
+
 ## 取代码
 
 ```powershell

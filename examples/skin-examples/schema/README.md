@@ -194,16 +194,35 @@ image = "assets/settings.png"
 ```
 
 - `image`：背景图，`.png`、`.apng`、`.gif` 或 `.webp`
-- `image_width_dip` / `image_height_dip`：背景图的显示尺寸，大于 `0`、不超过 `2000`。窗口就开这么大，图片拉伸到这个尺寸；给 2 倍图时写成像素的一半
+- `image_width_dip` / `image_height_dip`：背景图的显示尺寸，大于 `0`、不超过 `2000`。图片拉伸到这个尺寸；窗口按背景图与所有按钮合起来的范围开，按钮排到图外时窗口跟着变大。给 2 倍图时写成像素的一半
 - `[toolbar.buttons.<按钮>]`：每个按钮一张表，按钮名见下表，所有键都可省略
-  - `x_dip` / `y_dip`：按钮框左上角相对背景图左上角的位置，`0`–`2000`。**两个都写了按钮才会出现**，没写坐标的按钮不画（设置仍可从托盘菜单打开）
+  - `x_dip` / `y_dip`：按钮框左上角相对背景图左上角的位置，`0`–`2000`。两个都写了就固定在这里；否则按下面的 `button_flow` 排，皮肤没写 `button_flow` 时这个按钮不画（设置仍可从托盘菜单打开）
   - `width_dip` / `height_dip`：按钮框的宽高，大于 `0`、不超过 `500`，默认 `26`
+  - `background`：按钮自己的底图（比如圆底），拉满按钮框，画在按钮图或图标下面，跟着按钮一起显示、一起隐藏。**按钮的底图请画在这里，不要画进背景图**，否则用户关掉按钮后底图还留在图上
   - `icon_size_dip`：没有贴图时内置图标（Segoe Fluent Icons）的字号，大于 `0`、不超过 `500`。不写时是按钮框短边的 `0.82` 倍；按钮框画在一块圆底之类的图案里、又想让图标比框大或小时单独设它
   - `visible`：`false` 时把这个按钮藏起来。皮肤只能藏，用户在设置页关掉的按钮写 `true` 也不会出现
   - `image`：按钮图，在按钮框里等比缩放；各个状态共用，`images` 里缺某个状态时也用它
   - `[toolbar.buttons.<按钮>.images]`：状态名 → 按钮图，只有有状态的按钮能写
   - 既没有 `image` 也没有对应状态的图时，画内置的矢量图标，颜色取 `[toolbar.*].icon`。鼠标悬停和按下时按钮上盖一层 `[toolbar.*].hover`
 
+所有按钮共用的设置写在 `[toolbar.button_defaults]`，每个按钮没写的 `width_dip`、`height_dip`、`icon_size_dip`、`background` 就取这里的。按钮多半是一排或一列，用 `[toolbar.button_flow]` 让工具栏自己排，不用逐个写坐标：
+
+```toml
+[toolbar.button_defaults]
+width_dip = 30
+height_dip = 30
+icon_size_dip = 20
+background = "assets/plate.png"
+
+[toolbar.button_flow]
+x_dip = 170          # 第一个按钮框的左上角
+y_dip = 0
+direction = "vertical"   # horizontal（默认）| vertical
+gap_dip = 2
+```
+
+- `button_flow` 只排**当前显示**的按钮，按下表的顺序；写了 `x_dip` 和 `y_dip` 的按钮固定在原处，不占队里的位置；`visible = false` 的也不占
+- `x_dip` / `y_dip`：`0`–`2000`；`gap_dip`：按钮之间的空隙，`0`–`500`
 | 按钮 | 作用 | 状态名 |
 |---|---|---|
 | `status` | 中 / 英切换 | `cn`（中文）、`en`（英文）、`ja`（日文）、`caps`（大写锁定）、`en-candidate`（英文候选输入） |
@@ -215,9 +234,9 @@ image = "assets/settings.png"
 | `settings` | 设置 | 无 |
 
 - 设置页「悬浮工具栏」里的缩放会同时放大背景图、按钮位置和尺寸。
-- 用户在设置页关掉某个按钮后，图上它的位置就空着，背景图不会因此变短。
+- 用户在设置页关掉某个按钮后：写了坐标的按钮那里就空着；按 `button_flow` 排的按钮后面的会往前补上。打开一个按钮时同理，皮肤没给它写表也会排进队里。
 - 动图只在 `schema_version = 2` 的皮肤里播放，规则同[动图](#动图v2)；工具栏隐藏或自动隐藏淡出后停止播放。窗口形状按所有帧合起来的轮廓裁，任何一帧画到的地方都不会被裁掉，也都能点到、能拖动。
-- 未知的按钮名、状态名，以及不在 `mode = "image"` 时写的 `image` / `buttons`，不会让皮肤读不出来，只在设置页的诊断信息里提示一条。
+- 未知的按钮名、状态名，以及不在 `mode = "image"` 时写的 `image` / `buttons` / `button_defaults` / `button_flow`，不会让皮肤读不出来，只在设置页的诊断信息里提示一条。
 
 ## 颜色格式
 

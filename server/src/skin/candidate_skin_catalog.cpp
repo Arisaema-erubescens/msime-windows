@@ -508,6 +508,32 @@ bool IsToolbarImagePath(const std::string &path)
     return IsSafeRelativeResource(path) && IsAnimatableImagePath(path);
 }
 
+// 按钮框的宽高、图标字号与底图：[toolbar.buttons.<key>] 与 [toolbar.button_defaults] 共用这几项。
+bool ReadToolbarButtonLook(const toml::table &table, const std::string &where, ToolbarButton &button,
+                           std::string *error)
+{
+    if (!ReadOptionalBounded(table, "width_dip", 500.0, button.widthDip) ||
+        !ReadOptionalBounded(table, "height_dip", 500.0, button.heightDip) ||
+        (button.widthDip && *button.widthDip <= 0.0) || (button.heightDip && *button.heightDip <= 0.0))
+    {
+        SetError(error, where + " 的 width_dip / height_dip 必须是大于 0、不超过 500 的数值");
+        return false;
+    }
+    if (!ReadOptionalBounded(table, "icon_size_dip", 500.0, button.iconSizeDip) ||
+        (button.iconSizeDip && *button.iconSizeDip <= 0.0))
+    {
+        SetError(error, where + ".icon_size_dip 必须是大于 0、不超过 500 的数值");
+        return false;
+    }
+    if (table.contains("background") &&
+        (!ReadString(table, "background", button.background, 256, true) || !IsToolbarImagePath(button.background)))
+    {
+        SetError(error, where + ".background 无效（需为皮肤目录里的 .png、.apng、.gif 或 .webp）");
+        return false;
+    }
+    return true;
+}
+
 // [toolbar.buttons.<key>] 的一项。未知的状态名记一条提示后忽略，不让整份皮肤读不出来。
 bool ReadToolbarButton(const toml::node &node, const std::string &key, const std::vector<std::string> &states,
                        Package &package, std::string *error)
@@ -531,17 +557,8 @@ bool ReadToolbarButton(const toml::node &node, const std::string &key, const std
         SetError(error, where + " 的 x_dip / y_dip 必须是 0–2000 的数值");
         return false;
     }
-    if (!ReadOptionalBounded(*table, "width_dip", 500.0, button.widthDip) ||
-        !ReadOptionalBounded(*table, "height_dip", 500.0, button.heightDip) ||
-        (button.widthDip && *button.widthDip <= 0.0) || (button.heightDip && *button.heightDip <= 0.0))
+    if (!ReadToolbarButtonLook(*table, where, button, error))
     {
-        SetError(error, where + " 的 width_dip / height_dip 必须是大于 0、不超过 500 的数值");
-        return false;
-    }
-    if (!ReadOptionalBounded(*table, "icon_size_dip", 500.0, button.iconSizeDip) ||
-        (button.iconSizeDip && *button.iconSizeDip <= 0.0))
-    {
-        SetError(error, where + ".icon_size_dip 必须是大于 0、不超过 500 的数值");
         return false;
     }
     if (table->contains("image") &&
@@ -580,11 +597,39 @@ bool ReadToolbarButton(const toml::node &node, const std::string &key, const std
             button.images[state] = path->get();
         }
     }
-    if (button.xDip.has_value() != button.yDip.has_value())
-    {
-        package.notices.push_back(where + " 只写了 x_dip、y_dip 其中一个，这个按钮不会显示");
-    }
     package.toolbarButtons[key] = std::move(button);
+    return true;
+}
+
+// [toolbar.button_flow]：x_dip、y_dip、direction、gap_dip。
+bool ReadToolbarButtonFlow(const toml::node &node, Package &package, std::string *error)
+{
+    const auto *table = node.as_table();
+    if (!table)
+    {
+        SetError(error, "toolbar.button_flow 必须是表");
+        return false;
+    }
+    ToolbarButtonFlow flow;
+    std::string direction = "horizontal";
+    if (!ReadSignedNumber(*table, "x_dip", 2000.0, flow.xDip) ||
+        !ReadSignedNumber(*table, "y_dip", 2000.0, flow.yDip) || flow.xDip < 0.0 || flow.yDip < 0.0)
+    {
+        SetError(error, "toolbar.button_flow 的 x_dip / y_dip 必须是 0–2000 的数值");
+        return false;
+    }
+    if (!ReadEnum(*table, "direction", {"horizontal", "vertical"}, direction))
+    {
+        SetError(error, "toolbar.button_flow.direction 只能是 horizontal 或 vertical");
+        return false;
+    }
+    if (!ReadSignedNumber(*table, "gap_dip", 500.0, flow.gapDip) || flow.gapDip < 0.0)
+    {
+        SetError(error, "toolbar.button_flow.gap_dip 必须是 0–500 的数值");
+        return false;
+    }
+    flow.vertical = direction == "vertical";
+    package.toolbarButtonFlow = flow;
     return true;
 }
 
@@ -635,11 +680,33 @@ bool ReadToolbarImageMode(const toml::table &toolbar, Package &package, std::str
             }
         }
     }
+    if (const toml::node *defaultsNode = toolbar.get("button_defaults"))
+    {
+        const auto *defaults = defaultsNode->as_table();
+        if (!defaults)
+        {
+            SetError(error, "toolbar.button_defaults 必须是表");
+            return false;
+        }
+        if (!ReadToolbarButtonLook(*defaults, "toolbar.button_defaults", package.toolbarButtonDefaults, error))
+        {
+            return false;
+        }
+    }
+    if (const toml::node *flowNode = toolbar.get("button_flow"))
+    {
+        if (!ReadToolbarButtonFlow(*flowNode, package, error))
+        {
+            return false;
+        }
+    }
     if (package.toolbarMode != "image")
     {
-        if (!package.toolbarImage.empty() || !package.toolbarButtons.empty())
+        if (!package.toolbarImage.empty() || !package.toolbarButtons.empty() || package.toolbarButtonFlow ||
+            toolbar.contains("button_defaults"))
         {
-            package.notices.push_back("toolbar 的 image 与 buttons 只在 mode = \"image\" 时生效，已忽略");
+            package.notices.push_back(
+                "toolbar 的 image、buttons、button_defaults 与 button_flow 只在 mode = \"image\" 时生效，已忽略");
         }
         return true;
     }
@@ -649,17 +716,16 @@ bool ReadToolbarImageMode(const toml::table &toolbar, Package &package, std::str
         SetError(error, "toolbar.mode = \"image\" 需要同时写 image、image_width_dip 与 image_height_dip");
         return false;
     }
-    for (const auto &[key, button] : package.toolbarButtons)
+    // 没有 button_flow 时，坐标不全的按钮没地方放。
+    if (!package.toolbarButtonFlow)
     {
-        if (!button.xDip || !button.yDip)
+        for (const auto &[key, button] : package.toolbarButtons)
         {
-            continue;
-        }
-        const double right = *button.xDip + button.widthDip.value_or(kDefaultToolbarButtonSizeDip);
-        const double bottom = *button.yDip + button.heightDip.value_or(kDefaultToolbarButtonSizeDip);
-        if (right > package.toolbarImageWidthDip || bottom > package.toolbarImageHeightDip)
-        {
-            package.notices.push_back("toolbar.buttons." + key + " 超出了背景图，超出的部分既画不出来也点不到");
+            if (button.xDip.has_value() != button.yDip.has_value())
+            {
+                package.notices.push_back("toolbar.buttons." + key +
+                                          " 只写了 x_dip、y_dip 其中一个，又没有 button_flow，这个按钮不会显示");
+            }
         }
     }
     return true;
@@ -1435,11 +1501,21 @@ std::optional<Package> Load(const std::filesystem::path &skinsRoot, const std::s
                 SetError(error, "找不到 toolbar.image 文件");
                 return std::nullopt;
             }
+            if (!package.toolbarButtonDefaults.background.empty() && !exists(package.toolbarButtonDefaults.background))
+            {
+                SetError(error, "找不到 toolbar.button_defaults.background 文件");
+                return std::nullopt;
+            }
             for (const auto &[key, button] : package.toolbarButtons)
             {
                 if (!button.image.empty() && !exists(button.image))
                 {
                     SetError(error, "找不到 toolbar.buttons." + key + ".image 文件");
+                    return std::nullopt;
+                }
+                if (!button.background.empty() && !exists(button.background))
+                {
+                    SetError(error, "找不到 toolbar.buttons." + key + ".background 文件");
                     return std::nullopt;
                 }
                 for (const auto &[state, path] : button.images)
