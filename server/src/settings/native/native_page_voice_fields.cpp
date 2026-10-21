@@ -1131,6 +1131,14 @@ std::string AiProviderForMode(const std::string &mode, const std::string &provid
     return provider == "jev" || provider.empty() ? "deepseek" : provider;
 }
 
+std::string AiTranslationProvider(const SettingsModel &model, const std::string &provider)
+{
+    if (provider != "jev")
+        return provider;
+    const std::string remembered = model.GetString("ai_assistant.generate_provider");
+    return remembered.empty() ? std::string("deepseek") : remembered;
+}
+
 std::wstring AiDefaultEndpoint(const std::string &provider)
 {
     return Widen(AiAssistant::ProviderStore::BuiltinDefaultEndpoint(provider));
@@ -1244,7 +1252,10 @@ ActiveAiConfig ReadActiveAiConfig(const SettingsModel &model)
 {
     ActiveAiConfig config;
     const Json *providers = model.Find("ai_assistant.providers");
-    config.provider = model.GetString("ai_assistant.provider", "deepseek");
+    // 翻译复用的是 Chat Completions 服务商。AI 联想处在选择器模式时，取生成式上次用的那家，
+    // 与 PublishTranslationConfig 的取值口径保持一致。
+    const std::string active = model.GetString("ai_assistant.provider", "deepseek");
+    config.provider = AiTranslationProvider(model, active);
 
     const auto readSlot = [&](const std::string &base) {
         const Json *map = model.Find("ai_assistant." + base + "s");
@@ -1261,7 +1272,7 @@ ActiveAiConfig ReadActiveAiConfig(const SettingsModel &model)
             if (const Json *entry = FindEntry(providers, config.provider, base.c_str()); entry && entry->is_string())
                 value = entry->get<std::string>();
         }
-        if (value.empty() && model.GetString("ai_assistant.provider") == config.provider)
+        if (value.empty() && active == config.provider)
             value = model.GetString("ai_assistant." + base);
         return TrimAscii(value);
     };
@@ -1282,7 +1293,7 @@ ActiveAiConfig ReadActiveAiConfig(const SettingsModel &model)
     }
     // 与 ime_config.cpp 的加载顺序一致：单值 token 只给当前服务商兜底。别家的槽位空着就是没填，
     // 否则翻译页会把「实际发空 token」的配置判成可用。
-    if (config.token.empty() && model.GetString("ai_assistant.provider") == config.provider)
+    if (config.token.empty() && active == config.provider)
         config.token = TrimAscii(model.GetString("ai_assistant.token"));
     config.tokenSet = !IsPlaceholderToken(config.token);
 

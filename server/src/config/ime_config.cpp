@@ -935,6 +935,17 @@ bool LoadImeConfig()
         };
         if (AiAssistantTokenSlotKey(g_ai_assistant.provider).empty() && !registered(g_ai_assistant.provider))
             g_ai_assistant.provider = "deepseek";
+        // 生成式记的上次服务商只在它是合法 id 时才算数，旧配置里没有这个键时跟随当前 provider。
+        g_ai_assistant.generate_provider =
+            VoiceInput::NormalizeProviderId(tbl["ai_assistant"]["generate_provider"].value_or(std::string()));
+        const bool generate_known = AiAssistantTokenSlotKey(g_ai_assistant.generate_provider) != "" ||
+                                    std::any_of(g_ai_assistant.providers.begin(), g_ai_assistant.providers.end(),
+                                                [](const AiAssistant::AiProvider &entry) {
+                                                    return entry.id == g_ai_assistant.generate_provider;
+                                                });
+        if (!generate_known || g_ai_assistant.generate_provider == "jev")
+            g_ai_assistant.generate_provider =
+                g_ai_assistant.provider == "jev" ? std::string("deepseek") : g_ai_assistant.provider;
         g_ai_assistant.token = tbl["ai_assistant"]["token"].value_or(std::string());
         g_ai_assistant.tokens.clear();
         for (const auto provider : AiAssistantProviders())

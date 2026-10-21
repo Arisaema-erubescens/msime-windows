@@ -491,7 +491,6 @@ struct AiPage : std::enable_shared_from_this<AiPage>
     std::shared_ptr<Hideable> providerField;
     std::shared_ptr<Dimmable> limitDimmable;
     std::shared_ptr<Dimmable> thinkingDimmable;
-    std::shared_ptr<Dimmable> endpointDimmable;
     std::shared_ptr<Hideable> promptSection;
     std::shared_ptr<Dropdown> promptSlot;
     std::shared_ptr<InputBox> prompt;
@@ -499,6 +498,9 @@ struct AiPage : std::enable_shared_from_this<AiPage>
     std::shared_ptr<StatusText> fetchStatus;
     std::unique_ptr<CredentialTest> test;
     std::string pendingFetch;
+    // 切换模式或服务商后，配置要等宿主写盘并推回快照才算落地。这期间状态栏说「保存中」，
+    // 免得「界面已经切好、后端还是旧服务商」的那几百毫秒被当成已经可用。
+    bool saving = false;
 
     void Write(const std::string &path, Json value)
     {
@@ -609,14 +611,18 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         const bool select = mode == "select";
         if (providerField)
             providerField->SetVisible(!select);
-        // Jev 只吃 Token 与模型，其余三项对它没有意义，置灰并挡住输入。
-        for (const auto &dim : {limitDimmable, thinkingDimmable, endpointDimmable})
+        // Jev 只吃 Token、模型与接口地址；候选数量与思考强度对它没有意义，置灰并挡住输入。
+        for (const auto &dim : {limitDimmable, thinkingDimmable})
         {
             if (dim)
                 dim->SetDisabled(select || (dim == thinkingDimmable && !ThinkingAvailable()));
         }
         if (promptSection)
             promptSection->SetVisible(!select && context.model.GetBool("ai_assistant.enabled"));
+        // 选择器不自带模型清单：官方 TypeSafe 只认内置模型名，自建实现的模型名由用户填。
+        // 这个按钮在 select 模式下只会返回一句「不提供模型列表」，不如直接关掉。
+        if (fetchButton)
+            fetchButton->SetDisabled(select);
         RefreshStatus();
     }
 
@@ -626,15 +632,21 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         {
             const std::string text = Trimmed(Narrow(token->GetText()));
             const bool set = !text.empty() && text.front() != '<';
-            pill->Set(L"Jev · 从候选里挑", set ? "success" : "pending");
-            statusText->SetText(L"只把分段拼音、前文和最多 32 个本地候选发给 TypeSafe，由它挑一个；不生成新文字。");
+            const std::wstring picked = Trim(model->Input()->GetText());
+            const std::wstring shown = picked.empty() ? Widen(DefaultModel()) : picked;
+            pill->Set(L"从候选里挑 · " + (saving ? std::wstring(L"保存中") : shown),
+                      saving ? "pending" : (set ? "success" : "pending"));
+            statusText->SetText(L"只把分段拼音、前文和最多 32 个本地候选发给选择器，由它挑一个；不生成新文字。"
+                                L"官方 TypeSafe 之外，Laya、OpenJev 这类自建实现也照同一套协议，在下方填它们的地址。");
             return;
         }
         const std::wstring name = AiProviderLabel(provider, context.model.Find("ai_assistant.providers"));
         const std::wstring modelText = Trim(model->Input()->GetText());
         const std::wstring shown = modelText.empty() ? Widen(DefaultModel()) : modelText;
         const bool ready = context.model.GetBool("ai_assistant.enabled");
-        pill->Set(name + L" · " + (shown.empty() ? std::wstring(L"未选模型") : shown), ready ? "success" : "pending");
+        pill->Set(name + L" · " +
+                      (saving ? std::wstring(L"保存中") : (shown.empty() ? std::wstring(L"未选模型") : shown)),
+                  saving ? "pending" : (ready ? "success" : "pending"));
         statusText->SetText(ready ? L"已启用。每次输入完整拼音后，拼音、前文和字数上限会发给上方服务商。"
                                   : L"尚未启用；下面的配置保存后，打开总开关才会生效。");
     }
@@ -654,6 +666,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
             return;
         provider = next;
         Write("ai_assistant.provider", provider);
+        saving = true;
         providerDropdown->SetValue(provider);
         ApplyProviderFields();
         ClearModelMenu();
@@ -668,8 +681,10 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         const std::string target = AiProviderForMode(mode, provider);
         if (target != provider)
         {
+            // 配置层在 provider 变更时自动记下离开的那家，页面不需要单独写 generate_provider。
             provider = target;
             Write("ai_assistant.provider", provider);
+            saving = true;
         }
         RefreshChoices();
         providerDropdown->SetValue(provider);
@@ -734,12 +749,19 @@ struct AiPage : std::enable_shared_from_this<AiPage>
     {
         if (localWrites > 0)
             return;
+        // 首帧快照可能早于控件构建完成，和 SyncLayout 一样先确认控件已就绪。
+        if (!modeGroup || !providerDropdown || !endpoint || !model || !token || !limit || !promptSlot || !prompt)
+            return;
         const SettingsModel &m = context.model;
+        // 快照回来了，说明上次的写入已经落地，状态栏可以显示最终结果。
+        saving = false;
         const std::string stored = m.GetString("ai_assistant.provider", "deepseek");
         mode = AiModeOf(stored);
         modeGroup->SetValue(mode);
         RefreshChoices();
-        provider = AiProviderForMode(mode, stored);
+        // 生成式用 generate_provider 恢复上次选的服务商；它缺失或非法时退回 provider 本身。
+        const std::string remembered = m.GetString("ai_assistant.generate_provider");
+        provider = AiProviderForMode(mode, remembered.empty() ? stored : remembered);
         providerDropdown->SetValue(provider);
         ApplyProviderFields();
         limit->SetText(std::to_wstring(m.GetInt("ai_assistant.candidate_limit", 3)));
@@ -843,22 +865,15 @@ struct AiPage : std::enable_shared_from_this<AiPage>
 
         endpoint = GridInput();
         endpoint->SetOnCommit([this](const std::wstring &text) {
-            // Jev 只认官方接口，别的值会静默把它关掉。
-            if (provider == "jev")
-            {
-                WriteProviderValue("endpoint", std::string(Jev::kEndpoint));
-                endpoint->SetText(Widen(Jev::kEndpoint));
-                SyncLayout();
-                return;
-            }
             WriteProviderValue("endpoint", Trimmed(Narrow(text)));
             // 端点变了，思考强度是否生效也跟着变（后端按域名判定）。
             SyncLayout();
         });
         auto endpointField = std::make_shared<Field>(L"接口地址", endpoint);
-        endpointField->Add(MakeDescription(L"留空使用默认地址；只写主机名时按 https 处理。"));
-        endpointDimmable = std::make_shared<Dimmable>(endpointField);
-        grid->Add(endpointDimmable, true);
+        endpointField->Add(
+            MakeDescription(L"留空使用官方地址。Laya、OpenJev 这类自建实现照同一套协议，填它们的地址即可。"
+                            L"这里填的地址会收到你的 Token，只填你信任的地址。"));
+        grid->Add(endpointField, true);
 
         column->Add(grid);
         return column;
@@ -909,7 +924,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
             modeGroup = std::make_shared<RadioGroup>();
             auto generate = modeGroup->Add(L"生成式", "generate");
             generate->SetInnerPadding({4.0f, 8.0f, 4.0f, 8.0f});
-            auto select = modeGroup->Add(L"从候选里挑（Jev）", "select");
+            auto select = modeGroup->Add(L"从候选里挑", "select");
             select->SetInnerPadding({4.0f, 8.0f, 4.0f, 8.0f});
             modeGroup->SetValue("generate");
             modeGroup->SetOnChanged([this](const std::string &value) { SwitchMode(value); });

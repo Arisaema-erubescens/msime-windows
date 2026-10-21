@@ -1348,11 +1348,9 @@ struct InputPage
         if (provider == "ai")
         {
             const voice_fields::ActiveAiConfig state = AiState();
-            // Jev 只从候选中选，不能当翻译服务；AI 联想总开关与这里无关，只要凭据齐就能用。
-            if (voice_fields::AiProviderIsJev(state.provider))
-                text = L"Jev 只从已有候选中挑选，不能用于翻译；请在「AI 与云联想」页换成生成式服务商";
-            else
-                text = L"请先在「AI 与云联想」页面填写当前服务商的接口地址、Token 和模型";
+            // 选择器模式下这里的 provider 已经解析成「生成式上次用的那家」，所以不再是 jev。
+            // AI 联想总开关与这里无关，只要凭据齐就能用。
+            text = L"请先在「AI 与云联想」页面填写当前服务商的接口地址、Token 和模型";
             ok = state.usable;
         }
         else if (provider == "custom")
@@ -1380,10 +1378,8 @@ struct InputPage
         for (auto &[name, box] : providerFields)
             box->SetVisible(name == provider);
         const voice_fields::ActiveAiConfig state = AiState();
-        // 摘要用显示名而不是内部 id；Jev 单独标明它不能用作翻译。
-        if (voice_fields::AiProviderIsJev(state.provider))
-            aiSummary->SetText(L"Jev · 只能从候选中挑选，不能用于翻译");
-        else if (state.usable)
+        // 摘要用显示名而不是内部 id。
+        if (state.usable)
             aiSummary->SetText(
                 voice_fields::AiProviderLabel(state.provider, context->model.Find("ai_assistant.providers")) + L" · " +
                 Widen(state.model));
@@ -1801,10 +1797,11 @@ VisualPtr BuildInputPage(PageContext &context)
                                                    L"API Key（可选，以 Bearer Token 发送）", L"留空表示不鉴权", true),
                                              true}}))});
         s->aiSummary = std::make_shared<ApiField>(L"当前服务商与模型", L"未配置", false, true);
-        auto ai = Col(
-            {heading(L"复用 AI 辅助配置", L"使用「AI 与云联想」页当前服务商的接口地址、Token 与模型，无需在此重复填写。"
-                                          L"不依赖那边的「启用 AI 联想」开关，凭据填好就能用于翻译。"),
-             blockInput(grid({{s->aiSummary, true}}))});
+        auto ai = Col({heading(L"复用 AI 辅助配置",
+                               L"使用「AI 与云联想」页生成式服务商的接口地址、Token 与模型，无需在此重复填写。"
+                               L"那边选了「从候选里挑」也照样能用，翻译会用生成式那一家。"
+                               L"不依赖「启用 AI 联想」开关，凭据填好就能用于翻译。"),
+                       blockInput(grid({{s->aiSummary, true}}))});
         s->providerFields["tencent"] = std::make_shared<Hideable>(tencent, true);
         s->providerFields["niutrans"] = std::make_shared<Hideable>(niutrans, false);
         s->providerFields["custom"] = std::make_shared<Hideable>(custom, false);
@@ -1967,35 +1964,45 @@ VisualPtr BuildInputPage(PageContext &context)
         collocationBlock->SetMargin({0.0f, 0.0f, 10.0f, 0.0f});
         s->collocationToggle = BindToggle(context, "association.sentence_collocation_enabled");
 
-        auto content =
-            Col({FrequencyRow(SubBlock(L"Trigram 模型整句", L"使用三元语言模型生成整句候选"),
-                              Toggle(context, "association.sentence_wordlattice")),
-                 FrequencyRow(SubBlock(L"Unigram 模型整句", L"使用一元语言模型生成整句候选"),
-                              Toggle(context, "association.sentence_google")),
-                 Padded(neuralBlock, {0.0f, 10.0f, 0.0f, 10.0f}),
-                 FrequencyRow(
-                     SubBlock(L"神经网络模型整句（效果优先）",
-                              L"下载模型后可用：结合已上屏的前文，从内部生成的最多 12 个备选句中选择，处理时间较长"),
-                     s->neuralToggle),
-                 FrequencyRow(SubBlock(L"神经网络模型整句（速度优先）",
-                                       L"使用轻量模型从最多 12 个备选句中选择；两种模式可同时独立给出结果"),
-                              Toggle(context, "association.sentence_neural_keyboard")),
-                 FrequencyRow(
-                     SubBlock(L"去重后补充次选", L"某个模型的首选与已有候选重复时，显示该模型排名最高的下一条不同结果"),
-                     Toggle(context, "association.sentence_show_next_on_duplicate")),
-                 FrequencyRow(
-                     SubBlock(
-                         L"显示整句来源标签",
-                         L"在整句候选后显示〔Trigram〕〔Unigram〕〔神经D〕〔神经K〕〔万象〕〔八股〕〔墨奇〕等来源标签"),
-                     Toggle(context, "association.sentence_source_badge")),
-                 Padded(collocationBlock, {0.0f, 10.0f, 0.0f, 10.0f}),
-                 FrequencyRow(SubBlock(L"octagram 语法整句",
-                                       L"下载模型后可用：一并接入该模型的全部能力——解码时按字级搭配分选出更准的首选，"
-                                       L"并把搭配紧密的整句提到前面，以所选模型自己的来源行显示（万象〔万象〕、八股文〔"
-                                       L"八股〕、白霜〔墨奇〕）"),
-                              s->collocationToggle)});
+        auto content = Col(
+            {FrequencyRow(SubBlock(L"Trigram 模型整句", L"本地生成，使用三元语言模型生成整句候选"),
+                          Toggle(context, "association.sentence_wordlattice")),
+             FrequencyRow(SubBlock(L"Unigram 模型整句", L"本地生成，使用一元语言模型生成整句候选"),
+                          Toggle(context, "association.sentence_google")),
+             Padded(neuralBlock, {0.0f, 10.0f, 0.0f, 10.0f}),
+             FrequencyRow(
+                 SubBlock(
+                     L"神经网络模型整句（效果优先）",
+                     L"本地生成，下载模型后可用：结合已上屏的前文，从内部生成的最多 12 个备选句中选择，处理时间较长"),
+                 s->neuralToggle),
+             FrequencyRow(SubBlock(L"神经网络模型整句（速度优先）",
+                                   L"本地生成，使用轻量模型从最多 12 个备选句中选择；两种模式可同时独立给出结果"),
+                          Toggle(context, "association.sentence_neural_keyboard")),
+             FrequencyRow(SubBlock(L"去重后补充次选",
+                                   L"本地处理，某个模型的首选与已有候选重复时，显示该模型排名最高的下一条不同结果"),
+                          Toggle(context, "association.sentence_show_next_on_duplicate")),
+             FrequencyRow(SubBlock(L"显示整句来源标签",
+                                   L"本地处理，在整句候选后显示〔Trigram〕〔Unigram〕〔神经D〕〔神经K〕〔万象〕"
+                                   L"〔八股〕〔墨奇〕等来源标签"),
+                          Toggle(context, "association.sentence_source_badge")),
+             Padded(collocationBlock, {0.0f, 10.0f, 0.0f, 10.0f}),
+             FrequencyRow(
+                 SubBlock(L"octagram 语法整句",
+                          L"本地生成，下载模型后可用：一并接入该模型的全部能力——解码时按字级搭配分选出更准的首选，"
+                          L"并把搭配紧密的整句提到前面，以所选模型自己的来源行显示（万象〔万象〕、八股文〔"
+                          L"八股〕、白霜〔墨奇〕）"),
+                 s->collocationToggle),
+             // 这一节里唯一联网的一项。它跟 AI 联想无关：不要 Token，也不用选服务商，
+             // 默认还开着，所以必须留一个能点得到的地方。
+             FrequencyRow(
+                 SubBlock(L"云候选",
+                          L"联网，把当前的全拼（双拼会先还原成全拼，日文输入时是罗马字）发送到 Google 的 inputtools "
+                          L"服务换取一个候选。对方会收到拼音、你的 IP 地址和请求元数据，不会收到已上屏的文字、"
+                          L"词库或设置。默认开启，无需账号；需要走代理时在「帮助」页设置，详见 PRIVACY.md"),
+                 Toggle(context, "general.cloud_candidates"))});
         content->SetMargin({0.0f, 8.0f, 0.0f, 0.0f});
-        page.AddSection(Col({MakeTitleBlock(L"整句候选", L"输入多个拼音音节时，提供整句候选"), content}));
+        page.AddSection(
+            Col({MakeTitleBlock(L"整句与云候选", L"输入多个拼音音节时，额外提供整句或云端给出的候选"), content}));
     }
 
     // ---- 拼音方案调频 ----

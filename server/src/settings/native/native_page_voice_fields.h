@@ -288,6 +288,8 @@ std::wstring Trim(const std::wstring &text);
 // 其余服务商走 OpenAI 兼容的 Chat Completions，自己生成候选文本。
 std::string AiModeOf(const std::string &provider);
 std::string AiProviderForMode(const std::string &mode, const std::string &provider);
+// 候选词翻译复用的服务商：选择器模式（jev）下取生成式上次用的那家，其余情况就是 provider 本身。
+std::string AiTranslationProvider(const SettingsModel &model, const std::string &provider);
 // 出厂默认的接口地址与模型；未知服务商返回空串。空槽位在界面上显示它作占位符。
 std::wstring AiDefaultEndpoint(const std::string &provider);
 std::wstring AiDefaultModel(const std::string &provider);

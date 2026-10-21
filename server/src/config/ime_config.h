@@ -71,6 +71,8 @@ struct AiAssistantConfig
     // Active provider id. The legacy set is deepseek | openai | siliconflow | groq | custom; ids
     // beyond that come from the provider registry in the data directory.
     std::string provider = "deepseek";
+    // 生成式模式下最后选过的服务商。provider 切到 jev 时它保持不变，切回生成式时用它恢复。
+    std::string generate_provider = "deepseek";
     std::string token;
     std::map<std::string, std::string> tokens;
     std::string endpoint = "https://api.deepseek.com/chat/completions";

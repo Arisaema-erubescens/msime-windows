@@ -550,6 +550,7 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
           {"ai_assistant",
            {{"enabled", ai.enabled},
             {"provider", ai.provider},
+            {"generate_provider", ai.generate_provider},
             {"token", ai.token},
             {"tokens", ai.tokens},
             {"endpoint", ai.endpoint},

@@ -88,14 +88,29 @@ if (Test-Path -LiteralPath $factoryConfig) {
 
 # 4. 启动脚本。环境变量走进程级，不落盘、不影响已安装的版本。
 #    .cmd 一律只写 ASCII：中文注释在 GBK 控制台下会变成乱码。
+#    两个模式：
+#      默认    数据目录指到包内 data\，出厂空白，改动不碰本机
+#      live    用本机正式版的数据目录（注册表 DataDir 或 %LOCALAPPDATA%），改动会写进去
+#    两种模式都加实例后缀，保证能和已安装的正式版同时开着。
 $launcher = @'
 @echo off
-rem Point the settings window at the data folder inside this directory, and give it its own
-rem single-instance slot so it can run next to an installed copy. Nothing is written to the
-rem registry or to the installed profile.
+rem Portable preview of the settings window.
+rem   run-settings.cmd        isolated: data lives in .\data, nothing touches this machine
+rem   run-settings.cmd live   live: uses the installed copy's data directory and config
 setlocal
-set "METASEQUOIA_IME_DATA_DIR=%~dp0data"
 set "METASEQUOIA_IME_SETTINGS_INSTANCE=portable"
+rem Default the data directory to the copy inside this folder. Assign it outside the if-block
+rem on purpose: cmd expands the whole block when it parses it, so a set inside is easy to get
+rem wrong later.
+set "METASEQUOIA_IME_DATA_DIR=%~dp0data"
+if /I "%~1"=="live" (
+    rem Must clear the inherited value: a developer shell usually sets this to a test profile,
+    rem and leaving it would send live mode to that profile instead of the installed one.
+    set "METASEQUOIA_IME_DATA_DIR="
+    echo Using the installed data directory. Changes are written to it.
+) else (
+    echo Using the isolated data directory inside this folder.
+)
 start "" "%~dp0MetasequoiaImeSettings.exe"
 endlocal
 '@
@@ -110,10 +125,23 @@ $readme = @"
 怎么用
   1. 解压到普通目录，别放 Program Files：那里需要管理员权限才能写。
   2. 双击 run-settings.cmd。
-  3. 看完直接删掉整个目录，不留任何痕迹。
+  3. 默认模式下看完直接删掉整个目录，不留任何痕迹。
+
+两种启动方式
+  run-settings.cmd          用包内的空白配置，改动不影响本机已装的版本
+  run-settings.cmd live     用本机已装版本的真实配置，能看出新界面在你自己的设置下是什么样
+
+live 模式的注意事项
+  这个模式改的是你正式版的配置文件，删掉本目录不会自动恢复。
+  想留后路的话，先备份 %LOCALAPPDATA%\metasequoiaime\config.toml。
+  本机没装过正式版时，它会落到 %LOCALAPPDATA%\metasequoiaime；那里没有现成配置，
+  改动会保存失败，请改用默认模式。
+  另外这个设置程序来自开发构建，没有正式版的签名证书。
+
+两种方式都会给设置程序一个独立的实例名，可以和已安装的正式版同时开着。
 
 哪些能看到
-  全部设置页面的界面与交互。改动会写进本目录下的 data\config.toml。
+  全部设置页面的界面与交互。隔离模式下改动写进本目录下的 data\config.toml。
 
 哪些看不到
   输入法本身的输入效果：候选窗、上屏、皮肤在真实输入时的样子。
