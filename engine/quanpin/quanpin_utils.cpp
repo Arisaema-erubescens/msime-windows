@@ -5,6 +5,7 @@
 #include "../common/helpcode_utils.h"
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <limits>
 #include <string_view>
 #include <unordered_map>
@@ -1116,6 +1117,133 @@ std::vector<AutocorrectCut> autocorrect_cut_kbest(const std::string &pinyin, con
     return results;
 }
 
+// ---- 长句容错槽位模型 ----
+
+FaultSlotKind fault_slot_kind(const std::string &piece)
+{
+    if (intact_pinyin_set().count(piece) != 0)
+    {
+        return FaultSlotKind::Determining;
+    }
+    return piece.size() == 1 ? FaultSlotKind::SingleInitial : FaultSlotKind::Fault;
+}
+
+std::vector<FaultSlot> build_fault_slots(const std::string &pinyin)
+{
+    if (pinyin.empty() || pinyin.find('\'') != std::string::npos)
+    {
+        return {};
+    }
+    // 输入可能带大小写（大写段是触发键的一部分）：切分与槽位分类都按小写字母走，
+    // 与 autocorrect_cut_kbest 对 fold 后字母工作同一个约定。
+    std::string letters;
+    letters.reserve(pinyin.size());
+    for (const char ch : pinyin)
+    {
+        letters.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+        if (letters.back() < 'a' || letters.back() > 'z')
+        {
+            return {};
+        }
+    }
+    // 与查询层同一个切分器：残余字母按简拼尾解释，任何字母串都切得出。用前缀集
+    // （intact_only=false）切，r、c 这类单字母声母才能成段；槽位分类再按 intact 集
+    // 区分合法音节与简拼/非法段。
+    const Segments segments = cut_one_piece_min_segments(letters, false);
+    // 切分必须逐字母盖住输入（该切分器保证），用拼接而非 join_segments 比较：
+    // 后者插入分隔符，对多段输入恒不等。
+    std::string joined;
+    for (const auto &segment : segments)
+    {
+        joined += segment;
+    }
+    if (segments.empty() || joined != letters)
+    {
+        return {};
+    }
+    std::vector<FaultSlot> slots;
+    slots.reserve(segments.size());
+    for (const auto &segment : segments)
+    {
+        FaultSlot slot;
+        slot.raw_text = segment;
+        slot.base_syllable = segment;
+        slot.kind = fault_slot_kind(segment);
+        // Fault 槽没有基础读法：多字母非法串不能当简拼查词。
+        if (slot.kind == FaultSlotKind::Fault)
+        {
+            slot.base_syllable.clear();
+        }
+        slots.push_back(std::move(slot));
+    }
+    return slots;
+}
+
+std::vector<std::pair<std::string, int>> fault_slot_correction_targets(const std::string &raw_text,
+                                                                       const unsigned autocorrect_types)
+{
+    if (autocorrect_types == 0 || raw_text.empty() || intact_pinyin_set().count(raw_text) != 0)
+    {
+        return {};
+    }
+    std::vector<std::pair<std::string, int>> targets;
+    const auto found = correction_index().find(raw_text);
+    if (found == correction_index().end())
+    {
+        return targets;
+    }
+    for (const auto &target : found->second)
+    {
+        // 掩码门控与 autocorrect_cut_kbest 同一条规则；权重按启用位折算（同
+        // min_enabled_correction_weight），生成式目标走昂贵档常数。
+        const unsigned enabled_bits = autocorrect_types & target.type_bit;
+        if (enabled_bits == 0)
+        {
+            continue;
+        }
+        const int weight =
+            target.generated ? kAutocorrectGeneratedShapeWeight : min_enabled_correction_weight(enabled_bits);
+        const auto duplicate = std::find_if(targets.begin(), targets.end(),
+                                            [&](const auto &entry) { return entry.first == target.syllable; });
+        if (duplicate == targets.end())
+        {
+            targets.emplace_back(std::string(target.syllable), weight);
+        }
+        else if (weight < duplicate->second)
+        {
+            duplicate->second = weight;
+        }
+    }
+    return targets;
+}
+
+bool fault_slots_eligible(const std::vector<FaultSlot> &slots, const unsigned autocorrect_types)
+{
+    if (autocorrect_types == 0 || slots.empty() || slots.size() > kMaxFaultSlotCount)
+    {
+        return false;
+    }
+    std::size_t non_determining = 0;
+    std::size_t single_initial = 0;
+    for (const auto &slot : slots)
+    {
+        if (slot.kind == FaultSlotKind::SingleInitial)
+        {
+            ++single_initial;
+        }
+        if (slot.kind != FaultSlotKind::Determining)
+        {
+            ++non_determining;
+        }
+    }
+    // 必须有至少两个单字母槽：这是长句里有意混入的简拼（shuishanshurFayonghu... 的
+    // r、c、l），k-best 的 3 边预算装不下它们，才轮到容错仲裁。只有一个单字母槽的串
+    // （tiananmenguangchang 的后两个字母被抓成单字母槽）是字面仲裁的势力范围，拉进容错
+    // 搜索只会让 kenlm 在展开读法里挑一个分数更高的错切分（天安门广场 -> 天南门广场）。
+    // 短串同样走旧 autocorrect_cut_kbest 快速路径，行为零变。
+    return single_initial >= 2 && non_determining > 0 && slots.size() > kMaxShortAutocorrectSyllables;
+}
+
 namespace
 {
 // 罕见合法音节 -> 它的换位常用音节。人工收录、不由生成器派生：两侧都常用的换位对
@@ -1293,6 +1421,78 @@ std::optional<size_t> corrected_reading_raw_length(const std::string &raw_letter
     }
     const auto &last = cut->segments[reading.size() - 1];
     return last.start + last.raw_text.size();
+}
+
+bool is_deletion_variant(const std::string &raw_text, const std::string &reading)
+{
+    if (reading.size() + 1 != raw_text.size())
+    {
+        return false;
+    }
+    size_t r = 0;
+    size_t skipped = 0;
+    for (const char ch : raw_text)
+    {
+        if (skipped == 0 && (r >= reading.size() || ch != reading[r]))
+        {
+            skipped = 1;
+            continue;
+        }
+        if (r < reading.size() && reading[r] == ch)
+        {
+            ++r;
+            continue;
+        }
+        return false;
+    }
+    return skipped == 1 && r == reading.size();
+}
+
+std::optional<size_t> fault_reading_raw_length(const std::string &raw_letters, const Segments &reading)
+{
+    const auto slots = build_fault_slots(raw_letters);
+    if (slots.empty() || reading.size() > slots.size() || reading.empty())
+    {
+        return std::nullopt;
+    }
+    const auto &intact = intact_pinyin_set();
+    size_t consumed = 0;
+    for (size_t i = 0; i < reading.size(); ++i)
+    {
+        const auto &slot = slots[i];
+        const auto &syllable = reading[i];
+        // 槽盖住的原始字母必须被读音逐字母消耗（允许 ü 归一）。
+        const bool matches_slot = syllable == slot.base_syllable ||
+                                  (syllable.size() == slot.raw_text.size() &&
+                                   canonical_umlaut_spelling(slot.raw_text) == canonical_umlaut_spelling(syllable));
+        switch (slot.kind)
+        {
+        case FaultSlotKind::Determining:
+            // loose scan 产出的漏字变体（yang -> yan）也是这个槽的合法读法，与
+            // arbitrate_fault_slots / QuanpinDisplayAtWinningSlots 同一条形态判定。
+            if (!matches_slot && !is_deletion_variant(slot.raw_text, syllable))
+            {
+                return std::nullopt;
+            }
+            break;
+        case FaultSlotKind::SingleInitial:
+            // 简拼读法（r）或同首字母的展开音节（ru）都消耗这个槽；别的音节对不上。
+            if (!matches_slot && (syllable.empty() || syllable.front() != slot.raw_text.front()))
+            {
+                return std::nullopt;
+            }
+            break;
+        case FaultSlotKind::Fault:
+            // Fault 槽只能读成合法音节；任意音节都消耗这段字母。
+            if (syllable.empty() || intact.count(syllable) == 0)
+            {
+                return std::nullopt;
+            }
+            break;
+        }
+        consumed += slot.raw_text.size();
+    }
+    return consumed;
 }
 
 AutocorrectCut autocorrect_cut_detail(const std::string &pinyin, const unsigned autocorrect_types)

@@ -104,6 +104,14 @@ inline constexpr int kAutocorrectDeletionWeight = 11;
 inline constexpr int kAutocorrectInsertionWeight = 12;
 inline constexpr int kAutocorrectNeighborWeight = 13;
 
+// 句中简拼展开（单字母声母 -> 它开头的全拼音节，shu'r'fa 的 r -> ru）。这是意图性
+// 规则展开，不是有限错拼对：单字母属于简拼空间，autocorrect_table.h 的准入规则
+// （key 为 >=3 字母的非合法拼音串）不收它，运行时按 intact_pinyin_list() 现算，
+// 不进表也不动生成器。权重定在 insertion(12)/neighbor(13) 与 generated(15) 之间：
+// 展开不是手误（用户就是想打简拼），但它一次引入整组候选，噪声面比任何单字母
+// 手误都宽，比邻键贵一档；又比生成式远键便宜（首字母是用户敲的，意图明确）。
+inline constexpr int kAutocorrectJianpinExpandWeight = 14;
+
 // Out-of-table generated shapes (non-neighbor substitutions, see
 // CorrectionTarget::generated): fixed expensive-tier weight.
 // These slips are rarer than any in-table shape, and the ranking contract
@@ -235,6 +243,55 @@ std::vector<AutocorrectCut> autocorrect_cut_kbest(const std::string &pinyin, uns
 std::vector<AutocorrectCut> legal_input_correction_cuts(const std::string &pinyin, const Segments &segments,
                                                         unsigned autocorrect_types, std::size_t k);
 
+// ---- 长句容错槽位模型（方案 C：engine 级联合搜索） ----
+//
+// 贪心切分把原始字母切成槽位；每个槽有一个确定性的基础读法（合法音节、简拼尾或
+// 空读法），词格展开时可以给非法槽换一种读法（纠错表目标或简拼展开）。槽模型只
+// 描述「哪里可能读错」，不产生候选读音——候选由词格层在词典命中处现算。
+
+// 一个槽的容错类型。determining 决定基础读法；可展开的槽允许词格在词典行里给它
+// 换一种读音（行键在该槽的位置上与基础读法不同）。
+enum class FaultSlotKind
+{
+    // 合法完整音节：基础读法固定，不展开。
+    Determining,
+    // 单字母声母：基础读法是它自己（简拼），词格可把它展开成同首字母全拼（词典行键在此位不等于它）。
+    SingleInitial,
+    // 多字母非法串（rfa、neicjiaol）：无基础读法；词格可用纠错表目标音节在此位开头。
+    Fault,
+};
+
+// 按切段文本分类槽位：intact 集合内为 Determining，单字母为 SingleInitial，其余 Fault。
+FaultSlotKind fault_slot_kind(const std::string &piece);
+
+struct FaultSlot
+{
+    // 该槽盖住的原始字母段（小写）。
+    std::string raw_text;
+    // 基础读法：Determining/SingleInitial 槽为字面切分音节；Fault 槽为空。
+    std::string base_syllable;
+    FaultSlotKind kind = FaultSlotKind::Determining;
+};
+
+// 字面贪心切分 -> 槽序列。任何输入都切得出（切分器对残余字母按简拼尾解释），
+// 返回空只当 pinyin 为空或含手动分隔符。
+std::vector<FaultSlot> build_fault_slots(const std::string &pinyin);
+
+// 非法槽的容错读法起点（autocorrect_table 命中）：这段原始字母能纠成哪些合法音节，
+// 附各目标按启用位折算的纠错权重（kAutocorrect*Weight）。只列表目标，简拼展开在词格层
+// 现算。types 为 0 或无命中返回空。
+std::vector<std::pair<std::string, int>> fault_slot_correction_targets(const std::string &raw_text,
+                                                                       unsigned autocorrect_types);
+
+// 该串是否值得走容错词格仲裁：字面切分含非法槽（不能整句解码）、槽多于短串
+// 快速路径的上限（kMaxShortAutocorrectSyllables）、掩码开着、无手动分隔符。
+bool fault_slots_eligible(const std::vector<FaultSlot> &slots, unsigned autocorrect_types);
+
+// 短串（<= 该槽位数的切分）继续走 autocorrect_cut_kbest 旧路径，行为零变。
+inline constexpr std::size_t kMaxShortAutocorrectSyllables = 4;
+// 容错词格的槽位上限：超过它的长句每槽展开的组合面太大，仲裁放弃（保持字面切分）。
+inline constexpr std::size_t kMaxFaultSlotCount = 20;
+
 // 纠错切分里音节前缀与 reading 相同的那条（k-best 次序里最靠前的），找不到返回空。
 // 用来把一个纠错读音对回原始字母：它的各段 start / raw_text 就是读音每个音节实际
 // 盖住的原始区间。
@@ -249,6 +306,18 @@ std::optional<AutocorrectCut> correction_cut_for_reading(const std::string &raw_
 // 长度不变，也走那条路）。raw_letters 是不含分隔符的原始字母。
 std::optional<size_t> corrected_reading_raw_length(const std::string &raw_letters, const Segments &reading,
                                                    unsigned autocorrect_types);
+
+// 漏字变体形态判定：reading 能从 raw_text 删掉恰好一个字母（保序子序列）得到。
+// loose scan（yang -> yan）的边生成、胜出读音的消耗对齐和分段显示三处共用这一条，
+// 谁也不能比别处宽：宽了会把无关同首字母音节当成变体，窄了胜出读音对不回原串。
+bool is_deletion_variant(const std::string &raw_text, const std::string &reading);
+
+// 容错槽位读音对回原始字母：reading 逐音节对槽位走——Determining 槽必须等于基础读法
+// （ü 归一后比较），SingleInitial 槽认简拼读法（等于槽字母）或同首字母的展开音节，
+// Fault 槽认任意合法音节。全部对上时返回盖住的原始字母数，否则空。调用方照旧按
+// 读音长度消耗。correction_cut_for_reading 对不上这类读音（简拼展开不在 k-best 切分
+// 里），选中长句容错候选的消耗对齐走这里。
+std::optional<size_t> fault_reading_raw_length(const std::string &raw_letters, const Segments &reading);
 
 // True for a leading initial followed by complete syllables ("ywen" = y + wen),
 // or one or more legal syllables plus at most one trailing letter ("zheg" = zhe + g)
