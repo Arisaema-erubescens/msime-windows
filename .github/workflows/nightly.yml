@@ -43,8 +43,50 @@ env:
   NIGHTLY_ASSET_RETENTION: 14
 
 jobs:
+  gate:
+    name: Skip if nothing changed
+    # Only the schedule honours the "no new commits" gate: a manual run always
+    # builds, whoever clicked it explicitly asked for a build.
+    if: ${{ github.event_name == 'schedule' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      changed: ${{ steps.compare.outputs.changed }}
+    steps:
+      - name: Compare develop's HEAD against the last published nightly
+        id: compare
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # The '<!-- nightly-sha: ... -->' trailer in the nightly release body is
+          # the source of truth for what the channel already covers (the tag never
+          # moves, so the tag's own commit would stay at the first nightly). Any
+          # failure to read the marker -- first run, no release, network flake --
+          # counts as "changed": a spurious rebuild is harmless, a skipped one
+          # silently withholds commits from the channel.
+          changed=true
+          body=$(gh release view nightly --json body --jq .body 2>/dev/null || true)
+          if [ -n "$body" ] && previous=$(printf '%s' "$body" | grep -oP '<!--\s*nightly-sha:\s*\K[0-9a-f]{7,40}' | head -n1); then
+            if [ "${#previous}" -ge 7 ] && git merge-base --is-ancestor "$previous" "$CURRENT_SHA" 2>/dev/null && \
+               [ "$previous" = "$CURRENT_SHA" ]; then
+              changed=false
+            fi
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          if [ "$changed" = false ]; then
+            echo "develop HEAD ${CURRENT_SHA:0:12} is already covered by the last nightly; skipping."
+          else
+            echo "New commits since the last nightly (or the marker could not be read); building."
+          fi
+
   tip:
     name: TSF ${{ matrix.name }}
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.result == 'success' && needs.gate.outputs.changed != 'false' }}
     runs-on: windows-2025
     timeout-minutes: 60
     strategy:
@@ -110,6 +152,8 @@ jobs:
 
   server:
     name: Server
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.result == 'success' && needs.gate.outputs.changed != 'false' }}
     runs-on: windows-2025
     timeout-minutes: 90
     env:
@@ -193,8 +237,13 @@ jobs:
 
   package:
     name: Package and publish
-    needs: [tip, server]
-    if: ${{ !cancelled() && needs.tip.result == 'success' && needs.server.result == 'success' }}
+    needs: [gate, tip, server]
+    if: ${{ !cancelled() && needs.gate.result == 'success' && needs.gate.outputs.changed != 'false' && needs.tip.result == 'success' && needs.server.result == 'success' }}
+    # The publish step talks to github.com several times (release view/create/edit/upload) and
+    # the downloads upstream of it have been the flakiest part of the week -- retry the whole
+    # job once on failure before the notify job files an issue. Retrying a job re-runs every
+    # step in it; the downloads and signing are deterministic, so a second attempt starts from
+    # a clean slate at the cost of a few minutes.
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
@@ -332,6 +381,11 @@ jobs:
             installer/import-nightly-trust.ps1
           if-no-files-found: error
       - name: Publish the prerelease
+        # github.com's release endpoints have dropped connections repeatedly this
+        # week, and one dropped call would otherwise fail the whole night. The
+        # publish body is written to a script and run twice on failure: release
+        # view/create/edit and the --clobber upload are idempotent, so attempt 2
+        # finishes a partially done attempt 1 instead of duplicating anything.
         if: ${{ github.event_name == 'schedule' || inputs.publish }}
         shell: pwsh
         env:
@@ -342,6 +396,8 @@ jobs:
           INSTALLER_SHA256: ${{ steps.asset.outputs.installer_sha256 }}
           CURRENT_SHA: ${{ github.sha }}
         run: |
+          $publishScript = Join-Path $env:RUNNER_TEMP 'publish-nightly.ps1'
+          @'
           # The tag is a fixed literal, never a version: users get one bookmarkable URL, and a
           # version-shaped tag would read as a release. --prerelease keeps it out of Latest, which
           # GitHub reserves for non-prerelease releases, so the front page never points here.
@@ -352,6 +408,7 @@ jobs:
           # that the tag keeps pointing at the first nightly's commit, which is why the body names
           # the real commit and the '<!-- nightly-sha: ... -->' trailer below is the source of truth
           # for the next run's changelog.
+          $ErrorActionPreference = 'Stop'
           $tag = 'nightly'
           $marker = '<!-- nightly-sha: {0} -->'
 
@@ -455,12 +512,34 @@ jobs:
           # --clobber replaces yesterday's asset; the release keeps exactly one installer.
           gh release upload $tag $env:INSTALLER_PATH (Join-Path $PWD 'installer/nightly-signing.cer') (Join-Path $PWD 'installer/import-nightly-trust.ps1') --repo $env:GH_REPO --clobber
           if ($LASTEXITCODE -ne 0) { throw 'gh release upload failed' }
+          '@ | Set-Content -LiteralPath $publishScript -Encoding utf8NoBOM
+          $published = $false
+          for ($attempt = 1; $attempt -le 2 -and -not $published; $attempt++) {
+              Write-Host "::group::Publish attempt $attempt"
+              try {
+                  & $publishScript
+                  if ($LASTEXITCODE -eq 0) { $published = $true }
+                  else { throw "publish script exited with $LASTEXITCODE" }
+              }
+              catch {
+                  if ($attempt -eq 2) { throw }
+                  Write-Warning "Publish attempt $attempt failed: $($_.Exception.Message)"
+                  Write-Host 'Retrying once after a short backoff (github.com connection drops).'
+                  Start-Sleep -Seconds 30
+              }
+              finally {
+                  Write-Host '::endgroup'
+              }
+          }
+          if (-not $published) { throw 'publish did not complete' }
 
   notify:
     name: Report a failed night
-    needs: [tip, server, package]
+    needs: [gate, tip, server, package]
     # fail() covers the case where an earlier job was skipped because its dependency failed; the
-    # explicit result checks cover a job that never started for another reason.
+    # explicit result checks cover a job that never started for another reason. A gate skip
+    # (nothing to build) makes every downstream job "skipped", which is the channel working as
+    # intended and files nothing.
     if: ${{ failure() || cancelled() == false && (needs.tip.result == 'failure' || needs.server.result == 'failure' || needs.package.result == 'failure') }}
     runs-on: ubuntu-24.04
     steps:
