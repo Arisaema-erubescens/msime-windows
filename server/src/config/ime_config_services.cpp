@@ -366,7 +366,21 @@ void ime_config_detail::PublishTranslationConfig()
     snapshot->tencent = g_tencent_tmt;
     snapshot->custom = g_custom_translation;
     snapshot->niutrans = g_niutrans;
-    snapshot->ai = {g_ai_assistant.provider, g_ai_assistant.endpoint, g_ai_assistant.token, g_ai_assistant.model};
+    // 候选词翻译只走 Chat Completions，选择器（jev）没有 chat 接口。AI 联想处在选择器模式时，
+    // 复用「生成式上次用的那家」，这样选了排序也不会把翻译一起关掉。
+    const std::string &translation_provider =
+        g_ai_assistant.provider == "jev" ? g_ai_assistant.generate_provider : g_ai_assistant.provider;
+    const auto slot_value = [&translation_provider](const std::map<std::string, std::string> &slots,
+                                                    const std::string &fallback) {
+        const auto found = slots.find(translation_provider);
+        return found == slots.end() || found->second.empty() ? fallback : found->second;
+    };
+    const auto token = g_ai_assistant.tokens.find(translation_provider);
+    snapshot->ai = {
+        translation_provider,
+        slot_value(g_ai_assistant.endpoints, AiAssistant::ProviderStore::BuiltinDefaultEndpoint(translation_provider)),
+        token == g_ai_assistant.tokens.end() ? std::string() : token->second,
+        slot_value(g_ai_assistant.models, AiAssistant::ProviderStore::BuiltinDefaultModel(translation_provider))};
     std::lock_guard<std::mutex> lock(g_translation_snapshot_mutex);
     g_translation_snapshot = std::move(snapshot);
 }
@@ -495,6 +509,22 @@ static bool ApplyAiAssistantString(const std::string &key, const std::string &va
 {
     if (key == "prompt_id" && value != "custom_1" && value != "custom_2" && value != "custom_3")
         return false;
+    // 生成式模式下最后选过的服务商。切到 Jev 之前把当前服务商记在这里，切回来时用它，
+    // 否则 provider 被 jev 覆盖，用户每次切回生成式都得重新挑一遍。
+    if (key == "generate_provider")
+    {
+        const std::string provider = VoiceInput::NormalizeProviderId(value);
+        const auto registered =
+            std::find_if(g_ai_assistant.providers.begin(), g_ai_assistant.providers.end(),
+                         [&provider](const AiAssistant::AiProvider &entry) { return entry.id == provider; });
+        if (provider == "jev" ||
+            (AiAssistantTokenSlotKey(provider).empty() && registered == g_ai_assistant.providers.end()))
+            return false;
+        if (!WriteConfiguredValue("ai_assistant", key, EscapeTomlBasicString(provider)))
+            return false;
+        g_ai_assistant.generate_provider = provider;
+        return true;
+    }
     if (key == "thinking" && !VoiceInput::IsValidThinkingLevel(value))
         return false;
     if (key == "provider")
@@ -524,11 +554,17 @@ static bool ApplyAiAssistantString(const std::string &key, const std::string &va
                 {{"ai_assistant", "endpoint_" + previous, stored("endpoint", previous, g_ai_assistant.endpoint)},
                  {"ai_assistant", "model_" + previous, stored("model", previous, g_ai_assistant.model)},
                  {"ai_assistant", "provider", EscapeTomlBasicString(provider)},
+                 // 离开生成式的那一刻把「上次用的服务商」记下来。记 previous 而不是 provider：
+                 // 这样任何直接写 provider 的调用方都能得到正确结果，规则只在这里一处。
+                 {"ai_assistant", "generate_provider",
+                  EscapeTomlBasicString(previous == "jev" ? g_ai_assistant.generate_provider : previous)},
                  {"ai_assistant", "token", EscapeTomlBasicString(token)},
                  {"ai_assistant", "endpoint", stored("endpoint", provider, endpoint)},
                  {"ai_assistant", "model", stored("model", provider, model)}}))
             return false;
         g_ai_assistant.provider = provider;
+        if (previous != "jev")
+            g_ai_assistant.generate_provider = previous;
         g_ai_assistant.token = token;
         g_ai_assistant.endpoint = endpoint;
         g_ai_assistant.model = model;

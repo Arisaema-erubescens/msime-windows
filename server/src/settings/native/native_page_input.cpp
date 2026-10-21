@@ -1348,11 +1348,9 @@ struct InputPage
         if (provider == "ai")
         {
             const voice_fields::ActiveAiConfig state = AiState();
-            // Jev 只从候选中选，不能当翻译服务；AI 联想总开关与这里无关，只要凭据齐就能用。
-            if (voice_fields::AiProviderIsJev(state.provider))
-                text = L"Jev 只从已有候选中挑选，不能用于翻译；请在「AI 与云联想」页换成生成式服务商";
-            else
-                text = L"请先在「AI 与云联想」页面填写当前服务商的接口地址、Token 和模型";
+            // 选择器模式下这里的 provider 已经解析成「生成式上次用的那家」，所以不再是 jev。
+            // AI 联想总开关与这里无关，只要凭据齐就能用。
+            text = L"请先在「AI 与云联想」页面填写当前服务商的接口地址、Token 和模型";
             ok = state.usable;
         }
         else if (provider == "custom")
@@ -1380,10 +1378,8 @@ struct InputPage
         for (auto &[name, box] : providerFields)
             box->SetVisible(name == provider);
         const voice_fields::ActiveAiConfig state = AiState();
-        // 摘要用显示名而不是内部 id；Jev 单独标明它不能用作翻译。
-        if (voice_fields::AiProviderIsJev(state.provider))
-            aiSummary->SetText(L"Jev · 只能从候选中挑选，不能用于翻译");
-        else if (state.usable)
+        // 摘要用显示名而不是内部 id。
+        if (state.usable)
             aiSummary->SetText(
                 voice_fields::AiProviderLabel(state.provider, context->model.Find("ai_assistant.providers")) + L" · " +
                 Widen(state.model));
@@ -1801,10 +1797,11 @@ VisualPtr BuildInputPage(PageContext &context)
                                                    L"API Key（可选，以 Bearer Token 发送）", L"留空表示不鉴权", true),
                                              true}}))});
         s->aiSummary = std::make_shared<ApiField>(L"当前服务商与模型", L"未配置", false, true);
-        auto ai = Col(
-            {heading(L"复用 AI 辅助配置", L"使用「AI 与云联想」页当前服务商的接口地址、Token 与模型，无需在此重复填写。"
-                                          L"不依赖那边的「启用 AI 联想」开关，凭据填好就能用于翻译。"),
-             blockInput(grid({{s->aiSummary, true}}))});
+        auto ai = Col({heading(L"复用 AI 辅助配置",
+                               L"使用「AI 与云联想」页生成式服务商的接口地址、Token 与模型，无需在此重复填写。"
+                               L"那边选了「从候选里挑」也照样能用，翻译会用生成式那一家。"
+                               L"不依赖「启用 AI 联想」开关，凭据填好就能用于翻译。"),
+                       blockInput(grid({{s->aiSummary, true}}))});
         s->providerFields["tencent"] = std::make_shared<Hideable>(tencent, true);
         s->providerFields["niutrans"] = std::make_shared<Hideable>(niutrans, false);
         s->providerFields["custom"] = std::make_shared<Hideable>(custom, false);

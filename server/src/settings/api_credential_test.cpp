@@ -315,14 +315,18 @@ Result Run(const Request &request)
 {
     if (request.service == "ai.assistant" && Value(request, "provider") == "jev")
     {
+        // 与真实请求路径保持一致：ai_assistant.cpp 在 token 或模型为空时根本不发请求，
+        // 这里如果放过就会给出「连接成功」的假阳性。
+        if (!CloudTranslation::IsUsableSecret(Value(request, "token")) || Value(request, "model").empty())
+            return {false, "请先填写有效的 Token 和模型名。"};
         InitCurl();
         const std::vector<std::string> candidates{"实施", "事实"};
         const auto body =
             Jev::BuildRequest(Value(request, "model"), "方案已经通过，明天开始", {"shi", "shi"}, candidates);
         const auto response = Jev::Fetch(Value(request, "endpoint"), Value(request, "token"), body.dump());
         if (response && !Jev::ParseChoice(*response, candidates).empty())
-            return {true, "连接成功，Jev 已返回有效候选选择。"};
-        return {false, "Jev 未返回有效选择，请检查 Key、模型、官方接口地址和网络。"};
+            return {true, "连接成功，选择器已返回有效的候选选择。"};
+        return {false, "选择器未返回有效选择，请检查地址、Token、模型名和网络。"};
     }
     if (request.service.rfind("translation.", 0) == 0)
         return TestTranslation(request);
