@@ -19,7 +19,7 @@
 
 namespace
 {
-constexpr const char *kUrl = "https://mt.aliyuncs.com";
+constexpr const char *kDefaultUrl = "https://mt.aliyuncs.com";
 constexpr const char *kAction = "GetBatchTranslate";
 constexpr const char *kVersion = "2018-10-12";
 constexpr const char *kSignatureMethod = "HMAC-SHA1";
@@ -273,6 +273,13 @@ std::string BuildBatchSourceText(const std::vector<std::string> &texts, size_t b
 std::vector<std::string> TextTranslateBatch(const Credentials &credentials, const std::vector<std::string> &texts,
                                             const std::string &source, const std::string &target)
 {
+    return TextTranslateBatch(credentials, texts, source, target, kDefaultUrl);
+}
+
+std::vector<std::string> TextTranslateBatch(const Credentials &credentials, const std::vector<std::string> &texts,
+                                            const std::string &source, const std::string &target,
+                                            const std::string &endpoint)
+{
     std::vector<std::string> results(texts.size());
     if (texts.empty() || !IsUsableCredentials(credentials) || source.empty() || target.empty())
         return results;
@@ -322,8 +329,13 @@ std::vector<std::string> TextTranslateBatch(const Credentials &credentials, cons
         }
 
         std::string response;
-        if (!PostForm(curl, kUrl, payload, response))
-            continue;
+        // 一批发不出去，后续批次多半是同一个原因（网络断了、密钥被拒、配额用尽），接着发
+        // 只会每个批次再赔上一次超时，把候选词刷新的延迟拉长。剩下的留空交给上层退避。
+        if (!PostForm(curl, endpoint, payload, response))
+        {
+            results.resize(begin);
+            break;
+        }
         const auto translated = ParseBatchResponse(response, end - begin);
         for (size_t i = begin; i < end; ++i)
             results[i] = translated[i - begin];

@@ -32,4 +32,10 @@ std::string BuildBatchSourceText(const std::vector<std::string> &texts, size_t b
 // failed. When the batch time budget runs out the result is shorter than texts.
 std::vector<std::string> TextTranslateBatch(const Credentials &credentials, const std::vector<std::string> &texts,
                                             const std::string &source, const std::string &target);
+
+// Same as above with an explicit endpoint. Production code never calls this; tests use it to point
+// at an address that refuses connections and check that the first failing batch stops the rest.
+std::vector<std::string> TextTranslateBatch(const Credentials &credentials, const std::vector<std::string> &texts,
+                                            const std::string &source, const std::string &target,
+                                            const std::string &endpoint);
 } // namespace AliyunMt

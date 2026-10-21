@@ -137,3 +137,14 @@ TEST_CASE(AliyunEmptyInputSendsNothing)
     // 凭据不可用时不发请求。
     REQUIRE_EQ(AliyunMt::TextTranslateBatch({}, {"你好"}, "zh", "en").size(), size_t(1));
 }
+
+// 第一批连不上就停：后面的批次不再各赔一次超时，结果截断在第一批之前。
+// 上层把「结果比请求短」当成没发出，不计失败退避。
+TEST_CASE(AliyunStopsAtTheFirstBatchThatCannotBeSent)
+{
+    const AliyunMt::Credentials credentials{"LTAIrealLookingId", "realLookingSecret"};
+    // 端口 1 上没有监听，连接立即被拒。
+    const std::vector<std::string> texts(120, "w");
+    const auto results = AliyunMt::TextTranslateBatch(credentials, texts, "zh", "en", "http://127.0.0.1:1");
+    REQUIRE(results.empty());
+}
