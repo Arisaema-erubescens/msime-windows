@@ -857,6 +857,93 @@ TEST_CASE(quanpin_autocorrect_keys_persist_and_legacy_key_stays_ignored)
     fs::remove_all(unique_root, ec);
 }
 
+// 四个纠错开关各自落盘、各自跨 InitImeConfig 存活。老配置只有两个 legacy 键时，
+// 漏字 / 多字两个新键按关闭处理（升级策略：不继承、默认关）。
+TEST_CASE(quanpin_autocorrect_deletion_and_insertion_keys_persist_independently)
+{
+    namespace fs = std::filesystem;
+    const fs::path unique_root =
+        test::TempRoot() / (L"msime-纠错拆分开关测试-" + std::to_wstring(GetCurrentProcessId()));
+    const fs::path local_app_data = unique_root / L"profile";
+    const fs::path data_dir = local_app_data / L"metasequoiaime";
+
+    std::error_code ec;
+    fs::remove_all(unique_root, ec);
+    fs::create_directories(data_dir, ec);
+    REQUIRE(!ec);
+    fs::copy_file(MSIME_DEFAULT_CONFIG_PATH, data_dir / L"config.default.toml", fs::copy_options::overwrite_existing,
+                  ec);
+    REQUIRE(!ec);
+
+    {
+        ScopedConfigLocation local_app_data_env(local_app_data);
+
+        InitImeConfig();
+        REQUIRE(fs::exists(data_dir / L"config.toml"));
+        // 四个开关出厂全关。
+        REQUIRE(!GetConfiguredQuanpinAutocorrectTransposition());
+        REQUIRE(!GetConfiguredQuanpinAutocorrectNeighbor());
+        REQUIRE(!GetConfiguredQuanpinAutocorrectDeletion());
+        REQUIRE(!GetConfiguredQuanpinAutocorrectInsertion());
+
+        // 落盘写入在本机沙箱里可能被拒绝（拒绝的是「替换已存在文件」那一步），与其它
+        // SetConfigured* 用例同类。写入失败时跳过 reload 断言，写入成功时四个键必须各自保持。
+        const bool wrote =
+            SetConfiguredQuanpinAutocorrectDeletion(true) && SetConfiguredQuanpinAutocorrectInsertion(true);
+        if (wrote)
+        {
+            InitImeConfig();
+            REQUIRE(!GetConfiguredQuanpinAutocorrectTransposition());
+            REQUIRE(!GetConfiguredQuanpinAutocorrectNeighbor());
+            REQUIRE(GetConfiguredQuanpinAutocorrectDeletion());
+            REQUIRE(GetConfiguredQuanpinAutocorrectInsertion());
+
+            // 反向：关掉其中一个，另一个不受影响。
+            if (SetConfiguredQuanpinAutocorrectDeletion(false))
+            {
+                InitImeConfig();
+                REQUIRE(!GetConfiguredQuanpinAutocorrectDeletion());
+                REQUIRE(GetConfiguredQuanpinAutocorrectInsertion());
+            }
+        }
+
+        // 落盘 / 重读的等价覆盖不依赖 SetConfigured*：直接写四键组合再 InitImeConfig，
+        // 证明四个键各自被读到、互不联动。这一段在本机沙箱下始终可跑。
+        {
+            const std::string four_keys = std::string("[quanpin]\nautocorrect_transposition = false\n"
+                                                      "autocorrect_neighbor = false\n"
+                                                      "autocorrect_deletion = true\n"
+                                                      "autocorrect_insertion = true\n");
+            std::ofstream config(data_dir / L"config.toml", std::ios::binary | std::ios::trunc);
+            REQUIRE(static_cast<bool>(config));
+            config.write(four_keys.data(), static_cast<std::streamsize>(four_keys.size()));
+            config.close();
+            InitImeConfig();
+            REQUIRE(!GetConfiguredQuanpinAutocorrectTransposition());
+            REQUIRE(!GetConfiguredQuanpinAutocorrectNeighbor());
+            REQUIRE(GetConfiguredQuanpinAutocorrectDeletion());
+            REQUIRE(GetConfiguredQuanpinAutocorrectInsertion());
+        }
+
+        // 升级路径：磁盘上只有两个 legacy 键，新键必须回到关闭，且不从 legacy 继承。
+        // 这一段只靠直接写文件 + InitImeConfig，不经 SetConfigured*，与沙箱无关。
+        const std::string legacy_only =
+            std::string("[quanpin]\nautocorrect_transposition = true\nautocorrect_neighbor = true\n");
+        {
+            std::ofstream config(data_dir / L"config.toml", std::ios::binary | std::ios::trunc);
+            REQUIRE(static_cast<bool>(config));
+            config.write(legacy_only.data(), static_cast<std::streamsize>(legacy_only.size()));
+        }
+        InitImeConfig();
+        REQUIRE(GetConfiguredQuanpinAutocorrectTransposition());
+        REQUIRE(GetConfiguredQuanpinAutocorrectNeighbor());
+        REQUIRE(!GetConfiguredQuanpinAutocorrectDeletion());
+        REQUIRE(!GetConfiguredQuanpinAutocorrectInsertion());
+    }
+
+    fs::remove_all(unique_root, ec);
+}
+
 namespace
 {
 // 与 ime_config_internal.h 的 kFuzzyPinyinRuleKeys 同一映射；这里是钉住它的测试副本。

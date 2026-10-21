@@ -669,6 +669,36 @@ TEST_CASE(QuanpinAutocorrectInsertionTableEntriesAreLegal)
     }
 }
 
+TEST_CASE(QuanpinAutocorrectSwitchMaskDerivationIsOneToOne)
+{
+    const auto mask = &quanpin::autocorrect_types_from_switches;
+    // Every switch alone maps to exactly its own bit: no switch implies another.
+    REQUIRE_EQ(mask(false, false, false, false), 0u);
+    REQUIRE_EQ(mask(true, false, false, false), quanpin::kAutocorrectTransposition);
+    REQUIRE_EQ(mask(false, true, false, false), quanpin::kAutocorrectNeighbor);
+    REQUIRE_EQ(mask(false, false, true, false), quanpin::kAutocorrectDeletion);
+    REQUIRE_EQ(mask(false, false, false, true), quanpin::kAutocorrectInsertion);
+    // All four on is the full mask, identical to the legacy product mask.
+    REQUIRE_EQ(mask(true, true, true, true), 0xfu);
+    // The two legacy switches alone no longer drag the deletion/insertion bits in.
+    REQUIRE_EQ(mask(true, true, false, false), quanpin::kAutocorrectTransposition | quanpin::kAutocorrectNeighbor);
+    REQUIRE_EQ(mask(true, false, true, false), quanpin::kAutocorrectTransposition | quanpin::kAutocorrectDeletion);
+    // Every subset of the four switches is reachable, one bit per switch.
+    for (unsigned subset = 0; subset < 16; ++subset)
+    {
+        const unsigned derived = mask((subset & 1u) != 0, (subset & 2u) != 0, (subset & 4u) != 0, (subset & 8u) != 0);
+        REQUIRE_EQ(derived, subset);
+    }
+    // The alias layer still keys on the transposition/neighbor switches only: a
+    // deletion- or insertion-only mask must not switch it on.
+    REQUIRE(!quanpin::correction_aliases_enabled(0u));
+    REQUIRE(!quanpin::correction_aliases_enabled(quanpin::kAutocorrectDeletion));
+    REQUIRE(!quanpin::correction_aliases_enabled(quanpin::kAutocorrectInsertion));
+    REQUIRE(!quanpin::correction_aliases_enabled(quanpin::kAutocorrectDeletion | quanpin::kAutocorrectInsertion));
+    REQUIRE(quanpin::correction_aliases_enabled(quanpin::kAutocorrectTransposition));
+    REQUIRE(quanpin::correction_aliases_enabled(quanpin::kAutocorrectNeighbor));
+}
+
 TEST_CASE(QuanpinAutocorrectCutTypeBitSwitchMatrix)
 {
     const unsigned none = 0;
@@ -682,11 +712,8 @@ TEST_CASE(QuanpinAutocorrectCutTypeBitSwitchMatrix)
     // neighbour pair (kQwertyNeighbors['a'] == "qwsz"), and the generated space
     // explains "sahng" as "sa'ang" under the neighbour bit alone. The cases below
     // used to pin that one-to-one relation and are kept, with the widened reading
-    // spelled out. The bare bit used here is unreachable in the product: engine.cpp
-    // assembles the deletion and insertion bits alongside the legacy switches, so
-    // the only non-zero masks are 0xd/0xe/0xf. That makes THIS row untriggerable by
-    // a user; it does not make the generated space unreachable, because 0xe/0xf
-    // still carry the neighbour bit and all three carry the insertion bit.
+    // spelled out. Every single-switch mask below is product reachable now (four
+    // independent switches), so this row is a live user state rather than a probe.
     // "sahng" is a transposition fix; only that bit may correct it.
     REQUIRE(quanpin::autocorrect_cut("sahng", none).empty());
     REQUIRE_EQ(quanpin::join_segments(quanpin::autocorrect_cut("sahng", transposition_only)), std::string("shang"));
@@ -927,6 +954,29 @@ TEST_CASE(QuanpinAutocorrectCutDeletionBitSwitchMatrix)
     REQUIRE(quanpin::autocorrect_cut("shabg", deletion_only).empty());
 }
 
+// The four switches are independent, so each single-switch mask is product reachable
+// now. "sahng" is a transposition-shaped typo: the cut tables do not rewrite it to
+// "shang" under a deletion- or insertion-only mask (deletion reads it as sa + hang,
+// insertion finds nothing), and the spelling-alias layer -- the only thing that turns
+// "sahng" into "shang" -- stays off because it keys on the transposition/neighbor
+// switches (correction_aliases_enabled). Both halves are asserted at the dictionary
+// level below and in QuanpinDictionaryAutocorrectSingleSwitchMasksStayIndependent.
+TEST_CASE(QuanpinAutocorrectCutSingleSwitchMasksStayIndependent)
+{
+    const unsigned deletion_only = quanpin::kAutocorrectDeletion;
+    const unsigned insertion_only = quanpin::kAutocorrectInsertion;
+
+    REQUIRE_EQ(quanpin::join_segments(quanpin::autocorrect_cut("shng", deletion_only)), std::string("shang"));
+    REQUIRE(quanpin::autocorrect_cut("shng", insertion_only).empty());
+
+    REQUIRE_EQ(quanpin::join_segments(quanpin::autocorrect_cut("sjhang", insertion_only)), std::string("shang"));
+    REQUIRE(quanpin::autocorrect_cut("sjhang", deletion_only).empty());
+
+    REQUIRE(!quanpin::correction_aliases_enabled(deletion_only));
+    REQUIRE(!quanpin::correction_aliases_enabled(insertion_only));
+    REQUIRE(!quanpin::correction_aliases_enabled(deletion_only | insertion_only));
+}
+
 TEST_CASE(QuanpinAutocorrectCutKbestRanksAmbiguousKeys)
 {
     const unsigned both = quanpin::kAutocorrectTransposition | quanpin::kAutocorrectNeighbor;
@@ -1126,6 +1176,51 @@ TEST_CASE(QuanpinDictionaryAutocorrectInsertionTypo)
     const auto off_alias = dictionary.query("sahng", "", 0u);
     REQUIRE(std::none_of(off_alias.begin(), off_alias.end(),
                          [](const WordItem &item) { return !item.corrected_from.empty(); }));
+}
+
+// 单开一个非 legacy 开关（漏字 / 多字）时该开关自己那类手误能纠，而 legacy 的手误形状
+// 不受影响：sahng 是换位形状，别名层只看换位 / 邻键两位（correction_aliases_enabled），
+// 所以 deletion-only / insertion-only 下它不能被改写成 shang。这正是拆分开关要保证的
+// 「只开哪个就只纠哪种」。探针库里的 tbl_4_s 有一条字面整词（撒谎那个，键 shng），
+// 与上面 mask=0 的用例同源，不影响纠错标记的断言。
+TEST_CASE(QuanpinDictionaryAutocorrectSingleSwitchMasksStayIndependent)
+{
+    const auto db_path = CreateAutocorrectDatabase();
+    QuanpinDictionary dictionary(test::Utf8(db_path));
+    const unsigned deletion_only = quanpin::kAutocorrectDeletion;
+    const unsigned insertion_only = quanpin::kAutocorrectInsertion;
+
+    // 漏字：只开 deletion 就纠 shng -> shang，且带 corrected_from。
+    const auto deletion = dictionary.query("shng", "", deletion_only);
+    REQUIRE(!deletion.empty());
+    REQUIRE_EQ(deletion.front().word, std::string("上"));
+    REQUIRE_EQ(deletion.front().corrected_from, std::string("shng"));
+
+    // 多字：只开 insertion 就纠 sjhang -> shang（j 是 h 的邻键）。
+    const auto insertion = dictionary.query("sjhang", "", insertion_only);
+    REQUIRE(!insertion.empty());
+    REQUIRE_EQ(insertion.front().word, std::string("上"));
+    REQUIRE_EQ(insertion.front().corrected_from, std::string("sjhang"));
+
+    // 交叉：漏字闸门不放过多字形状，多字闸门也不放过漏字形状。
+    const auto insertion_shaped = dictionary.query("sjhang", "", deletion_only);
+    REQUIRE(std::none_of(insertion_shaped.begin(), insertion_shaped.end(),
+                         [](const WordItem &item) { return item.corrected_from == "sjhang"; }));
+    const auto deletion_shaped = dictionary.query("shng", "", insertion_only);
+    REQUIRE(std::none_of(deletion_shaped.begin(), deletion_shaped.end(),
+                         [](const WordItem &item) { return item.corrected_from == "shng"; }));
+
+    // 别名层不随这两个开关打开：sahng 在两个单开关掩码下都不得被改写成 shang。
+    for (const unsigned mask : {deletion_only, insertion_only, deletion_only | insertion_only})
+    {
+        const auto sahng = dictionary.query("sahng", "", mask);
+        REQUIRE(std::none_of(sahng.begin(), sahng.end(),
+                             [](const WordItem &item) { return item.corrected_from == "sahng" && item.word == "上"; }));
+    }
+    // 换位开关打开时同一输入照旧纠正，证明上一条断言不是「sahng 本来就纠不了」。
+    const auto transposition = dictionary.query("sahng", "", quanpin::kAutocorrectTransposition);
+    REQUIRE(std::any_of(transposition.begin(), transposition.end(),
+                        [](const WordItem &item) { return item.corrected_from == "sahng" && item.word == "上"; }));
 }
 
 TEST_CASE(QuanpinDictionaryAutocorrectAmbiguousDisambiguation)

@@ -10,8 +10,9 @@ namespace
 // rebuild (input_session_composition.cpp) and the server session adapter cannot drift.
 unsigned autocorrect_types_from_request(const QueryRequest &request)
 {
-    return quanpin::autocorrect_types_from_switches(request.enable_quanpin_autocorrect_transposition,
-                                                    request.enable_quanpin_autocorrect_neighbor);
+    return quanpin::autocorrect_types_from_switches(
+        request.enable_quanpin_autocorrect_transposition, request.enable_quanpin_autocorrect_neighbor,
+        request.enable_quanpin_autocorrect_deletion, request.enable_quanpin_autocorrect_insertion);
 }
 } // namespace
 

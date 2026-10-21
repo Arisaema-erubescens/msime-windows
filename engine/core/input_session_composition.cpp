@@ -215,8 +215,9 @@ std::string ResolveQuanpinCloudCacheKey(const QueryRequest &request)
 // correction space as the query.
 unsigned QuanpinAutocorrectTypes(const QueryRequest &request)
 {
-    return quanpin::autocorrect_types_from_switches(request.enable_quanpin_autocorrect_transposition,
-                                                    request.enable_quanpin_autocorrect_neighbor);
+    return quanpin::autocorrect_types_from_switches(
+        request.enable_quanpin_autocorrect_transposition, request.enable_quanpin_autocorrect_neighbor,
+        request.enable_quanpin_autocorrect_deletion, request.enable_quanpin_autocorrect_insertion);
 }
 
 std::string QuanpinLettersWithoutDelimiters(const std::string &text)

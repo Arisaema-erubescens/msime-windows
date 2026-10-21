@@ -57,37 +57,34 @@ std::string strip_active_helpcodes_with_cases(const std::string &raw_input, cons
 std::vector<Segments> sparse_pinyin_fallback_segments(const Segments &segments);
 
 // Autocorrection type bits passed to autocorrect_cut. One mask lets the dictionary
-// layer gate the whole feature with a single value while each type stays
-// independently toggleable (quanpin.autocorrect_transposition / autocorrect_neighbor).
+// layer gate the whole feature with a single value. Each bit has its own user-facing
+// switch (quanpin.autocorrect_transposition / autocorrect_neighbor /
+// autocorrect_deletion / autocorrect_insertion) and none of them implies another.
 inline constexpr unsigned kAutocorrectTransposition = 1u << 0;
 inline constexpr unsigned kAutocorrectNeighbor = 1u << 1;
-// Deletion (one dropped letter) corrections. The server side wires this bit to
-// the two existing autocorrect switches (either one on also enables deletion,
-// design D2); it stays a separate bit so a future config key can gate it alone.
+// Deletion (one dropped letter) corrections, e.g. shng -> shang.
 inline constexpr unsigned kAutocorrectDeletion = 1u << 2;
-// Insertion (one extra QWERTY-neighbor letter) corrections. Same linkage model
-// as deletion: the legacy switches carry this bit too (design D4 of the
-// insertion task); the bit stays independent for a future config key.
+// Insertion (one extra QWERTY-neighbor letter) corrections, e.g. sjhang -> shang.
 inline constexpr unsigned kAutocorrectInsertion = 1u << 3;
 
-// 开关 -> 掩码的唯一实现。用户可见的开关只有换位与邻键两个，但产品语义是「任一开关
-// 打开即开启整套纠错」：设计 D2 让打开纠错也带上漏字位（用户的意图是「修手误」，漏字
-// 同属手误），D4 再把多字位一并带上。两个开关都关时恒为 0，绝不返回只带后两位的掩码。
+// 开关 -> 掩码的唯一实现。四个用户可见开关一一映射到各自的位，互不联动：开哪个开关
+// 就只有哪个位，全关时恒为 0。产品可达的掩码因此是四位（0x1 / 0x2 / 0x4 / 0x8）的全部
+// 组合，包括只带漏字位或多字位的掩码。
 //
 // 调用点（都只是适配，不再各写一份规则）：`engine.cpp` 的
-// autocorrect_types_from_request 把 QueryRequest 的两个 bool 传进来；
+// autocorrect_types_from_request 把 QueryRequest 的四个 bool 传进来；
 // `input_session_composition.cpp` 的 QuanpinAutocorrectTypes 同理给预编辑用；
-// `server/src/session/engine_input_session.cpp` 把两个配置项传进来再下发给会话。
-// 产品可达的非零掩码因此只有 0xd / 0xe / 0xf。
-inline constexpr unsigned autocorrect_types_from_switches(const bool transposition, const bool neighbor)
+// `server/src/session/engine_input_session.cpp` 把四个配置项传进来再下发给会话。
+inline constexpr unsigned autocorrect_types_from_switches(const bool transposition, const bool neighbor,
+                                                          const bool deletion, const bool insertion)
 {
-    const unsigned legacy = (transposition ? kAutocorrectTransposition : 0u) | (neighbor ? kAutocorrectNeighbor : 0u);
-    return legacy == 0 ? 0u : legacy | kAutocorrectDeletion | kAutocorrectInsertion;
+    return (transposition ? kAutocorrectTransposition : 0u) | (neighbor ? kAutocorrectNeighbor : 0u) |
+           (deletion ? kAutocorrectDeletion : 0u) | (insertion ? kAutocorrectInsertion : 0u);
 }
 
 // 掩码下手误别名层（cut_pinyin_by_mode 的 include_correction_aliases）是否生效。
-// 用户可见的开关只有换位与邻键两位，删除 / 插入位只随它们联动（见
-// autocorrect_types_from_switches），所以只带后两位的掩码按「关」处理。方案、词典、
+// 别名层是「换位形状 / 多一个 h / 漏一个 g」这类拼写层改写，只归换位与邻键两个开关管，
+// 漏字 / 多字开关独立后也不带别名层：只带后两位的掩码按「关」处理。方案、词典、
 // 辅助码与排序上下文 key 都按这一条判断，避免各层对同一个掩码给出不同的切分。
 inline constexpr bool correction_aliases_enabled(unsigned autocorrect_types)
 {
@@ -210,13 +207,11 @@ Segments autocorrect_cut(const std::string &pinyin, unsigned autocorrect_types);
 // reachable through the neighbour bit alone -- "sahng" reads as "sa'ang", "shng"
 // as "sang". Callers must not read a bit as "only this family of typo".
 //
-// Scope of that: the BARE-bit readings above are unreachable in the product,
-// because engine.cpp always pairs the deletion and insertion bits with the legacy
-// switches, so the only masks that ever occur are 0 / 0xd / 0xe / 0xf. The
-// generated space itself is NOT unreachable: 0xe and 0xf still carry the
-// neighbour bit, so it does add user-visible recall (far substitutions under
-// 0xe/0xf). That recall is the intended gain, pinned end-to-end by
-// engine/tests/src/test_input_session.cpp ("shatg" -> shang).
+// Scope of that: the four switches are independent, so every combination of the
+// four bits (0..0xf) is a mask a user can reach -- the bare-bit readings above are
+// live user states now, not probes. The generated space therefore also adds
+// user-visible recall under the neighbour bit (far substitutions), pinned
+// end-to-end by engine/tests/src/test_input_session.cpp ("shatg" -> shang).
 // The head+jianpin-tail fallback in quanpin_dictionary.cpp runs the head with the
 // full mask too, so a neighbour-shaped typo in the head composes with a jianpin
 // tail ("shabgz" -> shang + z) and is ranked by edit cost exactly like the

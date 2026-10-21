@@ -243,11 +243,11 @@ SeriesQueryResolution resolve_series_query(const std::string &raw_input, const q
             // The neighbour bit is not just the static table, though: it also
             // carries the generated far-substitution space (see quanpin_utils.h),
             // and those reads must NOT compose. A correctly spelled head would be
-            // rewritten for no reason: "huanzh" (huan + zh) reads huang + h under
-            // 0xe/0xf because the generated z->g substitution turns the head "huanz"
-            // into huang. The composed reading takes over the segmentation and the
-            // plain one is only reachable as an unmarked alternative afterwards, so
-            // the cost tier cannot arbitrate against it. Accept only a pure-static
+            // rewritten for no reason: "huanzh" (huan + zh) reads huang + h when the
+            // neighbour switch is on because the generated z->g substitution turns the
+            // head "huanz" into huang. The composed reading takes over the segmentation
+            // and the plain one is only reachable as an unmarked alternative afterwards,
+            // so the cost tier cannot arbitrate against it. Accept only a pure-static
             // top cut below; k-best static priority makes a generated front exactly
             // "no static reading explains the head", so moving on to a longer tail
             // (or no composition at all) keeps the plain segmentation for inputs the

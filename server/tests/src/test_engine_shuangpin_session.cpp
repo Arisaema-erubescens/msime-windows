@@ -249,6 +249,57 @@ TEST_CASE(EngineSessionAppliesFuzzyPinyinRulesForQuanpinAndShuangpin)
     REQUIRE(!GetConfiguredFuzzyPinyinEnabled());
 }
 
+// 四个纠错开关各写各的键、各读各的键，互不联动：只开漏字 / 多字时 legacy 两位不动，
+// 且 InitImeConfig 重读后保持。写入失败时（本机沙箱拒绝替换已存在文件，与其它
+// SetConfigured* 用例同类）跳过落盘断言，内存值与掩码派生仍由下面的断言覆盖；
+// 引擎行为在 test_quanpin_scheme.cpp 的 QuanpinAutocorrectSwitchMaskDerivationIsOneToOne /
+// QuanpinDictionaryAutocorrectSingleSwitchMasksStayIndependent 断言。
+TEST_CASE(EngineSessionQuanpinAutocorrectSwitchesRoundTripIndependently)
+{
+    ScopedConfigRoot config_root;
+    InitImeConfig();
+    REQUIRE(!GetConfiguredQuanpinAutocorrectTransposition());
+    REQUIRE(!GetConfiguredQuanpinAutocorrectNeighbor());
+    REQUIRE(!GetConfiguredQuanpinAutocorrectDeletion());
+    REQUIRE(!GetConfiguredQuanpinAutocorrectInsertion());
+
+    // 四个开关一一映射到四个位，互不联动（不落盘，任何环境都成立）。
+    REQUIRE_EQ(quanpin::autocorrect_types_from_switches(
+                   GetConfiguredQuanpinAutocorrectTransposition(), GetConfiguredQuanpinAutocorrectNeighbor(),
+                   GetConfiguredQuanpinAutocorrectDeletion(), GetConfiguredQuanpinAutocorrectInsertion()),
+               0u);
+
+    if (SetConfiguredQuanpinAutocorrectDeletion(true) && SetConfiguredQuanpinAutocorrectInsertion(true))
+    {
+        REQUIRE(!GetConfiguredQuanpinAutocorrectTransposition());
+        REQUIRE(!GetConfiguredQuanpinAutocorrectNeighbor());
+        REQUIRE_EQ(quanpin::autocorrect_types_from_switches(
+                       GetConfiguredQuanpinAutocorrectTransposition(), GetConfiguredQuanpinAutocorrectNeighbor(),
+                       GetConfiguredQuanpinAutocorrectDeletion(), GetConfiguredQuanpinAutocorrectInsertion()),
+                   quanpin::kAutocorrectDeletion | quanpin::kAutocorrectInsertion);
+
+        InitImeConfig();
+        REQUIRE(!GetConfiguredQuanpinAutocorrectTransposition());
+        REQUIRE(!GetConfiguredQuanpinAutocorrectNeighbor());
+        REQUIRE(GetConfiguredQuanpinAutocorrectDeletion());
+        REQUIRE(GetConfiguredQuanpinAutocorrectInsertion());
+
+        // 收尾：两个开关关回去，不留脏状态给进程内后续用例。写回同样可能被沙箱拒绝，
+        // 失败时用 InitImeConfig 从磁盘收敛（上面那段已证明磁盘读回是「关」以外的独立路径）。
+        if (SetConfiguredQuanpinAutocorrectDeletion(false) && SetConfiguredQuanpinAutocorrectInsertion(false))
+        {
+            InitImeConfig();
+            REQUIRE(!GetConfiguredQuanpinAutocorrectDeletion());
+            REQUIRE(!GetConfiguredQuanpinAutocorrectInsertion());
+        }
+    }
+    // 不论上面的落盘分支是否走到，内存值都必须能被 InitImeConfig 从隔离配置收敛回全关。
+    // 走到这里时磁盘上只有测试自己写过的键，写回失败也不会残留「开」的文件状态。
+    InitImeConfig();
+    REQUIRE(!GetConfiguredQuanpinAutocorrectTransposition());
+    REQUIRE(!GetConfiguredQuanpinAutocorrectNeighbor());
+}
+
 TEST_CASE(CloudCandidateNeverEntersCreatingWordMode)
 {
     REQUIRE(!FanyImeIpc::ShouldEnterCreatingWord(CandidateSource::CloudSuggestion, true));
