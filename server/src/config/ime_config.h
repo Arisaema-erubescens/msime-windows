@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 struct VoiceInputConfig
@@ -70,6 +71,8 @@ struct AiAssistantConfig
     // Active provider id. The legacy set is deepseek | openai | siliconflow | groq | custom; ids
     // beyond that come from the provider registry in the data directory.
     std::string provider = "deepseek";
+    // 生成式模式下最后选过的服务商。provider 切到 jev 时它保持不变，切回生成式时用它恢复。
+    std::string generate_provider = "deepseek";
     std::string token;
     std::map<std::string, std::string> tokens;
     std::string endpoint = "https://api.deepseek.com/chat/completions";
@@ -79,6 +82,9 @@ struct AiAssistantConfig
     // slots alive for rollback; requests resolve through `active`.
     std::vector<AiAssistant::AiProvider> providers;
     AiAssistant::AiProvider active;
+    // 这两份默认值的唯一权威在 ai_provider_store.cpp 的 BuiltinDefaults()，设置页也从那里取。
+    // 结构体默认成员初始化器没法调用函数，只能在这里再写一遍；tests/src/test_ai_provider_store.cpp
+    // 的 ai_provider_store_defaults_match_the_config_struct 用例钉住两份一致。
     std::map<std::string, std::string> endpoints{
         {"deepseek", "https://api.deepseek.com/chat/completions"},
         {"openai", "https://api.openai.com/v1/chat/completions"},
@@ -150,6 +156,14 @@ struct TencentTmtConfig
     std::string target_language = "en";
 };
 
+struct AliyunMtConfig
+{
+    bool enabled = false;
+    // 键名沿用 secret_id / secret_key，才会被 IsCredentialKey 加密保存。
+    std::string secret_id;
+    std::string secret_key;
+};
+
 struct CustomTranslationConfig
 {
     bool enabled = false;
@@ -168,14 +182,15 @@ struct NiuTransConfig
 };
 
 // 候选词翻译读取的整份配置快照。provider 来自 [translation].provider，旧配置没有这个键时由
-// [tencent_tmt]/[custom_translation]/[niutrans] 的 enabled 布尔在加载时推导；其余字段是各提供方
+// [tencent_tmt]/[aliyun_mt]/[custom_translation]/[niutrans] 的 enabled 布尔在加载时推导；其余字段是各提供方
 // 配置的副本，ai 复用 AI 辅助当前服务商。配置加载和相关设置写入后整份替换，翻译 worker 与
 // 候选线程只读快照，不直接读会被重载改写的各段全局字符串。
 struct TranslationConfig
 {
-    // tencent | niutrans | custom | ai
+    // tencent | aliyun | niutrans | custom | ai
     std::string provider = "tencent";
     TencentTmtConfig tencent;
+    AliyunMtConfig aliyun;
     CustomTranslationConfig custom;
     NiuTransConfig niutrans;
     struct Ai
@@ -712,6 +727,9 @@ bool SetConfiguredTencentTmtString(const std::string &key, const std::string &va
 const CustomTranslationConfig &GetConfiguredCustomTranslation();
 bool SetConfiguredCustomTranslationBool(const std::string &key, bool value);
 bool SetConfiguredCustomTranslationString(const std::string &key, const std::string &value);
+const AliyunMtConfig &GetConfiguredAliyunMt();
+bool SetConfiguredAliyunMtBool(const std::string &key, bool value);
+bool SetConfiguredAliyunMtString(const std::string &key, const std::string &value);
 const NiuTransConfig &GetConfiguredNiuTrans();
 bool SetConfiguredNiuTransBool(const std::string &key, bool value);
 bool SetConfiguredNiuTransString(const std::string &key, const std::string &value);
@@ -728,5 +746,8 @@ const FrequencyAdjustmentConfig &GetConfiguredFrequencyAdjustment();
 bool SetConfiguredFrequencyAdjustmentString(const std::string &key, const std::string &value);
 bool SetConfiguredFrequencyAdjustmentInt(const std::string &key, int value);
 bool SetConfiguredAiAssistantString(const std::string &key, const std::string &value);
+// 按服务商写 endpoint / model：落槽位键 endpoint_<id> / model_<id>，单值键只在目标就是活动服务商时改写。
+// 设置页在多提供商之间切换时用它，免得"写单值键"被当成写给后端此刻的活动服务商。
+bool SetConfiguredAiAssistantProviderValue(std::string_view provider, std::string_view field, const std::string &value);
 bool SetConfiguredAiAssistantBool(const std::string &key, bool value);
 bool SetConfiguredAiAssistantInt(const std::string &key, int value);

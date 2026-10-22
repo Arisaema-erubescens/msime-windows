@@ -37,9 +37,12 @@ std::string Fetch(const AiAssistant::Request &request, uint64_t generation, Jev:
 {
     const auto &config = request.config;
     const std::string token = AiAssistant::RequestToken(config.provider, config.token);
-    if (!config.enabled || (AiAssistant::ProviderUsesToken(config.provider) && token.empty()) ||
-        config.endpoint.empty() || config.model.empty() || request.pinyin_segments.empty() ||
-        g_generation.load() != generation)
+    // 自建或转发的选择器可以不要 Key（如 OpenCode Zen 的免费模型），Jev 的 Token 交给 Jev::Client 判断；
+    // Ollama 这类本机服务本来就不鉴权，ProviderUsesToken 直接放行。
+    const bool token_missing =
+        token.empty() && config.provider != "jev" && AiAssistant::ProviderUsesToken(config.provider);
+    if (!config.enabled || token_missing || config.endpoint.empty() || config.model.empty() ||
+        request.pinyin_segments.empty() || g_generation.load() != generation)
     {
         (void)0;
         return {};
