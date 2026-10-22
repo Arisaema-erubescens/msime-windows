@@ -108,6 +108,20 @@ inline constexpr bool correction_aliases_enabled(unsigned autocorrect_types)
  * with the same edge count. The engine never trades one extra correction for a
  * lower total weight.
  */
+// 纠错键的长度上限。生成器（server/scripts/generate_quanpin_autocorrect.py 的
+// MAX_KEY_LENGTH）与 autocorrect_cut_kbest 的逐片扫描都用它，两边必须一致：最长
+// 合法音节是 6 字母，更长的键在任何查询路径上都查不到（k-best 扫描封顶 6，长句的
+// 容错槽位也只会切出 <=6 的音节）。下限 3 只由生成器的 MIN_KEY_LENGTH 把关——运行期
+// 对更短的键本来就不做改写（2 字母串属于简拼空间），这边没有可表达它的约束。
+// 漂移不会编译失败，只会静默少召回或多召回，改这里要连生成器一起改。
+inline constexpr std::size_t kAutocorrectMaxKeyLength = 6;
+
+// 对齐筛选用的过采样上界：legal_input_correction_cuts 和 correction_cut_for_reading
+// 都是「先多取几条 k-best，再从中筛出目标读音」，9 是经验上够筛的值。
+// 与 quanpin_dictionary.cpp 的 kAutocorrectCutKBest（生产路径上真正交给查询层的 k）
+// 不是一回事，不要混用：那个决定召回多少条备选切分，这个只决定筛选的视野。
+inline constexpr std::size_t kAutocorrectAlignKBest = 9;
+
 inline constexpr int kAutocorrectTranspositionWeight = 10;
 inline constexpr int kAutocorrectDeletionWeight = 11;
 // Between deletion and neighbor: insertion slips are estimated rarer than
@@ -271,9 +285,6 @@ enum class FaultSlotKind
     // 多字母非法串（rfa、neicjiaol）：无基础读法；词格可用纠错表目标音节在此位开头。
     Fault,
 };
-
-// 按切段文本分类槽位：intact 集合内为 Determining，单字母为 SingleInitial，其余 Fault。
-FaultSlotKind fault_slot_kind(const std::string &piece);
 
 struct FaultSlot
 {
