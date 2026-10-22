@@ -273,34 +273,38 @@ struct AboutState
     std::shared_ptr<Hideable> statusBox;
 };
 
-// 下载结束后恢复按钮并给出结果。成功时直接打开安装包：它已经校验过，接下来是 UAC
-// 和 Inno Setup 自己的界面，每一步仍由用户确认。失败时只报状态，用户可以再用弹窗里
-// 的「前往下载」走浏览器。
-void FinishUpdateDownload(const std::shared_ptr<AboutState> &state, const std::string &installer_path,
-                          const std::string &message)
+// 收尾：恢复按钮，把结论写给用户看。下载版复用它。
+inline void FinishUpdateDownload(const std::shared_ptr<AboutState> &state, const bool ok, const std::wstring &message)
 {
     state->check->SetDisabled(false);
     state->check->SetText(L"检查更新");
+    state->status->SetText(message);
+    state->status->SetRole(ok ? TextRole::Accent : TextRole::Danger);
+    state->statusBox->SetVisible(true);
+}
+
+// 下载结束后恢复按钮并给出结果。成功时先用清单摘要重新核对一遍磁盘上的文件，
+// 再交给系统打开：它已经校验过，接下来是 UAC 和 Inno Setup 自己的界面，每一步仍由
+// 用户确认。重核对是为了堵住「校验完成」到「用户点 UAC」之间被替换的窗口。
+void FinishUpdateDownload(const std::shared_ptr<AboutState> &state, const std::string &installer_path,
+                          const std::string &expected_digest, const std::string &message)
+{
     if (installer_path.empty())
     {
-        state->status->SetText(Widen(message.empty() ? "下载失败" : message));
-        state->status->SetRole(TextRole::Danger);
-        state->statusBox->SetVisible(true);
+        FinishUpdateDownload(state, false, Widen(message.empty() ? "下载失败" : message));
         return;
     }
-    const std::wstring path = Widen(installer_path);
+    const std::filesystem::path path = std::filesystem::u8path(installer_path);
+    if (!update_download::FileMatchesDigest(path, expected_digest))
+    {
+        FinishUpdateDownload(state, false, L"安装包在打开前核对失败，请重试");
+        return;
+    }
     const HINSTANCE opened = ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     if (reinterpret_cast<INT_PTR>(opened) <= 32)
-    {
-        state->status->SetText(L"安装包已下载，但无法自动打开，请到数据目录的 updates 文件夹里手动运行。");
-        state->status->SetRole(TextRole::Danger);
-    }
+        FinishUpdateDownload(state, false, L"安装包已下载，但无法自动打开，请重试");
     else
-    {
-        state->status->SetText(L"安装包已下载并通过校验，已打开安装程序");
-        state->status->SetRole(TextRole::Accent);
-    }
-    state->statusBox->SetVisible(true);
+        FinishUpdateDownload(state, true, L"安装包已下载并通过校验，已打开安装程序");
 }
 
 void ShowUpdateDialog(PageContext &context, const Version &latest, const std::string &releaseUrl,
@@ -411,12 +415,12 @@ void DownloadUpdate(PageContext &context, const std::shared_ptr<AboutState> &sta
             }
             if (!valid)
             {
-                FinishUpdateDownload(state, std::string(), "检查更新失败，请稍后重试");
+                FinishUpdateDownload(state, false, L"检查更新失败，请稍后重试");
                 return;
             }
             if (CompareVersions(latest, current) <= 0)
             {
-                FinishUpdateDownload(state, std::string(), "已是最新版本");
+                FinishUpdateDownload(state, true, L"已是最新版本");
                 return;
             }
 
@@ -452,17 +456,33 @@ void DownloadUpdate(PageContext &context, const std::shared_ptr<AboutState> &sta
                     if (result.outcome == update_download::Outcome::Ok)
                     {
                         update_download::PruneOldInstallers(request.directory, request.installer_name);
-                        return std::string("OK\n") + result.path.u8string();
+                        // 四段结果：状态、路径、摘要、说明，用换行分隔。
+                        return std::string("ok\n") + result.path.u8string() + "\n" + request.installer_sha256 + "\n";
                     }
-                    return std::string("ERR\n") + result.message;
+                    return std::string("err\n\n\n") + result.message;
                 },
                 [weak](const std::string &encoded) {
                     const std::shared_ptr<AboutState> locked = weak.lock();
                     if (!locked)
                         return;
-                    const bool ok = encoded.rfind("OK\n", 0) == 0;
-                    const std::string payload = encoded.size() > 3 ? encoded.substr(3) : std::string();
-                    FinishUpdateDownload(locked, ok ? payload : std::string(), ok ? std::string() : payload);
+                    // 四段：状态、路径、摘要、说明。状态不是 ok 时按失败收尾。
+                    const auto next = [&encoded](size_t &start) {
+                        const size_t end = encoded.find('\n', start);
+                        const std::string field =
+                            encoded.substr(start, end == std::string::npos ? std::string::npos : end - start);
+                        start = end == std::string::npos ? encoded.size() : end + 1;
+                        return field;
+                    };
+                    size_t cursor = 0;
+                    const std::string status = next(cursor);
+                    const std::string path = next(cursor);
+                    const std::string digest = next(cursor);
+                    const std::string note = cursor < encoded.size() ? encoded.substr(cursor) : std::string();
+                    if (status == "ok")
+                        FinishUpdateDownload(locked, path, digest, note);
+                    else
+                        FinishUpdateDownload(locked, std::string(), std::string(),
+                                             note.empty() ? std::string("下载失败") : note);
                 });
         });
 }

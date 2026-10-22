@@ -1,6 +1,5 @@
 #include "settings/native/native_settings_update_download.h"
 
-#include "utils/common_utils.h"
 #include "utils/network_proxy.h"
 
 #include <Windows.h>
@@ -263,14 +262,18 @@ Attempt FetchOnce(const std::string &url, const std::filesystem::path &target, C
         attempt.bytes += read;
 
         // 首段测速。收到足够样本或窗口结束就下判决，测速期间的数据不丢，继续使用。
+        // 用毫秒算，不用整数秒：按秒取整会让门槛随样本量漂移，一条恰好卡在 50 KB/s
+        // 附近的连接可能因为取整被判成慢。
         if (probing)
         {
-            const std::uint64_t probe_elapsed = ElapsedSeconds(probe_started);
+            const auto probe_ms =
+                (std::max)(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - probe_started).count(),
+                           std::int64_t{500});
             const bool enough_sample = attempt.bytes >= kProbeMinBytes;
-            if (enough_sample || probe_elapsed >= kProbeSeconds)
+            if (enough_sample || probe_ms >= static_cast<std::int64_t>(kProbeSeconds * 1000))
             {
-                const std::uint64_t span = (std::max)(probe_elapsed, std::uint64_t{1});
-                if (attempt.bytes / span < kProbeFloorBytesPerSecond)
+                const std::uint64_t bytes = attempt.bytes;
+                if (bytes * 1000 < kProbeFloorBytesPerSecond * static_cast<std::uint64_t>(probe_ms))
                 {
                     attempt.message = "下载速度低于 50 KB/s";
                     ok = false;
@@ -340,10 +343,24 @@ std::vector<std::string> ChannelUrls(const std::string &release_url, const std::
 
 std::filesystem::path DefaultDirectory()
 {
-    const std::wstring data = CommonUtils::get_ime_data_path_w();
-    if (data.empty())
-        return {};
-    return std::filesystem::path(data) / L"updates";
+    // 放在用户临时目录下，不是数据目录：数据目录是中等完整性、按安装器设置可写的，
+    // 从这里拉起的 exe 在「校验完成」到「用户点 UAC」之间可能被同机其他进程替换。
+    // 临时目录再套一层本进程唯一的子目录，让替换没有稳定的落脚点。
+    static const std::filesystem::path directory = [] {
+        std::wstring base(MAX_PATH, L'\0');
+        const DWORD length = GetTempPathW(static_cast<DWORD>(base.size()), base.data());
+        base.resize(length == 0 || length >= base.size() ? 0 : length);
+        if (base.empty())
+            return std::filesystem::path();
+
+        // 子目录名在本进程内固定，重试复用同一个路径；进程重启换一个新的。
+        LARGE_INTEGER counter{};
+        QueryPerformanceCounter(&counter);
+        const std::wstring name = L"MetasequoiaImeUpdate-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
+                                  std::to_wstring(static_cast<unsigned long long>(counter.QuadPart));
+        return std::filesystem::path(base) / name;
+    }();
+    return directory;
 }
 
 void PruneOldInstallers(const std::filesystem::path &directory, const std::string &keep_name)
@@ -358,10 +375,51 @@ void PruneOldInstallers(const std::filesystem::path &directory, const std::strin
         const std::string name = entry.path().filename().u8string();
         if (name == keep_name)
             continue;
-        // 只删自己产生的文件：安装包与临时文件，别的文件一概不碰。
+        // 只删自己产生的文件：安装包与临时文件，别的文件一概不碰。被别的实例占用的
+        // 文件删不掉就跳过，不在这里纠缠。
         if (IsInstallerName(name) || name.rfind("MetasequoiaIME_Setup_", 0) == 0)
             std::filesystem::remove(entry.path(), ec);
     }
+}
+
+bool FileMatchesDigest(const std::filesystem::path &path, const std::string &expected_hex)
+{
+    if (!IsSha256Hex(expected_hex))
+        return false;
+    std::ifstream file(path, std::ios::binary);
+    if (!file)
+        return false;
+    BCRYPT_ALG_HANDLE algorithm = nullptr;
+    BCRYPT_HASH_HANDLE hash = nullptr;
+    if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) != 0 ||
+        BCryptCreateHash(algorithm, &hash, nullptr, 0, nullptr, 0, 0) != 0)
+    {
+        if (hash)
+            BCryptDestroyHash(hash);
+        if (algorithm)
+            BCryptCloseAlgorithmProvider(algorithm, 0);
+        return false;
+    }
+    std::vector<char> buffer(64 * 1024);
+    bool ok = true;
+    while (file)
+    {
+        file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        const std::streamsize got = file.gcount();
+        if (got <= 0)
+            break;
+        if (BCryptHashData(hash, reinterpret_cast<PUCHAR>(buffer.data()), static_cast<ULONG>(got), 0) != 0)
+        {
+            ok = false;
+            break;
+        }
+    }
+    unsigned char digest[32]{};
+    if (ok)
+        ok = BCryptFinishHash(hash, digest, sizeof(digest), 0) == 0;
+    BCryptDestroyHash(hash);
+    BCryptCloseAlgorithmProvider(algorithm, 0);
+    return ok && HexDigest(digest) == expected_hex;
 }
 
 Result Download(const Request &request)
@@ -413,7 +471,6 @@ Result Download(const Request &request)
             }
             Attempt attempt = FetchOnce(channel, part_path, deadline);
             attempt.url = channel;
-            const std::uint64_t bytes = attempt.bytes;
             result.attempts.push_back(attempt);
             if (attempt.outcome == Outcome::Ok)
             {
@@ -448,7 +505,6 @@ Result Download(const Request &request)
                 break;
             }
             // 其它失败：同一条通道还有重试机会。静默重试，不打扰用户。
-            (void)bytes;
         }
     }
     std::filesystem::remove(part_path, ec);

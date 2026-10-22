@@ -74,6 +74,22 @@ TEST_CASE(update_download_refuses_to_start_without_a_digest)
     REQUIRE(result.attempts.empty());
 }
 
+TEST_CASE(update_download_keeps_the_installer_out_of_the_data_directory)
+{
+    using native_settings::update_download::DefaultDirectory;
+    const std::filesystem::path directory = DefaultDirectory();
+    REQUIRE(!directory.empty());
+    // 安装包不落在数据目录里：那里是中等完整性、对同机可写的，从那里拉起 exe 等于
+    // 把「校验通过」和「用户执行」之间的空窗交给别人。
+    REQUIRE(directory.filename().wstring().rfind(L"MetasequoiaImeUpdate-", 0) == 0);
+    // 目录必须真能建出来：下载前会 create_directories，建不出来就直接失败。
+    std::error_code ec;
+    std::filesystem::create_directories(directory, ec);
+    REQUIRE(!ec);
+    REQUIRE(std::filesystem::is_directory(directory, ec));
+    std::filesystem::remove_all(directory, ec);
+}
+
 TEST_CASE(update_download_pruning_leaves_only_the_kept_installer)
 {
     namespace fs = std::filesystem;
@@ -100,6 +116,22 @@ TEST_CASE(update_download_pruning_leaves_only_the_kept_installer)
     REQUIRE(!fs::exists(older));
     REQUIRE(!fs::exists(part));
     REQUIRE(fs::is_regular_file(unrelated));
+
+    // 打开前的重核对：内容一致返回 true，换掉一个字节返回 false。
+    const std::string expected = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"; // "hello"
+    const fs::path probe = directory / "MetasequoiaIME_Setup_v0.11.1.exe";
+    {
+        std::ofstream file(probe, std::ios::binary | std::ios::trunc);
+        file << "hello";
+    }
+    REQUIRE(FileMatchesDigest(probe, expected));
+    {
+        std::ofstream file(probe, std::ios::binary | std::ios::trunc);
+        file << "hellp";
+    }
+    REQUIRE(!FileMatchesDigest(probe, expected));
+    // 摘要格式不对时直接判失败，不去读文件。
+    REQUIRE(!FileMatchesDigest(probe, "not-a-digest"));
 
     fs::remove_all(directory, ec);
 }

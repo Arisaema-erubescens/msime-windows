@@ -92,4 +92,8 @@ std::filesystem::path DefaultDirectory();
 
 // 清掉目录里除 keep 之外的旧安装包与临时文件。
 void PruneOldInstallers(const std::filesystem::path &directory, const std::string &keep_name);
+
+// 重新核对文件的 SHA-256。下载目录与启动安装程序之间隔着用户点 UAC 的时间，
+// 这段时间里文件可能被同机的其他进程换掉，所以启动前再算一次。
+bool FileMatchesDigest(const std::filesystem::path &path, const std::string &expected_hex);
 } // namespace native_settings::update_download
