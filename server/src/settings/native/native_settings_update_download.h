@@ -96,4 +96,9 @@ void PruneOldInstallers(const std::filesystem::path &directory, const std::strin
 // 重新核对文件的 SHA-256。下载目录与启动安装程序之间隔着用户点 UAC 的时间，
 // 这段时间里文件可能被同机的其他进程换掉，所以启动前再算一次。
 bool FileMatchesDigest(const std::filesystem::path &path, const std::string &expected_hex);
+
+// 本次进程独占的安装包文件名：MetasequoiaIME_Setup_v0.11.1.exe.<pid>-<计数>.part。
+// 每个下载任务用自己的临时名，两个实例各写各的文件，互不覆盖；谁先完成谁把它改名成
+// 正式名字，另一个即使稍后写完，校验与改名也只是多走一遍，不会把好东西冲掉。
+std::string PartFileName(const std::string &installer_name);
 } // namespace native_settings::update_download

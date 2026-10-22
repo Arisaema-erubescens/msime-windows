@@ -7,6 +7,7 @@
 #include <winhttp.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <fstream>
@@ -345,22 +346,18 @@ std::filesystem::path DefaultDirectory()
 {
     // 放在用户临时目录下，不是数据目录：数据目录是中等完整性、按安装器设置可写的，
     // 从这里拉起的 exe 在「校验完成」到「用户点 UAC」之间可能被同机其他进程替换。
-    // 临时目录再套一层本进程唯一的子目录，让替换没有稳定的落脚点。
-    static const std::filesystem::path directory = [] {
-        std::wstring base(MAX_PATH, L'\0');
-        const DWORD length = GetTempPathW(static_cast<DWORD>(base.size()), base.data());
-        base.resize(length == 0 || length >= base.size() ? 0 : length);
-        if (base.empty())
-            return std::filesystem::path();
-
-        // 子目录名在本进程内固定，重试复用同一个路径；进程重启换一个新的。
-        LARGE_INTEGER counter{};
-        QueryPerformanceCounter(&counter);
-        const std::wstring name = L"MetasequoiaImeUpdate-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
-                                  std::to_wstring(static_cast<unsigned long long>(counter.QuadPart));
-        return std::filesystem::path(base) / name;
-    }();
-    return directory;
+    // 临时目录再套一层进程唯一的子目录，让替换没有稳定的落脚点。
+    //
+    // 每次调用都算一次：设置窗口关掉只是隐藏，进程还活着，要求后端一次下载走的是
+    // 同一个目录；用户可能又点了一次，那一次也该落在同一个目录里，靠临时的文件名
+    // 区分，而不是靠目录。
+    std::wstring base(MAX_PATH, L'\0');
+    const DWORD length = GetTempPathW(static_cast<DWORD>(base.size()), base.data());
+    base.resize(length == 0 || length >= base.size() ? 0 : length);
+    if (base.empty())
+        return {};
+    const std::wstring name = L"MetasequoiaImeUpdate-" + std::to_wstring(GetCurrentProcessId());
+    return std::filesystem::path(base) / name;
 }
 
 void PruneOldInstallers(const std::filesystem::path &directory, const std::string &keep_name)
@@ -375,11 +372,19 @@ void PruneOldInstallers(const std::filesystem::path &directory, const std::strin
         const std::string name = entry.path().filename().u8string();
         if (name == keep_name)
             continue;
-        // 只删自己产生的文件：安装包与临时文件，别的文件一概不碰。被别的实例占用的
-        // 文件删不掉就跳过，不在这里纠缠。
-        if (IsInstallerName(name) || name.rfind("MetasequoiaIME_Setup_", 0) == 0)
+        // 只删自己产生的文件：安装包、别的实例留下的临时文件，以及旧版本留下的
+        // 「.exe.part」这类名字。被正在写入的文件占着就删不掉，删不掉就跳过。
+        if (IsInstallerName(name) || name.find("MetasequoiaIME_Setup_") == 0)
             std::filesystem::remove(entry.path(), ec);
     }
+}
+
+std::string PartFileName(const std::string &installer_name)
+{
+    // 计数只增不减，配合进程号，同一台机器上并发的两个下载不会撞名。
+    static std::atomic<unsigned long long> counter{0};
+    const unsigned long long ticket = counter.fetch_add(1) + 1;
+    return installer_name + kPartSuffix + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(ticket);
 }
 
 bool FileMatchesDigest(const std::filesystem::path &path, const std::string &expected_hex)
@@ -453,8 +458,10 @@ Result Download(const Request &request)
     }
 
     const std::filesystem::path final_path = request.directory / request.installer_name;
-    std::filesystem::path part_path = final_path;
-    part_path += kPartSuffix;
+    // 每个下载任务用独占的临时名：两个实例同时下同一个版本时各写各的文件，
+    // 谁先完成谁改名成正式名字，后完成的那份要么在校验后同样通过、要么自行放弃，
+    // 不会把对方写了一半的数据当成自己的继续写。
+    std::filesystem::path part_path = request.directory / PartFileName(request.installer_name);
     const Clock::time_point deadline =
         Clock::now() + std::chrono::seconds((std::max)(request.deadline_seconds, std::uint64_t{60}));
 
@@ -479,6 +486,16 @@ Result Download(const Request &request)
                 // 这里不重读一遍文件：103 MB 的包重读一次要几秒，且会多占一份内存。
                 if (attempt.digest == request.installer_sha256)
                 {
+                    // 正式名字可能已经被另一个先完成的实例写好，且内容相同。这时不再
+                    // 覆盖：MoveFileEx 会把旧文件顶掉，而用户可能正读到它。
+                    if (FileMatchesDigest(final_path, request.installer_sha256))
+                    {
+                        std::filesystem::remove(part_path, ec);
+                        result.outcome = Outcome::Ok;
+                        result.message.clear();
+                        result.path = final_path;
+                        return result;
+                    }
                     std::filesystem::remove(final_path, ec);
                     if (MoveFileExW(part_path.c_str(), final_path.c_str(),
                                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
@@ -488,6 +505,7 @@ Result Download(const Request &request)
                         result.path = final_path;
                         return result;
                     }
+                    std::filesystem::remove(part_path, ec);
                     result.outcome = Outcome::Failed;
                     result.message = "无法保存安装包";
                     return result;

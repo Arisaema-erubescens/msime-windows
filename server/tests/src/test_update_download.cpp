@@ -82,12 +82,27 @@ TEST_CASE(update_download_keeps_the_installer_out_of_the_data_directory)
     // 安装包不落在数据目录里：那里是中等完整性、对同机可写的，从那里拉起 exe 等于
     // 把「校验通过」和「用户执行」之间的空窗交给别人。
     REQUIRE(directory.filename().wstring().rfind(L"MetasequoiaImeUpdate-", 0) == 0);
+    // 同一进程内重复调用给出同一个目录：第二次点击要落在同一个地方，靠临时文件名区分。
+    REQUIRE(DefaultDirectory() == directory);
     // 目录必须真能建出来：下载前会 create_directories，建不出来就直接失败。
     std::error_code ec;
     std::filesystem::create_directories(directory, ec);
     REQUIRE(!ec);
     REQUIRE(std::filesystem::is_directory(directory, ec));
     std::filesystem::remove_all(directory, ec);
+}
+
+TEST_CASE(update_download_gives_each_job_its_own_part_file)
+{
+    using native_settings::update_download::PartFileName;
+    const std::string first = PartFileName("MetasequoiaIME_Setup_v0.11.1.exe");
+    const std::string second = PartFileName("MetasequoiaIME_Setup_v0.11.1.exe");
+    // 同一个版本被点了两次，两个任务各写各的临时文件，不会互相截断。
+    REQUIRE(!first.empty());
+    REQUIRE(first != second);
+    REQUIRE(first.rfind("MetasequoiaIME_Setup_v0.11.1.exe.part", 0) == 0);
+    // 临时名不能反过来被当成正式安装包名，否则清理时会把它当作目标保留下来。
+    REQUIRE(!native_settings::update_download::IsInstallerName(first));
 }
 
 TEST_CASE(update_download_pruning_leaves_only_the_kept_installer)
