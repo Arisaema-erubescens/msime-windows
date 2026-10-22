@@ -642,6 +642,15 @@ class SidebarSearch : public msimeui::Panel
         listHolder_->ArrangeInLayout({finalRect.x, listTop, finalRect.width, list.height});
     }
 
+    void Render(msimeui::DeviceResources &dr) override
+    {
+        for (const auto &child : children_)
+        {
+            if (dr.IsVisible(Inflate(child->GetBounds(), 4.0f)))
+                child->Render(dr);
+        }
+    }
+
   private:
     std::wstring Query() const
     {
