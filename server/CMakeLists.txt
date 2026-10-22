@@ -554,6 +554,8 @@ add_executable(${SETTINGS_EXECUTABLE_NAME} WIN32
     "./src/settings/native/native_page_help_widgets.cpp"
     "./src/settings/native/native_page_help_widgets.h"
     "./src/settings/native/native_page_about.cpp"
+    "./src/settings/native/native_settings_update_download.cpp"
+    "./src/settings/native/native_settings_update_download.h"
     "./src/settings/native/native_page_feedback.cpp"
     "./src/skin/candidate_skin_catalog.cpp"
     "./src/skin/candidate_skin_catalog.h"
