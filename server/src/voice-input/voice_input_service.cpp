@@ -438,9 +438,12 @@ LRESULT CALLBACK VoiceMessageWindowProc(HWND hwnd, UINT message, WPARAM wparam, 
         return 0;
     case kStopRecordingMessage:
     case kToggleRecordingMessage: {
+        // Posted recording cookies are owned by this handler. A sender that
+        // posts without one still gets ordinary queue semantics (session 0).
         const std::unique_ptr<std::uint64_t> posted_session(reinterpret_cast<std::uint64_t *>(lparam));
+        const std::uint64_t session = posted_session ? *posted_session : 0;
         EnqueueControlCommand(message == kStopRecordingMessage ? ControlCommand::Stop : ControlCommand::Toggle,
-                              static_cast<std::uintptr_t>(wparam), *posted_session);
+                              static_cast<std::uintptr_t>(wparam), session);
         return 0;
     }
     case kLockRecordingMessage:

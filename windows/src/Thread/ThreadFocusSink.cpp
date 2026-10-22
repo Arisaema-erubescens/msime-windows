@@ -166,7 +166,9 @@ STDAPI CMetasequoiaIME::OnKillThreadFocus()
         !_localSessionResetPending.load(std::memory_order_acquire))
     {
         DWORD foregroundProcessId = 0;
-        GetWindowThreadProcessId(GetForegroundWindow(), &foregroundProcessId);
+        const HWND foreground = GetForegroundWindow();
+        if (foreground)
+            GetWindowThreadProcessId(foreground, &foregroundProcessId);
         if (foregroundProcessId != 0 && foregroundProcessId != GetCurrentProcessId())
         {
             // Queued keys belong to the preview being discarded. Use the

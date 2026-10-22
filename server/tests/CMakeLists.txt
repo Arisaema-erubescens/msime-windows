@@ -237,7 +237,6 @@ add_test(NAME webview_contract COMMAND test_webview_contract
     "${MSIME_ENGINE_DIR}/contracts/webview/fixtures.json")
 
 
-
 add_executable(test_voice_result_card src/test_voice_result_card.cpp)
 target_include_directories(test_voice_result_card PRIVATE ../src)
 target_compile_features(test_voice_result_card PRIVATE cxx_std_17)
@@ -294,5 +293,3 @@ if(WIN32)
     add_test(NAME voice_overlay_threading COMMAND test_voice_overlay_threading)
     set_tests_properties(voice_overlay_threading PROPERTIES TIMEOUT 10)
 endif()
-
-
