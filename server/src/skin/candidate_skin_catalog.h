@@ -232,8 +232,21 @@ struct Package
 
 struct Issue
 {
+    // 这条 issue 的性质，设置页据此把加载失败的目录和带提示的皮肤分开计数。不看 issue 的 folder 能否在
+    // packages 里找到：官方包在设置页单独成组，目录名读不出时 folder 也不是皮肤 id。
+    enum class Kind
+    {
+        // 目录加载失败，不会出现在可选列表里。
+        LoadFailed,
+        // 皮肤能用，只是有些字段被忽略。
+        Noticed,
+        // 皮肤目录本身读不全，folder 指的是 skinsRoot。
+        ScanFailed,
+    };
+
     std::string folder;
     std::string reason;
+    Kind kind = Kind::LoadFailed;
 };
 
 struct ScanResult

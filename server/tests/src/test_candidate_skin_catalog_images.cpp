@@ -409,6 +409,7 @@ TEST_CASE(candidate_skin_catalog_v1_cannot_use_the_canvas_base)
     const auto catalog = CandidateSkinCatalog::Scan(root);
     REQUIRE(catalog.packages.empty());
     REQUIRE_EQ(catalog.issues.size(), size_t{1});
+    REQUIRE(catalog.issues.front().kind == CandidateSkinCatalog::Issue::Kind::LoadFailed);
     RemoveSkin(root);
 }
 
@@ -449,6 +450,8 @@ z_index = "high"
         REQUIRE_EQ(catalog.issues.size(), size_t{1});
         REQUIRE_EQ(catalog.issues.front().folder, std::string("art"));
         REQUIRE_EQ(catalog.issues.front().reason, package->notices.front());
+        // The skin still loads: the settings page must count it under "notices", not as an invalid folder.
+        REQUIRE(catalog.issues.front().kind == CandidateSkinCatalog::Issue::Kind::Noticed);
         RemoveSkin(root);
     }
 }

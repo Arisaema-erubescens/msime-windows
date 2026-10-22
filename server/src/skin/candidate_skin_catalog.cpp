@@ -1220,18 +1220,18 @@ ScanResult Scan(const std::filesystem::path &skinsRoot)
             // 能用但有问题的皮肤照样列出来，问题另记一条，免得作者以为 v2 字段生效了。
             for (const auto &notice : package->notices)
             {
-                result.issues.push_back({folder, notice});
+                result.issues.push_back({folder, notice, Issue::Kind::Noticed});
             }
             result.packages.push_back(std::move(*package));
         }
         else
         {
-            result.issues.push_back({folder, error});
+            result.issues.push_back({folder, error, Issue::Kind::LoadFailed});
         }
     }
     if (ec)
     {
-        result.issues.push_back({"skins", "无法完整读取皮肤目录"});
+        result.issues.push_back({"skins", "无法完整读取皮肤目录", Issue::Kind::ScanFailed});
     }
     std::sort(result.packages.begin(), result.packages.end(),
               [](const Package &a, const Package &b) { return a.name < b.name; });

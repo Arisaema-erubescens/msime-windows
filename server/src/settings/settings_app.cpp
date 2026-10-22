@@ -296,7 +296,9 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
     if (g_candidate_skin_catalog)
     {
         for (const auto &issue : g_candidate_skin_catalog->issues)
-            skin_issues.push_back({{"folder", issue.folder}, {"reason", issue.reason}});
+            skin_issues.push_back({{"folder", issue.folder},
+                                   {"reason", issue.reason},
+                                   {"noticed", issue.kind == CandidateSkinCatalog::Issue::Kind::Noticed}});
     }
     nlohmann::json polish_presets = nlohmann::json::array();
     for (const auto &preset : VoiceInput::BuiltinPolishPromptPresets())
