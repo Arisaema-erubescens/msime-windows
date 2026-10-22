@@ -1,6 +1,8 @@
 #include "settings/native/native_page_voice_fields.h"
 #include "settings/native/native_settings_pages.h"
 
+#include "config/ai_provider.h"
+
 #include "msimeui/DeviceResources.h"
 #include "msimeui/Fonts.h"
 #include "msimeui/Window.h"
@@ -1352,7 +1354,7 @@ struct InputPage
             const voice_fields::ActiveAiConfig state = AiState();
             // 选择器模式下这里的 provider 已经解析成「生成式上次用的那家」，所以不再是 jev。
             // AI 联想总开关与这里无关，只要凭据齐就能用。
-            text = L"请先在「AI 与云联想」页面填写当前服务商的接口地址、Token 和模型";
+            text = L"请先在「AI 与云联想」页面填写当前服务商的接口地址、模型和 Token（Ollama 不需要）";
             ok = state.usable;
         }
         else if (provider == "custom")

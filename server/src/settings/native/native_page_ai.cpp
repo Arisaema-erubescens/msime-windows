@@ -2,6 +2,7 @@
 #include "settings/native/native_settings_pill.h"
 
 #include "ai/jev_client.h"
+#include "config/ai_provider.h"
 #include "voice-input/voice_providers.h"
 
 #include "msimeui/DeviceResources.h"
@@ -486,6 +487,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
     std::shared_ptr<Dropdown> providerDropdown;
     std::shared_ptr<ModelCombo> model;
     std::shared_ptr<InputBox> token;
+    std::shared_ptr<Hideable> tokenField;
     std::shared_ptr<InputBox> limit;
     std::shared_ptr<InputBox> endpoint;
     std::shared_ptr<Hideable> providerField;
@@ -565,6 +567,8 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         endpoint->SetPlaceholder(Widen(DefaultEndpoint()));
         model->Input()->SetText(Widen(slot(models, "model")));
         model->Input()->SetPlaceholder(Widen(DefaultModel()));
+        if (tokenField)
+            tokenField->SetVisible(AiAssistant::ProviderUsesToken(provider));
 
         std::string tokenValue;
         if (const Json *tokens = context.model.Find("ai_assistant.tokens"); tokens && tokens->is_object())
@@ -784,7 +788,8 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         column->Add(heading);
         auto description = MakeDescription(
             L"以下服务商都走 OpenAI 兼容的 Chat Completions 接口。接口地址与模型留空时使用各家的默认值；"
-            L"凭据按服务商分开保存，切换服务商不会清掉其它家的 Token。");
+            L"凭据按服务商分开保存，切换服务商不会清掉其它家的 Token。Ollama 连接本机服务，不需要 API Token，"
+            L"模型用「查询模型」从已下载的模型里选。");
         description->SetMargin({0.0f, -10.0f, 0.0f, 16.0f});
         column->Add(description);
 
@@ -829,10 +834,15 @@ struct AiPage : std::enable_shared_from_this<AiPage>
 
         token = GridInput(true);
         token->SetOnCommit([this](const std::wstring &text) {
+            // 不用 Token 的服务商不落盘，免得留下一个谁都不读的空槽或旧值。
+            if (!AiAssistant::ProviderUsesToken(provider))
+                return;
             Write("ai_assistant.token_" + provider, Trimmed(Narrow(text)));
             RefreshStatus();
         });
-        grid->Add(std::make_shared<Field>(L"API Token", token));
+        // Ollama 不鉴权，选它时整个输入框收起来，不留一个填了也没用的框。
+        tokenField = std::make_shared<Hideable>(std::make_shared<Field>(L"API Token", token));
+        grid->Add(tokenField);
 
         limit = GridInput();
         limit->SetPlaceholder(L"1-10，默认 3");

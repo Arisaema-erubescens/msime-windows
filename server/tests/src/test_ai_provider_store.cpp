@@ -140,13 +140,28 @@ TEST_CASE(ai_provider_store_resolves_the_active_entry)
         REQUIRE_EQ(active.id, std::string(builtin));
     }
 }
+TEST_CASE(ai_provider_ollama_sends_no_token)
+{
+    REQUIRE(AiAssistant::ProviderStore::IsBuiltinProvider("ollama"));
+    REQUIRE(!AiAssistant::ProviderUsesToken("ollama"));
+    for (const auto id : AiAssistant::ProviderStore::BuiltinProviderIds())
+        REQUIRE_EQ(AiAssistant::ProviderUsesToken(id), id != "ollama");
+
+    REQUIRE(AiAssistant::RequestToken("ollama", "sk-left-over").empty());
+    REQUIRE_EQ(AiAssistant::RequestToken("deepseek", "sk-test"), std::string("sk-test"));
+
+    // 没有 Token 就不带 Authorization 头，而不是发一个空的 Bearer。
+    REQUIRE(AiAssistant::AuthorizationHeader("").empty());
+    REQUIRE_EQ(AiAssistant::AuthorizationHeader("sk-test"), std::string("Authorization: Bearer sk-test"));
+}
+
 TEST_CASE(ai_provider_store_defaults_match_the_config_struct)
 {
     // 页面占位符、空槽位回退和配置结构体的初始值必须来自同一份默认值。三处任意一处
     // 改了忘改另一处，用户就会看到「占位符写着 A、实际请求发的是 B」。
     const AiAssistantConfig config;
     for (const char *id : {"deepseek", "openai", "siliconflow", "groq", "minimax", "moonshot", "zhipu", "dashscope",
-                           "volcengine", "openrouter", "jev"})
+                           "volcengine", "openrouter", "ollama", "jev"})
     {
         REQUIRE_EQ(config.endpoints.at(id), AiAssistant::ProviderStore::BuiltinDefaultEndpoint(id));
         REQUIRE_EQ(config.models.at(id), AiAssistant::ProviderStore::BuiltinDefaultModel(id));
