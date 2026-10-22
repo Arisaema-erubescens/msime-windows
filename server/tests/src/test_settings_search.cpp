@@ -22,8 +22,8 @@ struct RowBuilder
     std::vector<SettingsIndexEntry> entries;
     std::vector<std::shared_ptr<FakeRow>> kept;
 
-    // `alive = false` gives an entry whose row has already been freed, the way a page that was
-    // rebuilt leaves stale entries behind.
+    // `alive = false` gives an entry with no row, the way a malformed entry or one built for a
+    // page that was torn down would look.
     void Add(const char *page, const wchar_t *pageTitle, const wchar_t *title, const wchar_t *description,
              bool alive = true)
     {
@@ -116,7 +116,7 @@ TEST_CASE(SettingsSearchIgnoresAsciiCaseAndFullWidthForms)
     REQUIRE_EQ(wide.front().title, L"AI 服务端点");
 }
 
-TEST_CASE(SettingsSearchDropsEntriesWhoseRowIsGone)
+TEST_CASE(SettingsSearchSkipsEntriesWithoutARow)
 {
     RowBuilder tree;
     tree.Add("a", L"甲", L"候选框高度", L"", false);

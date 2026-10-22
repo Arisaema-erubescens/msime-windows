@@ -41,6 +41,10 @@ constexpr UINT_PTR kImageFrameTimer = 0x4E55;
 // Lifts the launch splash if no configSnapshot arrives, so a failed config load still
 // leaves a usable window.
 constexpr UINT_PTR kSplashTimer = 0x4E56;
+// Builds the pages the user has not opened yet so their settings are searchable from the first
+// keystroke. One page per tick: a page builder is a few hundred control constructions, which is
+// milliseconds, but sixteen of them in one go would be a visible hitch on a cold start.
+constexpr UINT_PTR kIndexPageTimer = 0x4E57;
 
 // 系统「显示动画」关闭时预览里的动图只显示首帧，与候选窗同一个开关；读不到时按开启处理。
 bool SystemAnimationsEnabled()
@@ -1643,7 +1647,7 @@ class SettingsWindowImpl : public HostServices
         modal_->Close();
         auto &page = pageCache_[index];
         if (!page)
-            page = BuildPageIndexed(index);
+            page = BuildPageAndIndex(index);
         pageHost_->SetChild(page);
         page->Attach(window_.get());
         // All pages share one scroller; a new page starts at the top.
@@ -1653,34 +1657,43 @@ class SettingsWindowImpl : public HostServices
         window_->RefreshHover();
     }
 
-    // Builds a page while recording every row it creates into the settings search index.
+    // Builds a page under an index scope, so every row it creates is recorded, and hands it back
+    // for the cache.
     //
-    // Pages are lazy: only the one on screen exists, so the index grows as pages get visited
-    // rather than being complete from the first frame. Building all sixteen up front would mean
-    // decoding every skin preview and running every dictionary query at startup, which is the
-    // cold-start cost the Direct2D window was written to avoid. Search therefore misses pages
-    // nobody has opened yet, and SidebarSearch::Refresh re-runs the query when the index grows.
-    VisualPtr BuildPageIndexed(size_t index)
+    // Indexed pages stay in `pageCache_` rather than being thrown away after their rows are
+    // collected. The index points at the page's rows, so a click has to scroll the very row that
+    // is on screen; a page held only long enough to read its titles would hand back rows that no
+    // longer exist. Holding one page per settings page costs what visiting them all costs, which
+    // is what `pageCache_` already did, and a builder does not decode images or query the
+    // dictionary on its own: those happen on first render and on user action.
+    VisualPtr BuildPageAndIndex(size_t index)
     {
         const auto &pages = Pages();
         const std::string pageId = pages[index].id;
         const std::wstring pageTitle = pages[index].title;
-        // Rows built by this page replace whatever it contributed last time.
-        auto pageEntries = std::make_shared<std::vector<SettingsIndexEntry>>();
+        auto slice = std::make_shared<std::vector<SettingsIndexEntry>>();
         VisualPtr built;
         {
-            SettingsIndexScope scope(pageId, [pageEntries, pageId, pageTitle](const SettingsIndexScope::Row &row) {
-                pageEntries->push_back({pageId, pageTitle, row.title, row.description, row.row});
+            SettingsIndexScope scope(pageId, [slice, pageId, pageTitle](const SettingsIndexScope::Row &row) {
+                // Row::row is weak and the page owns the row, so lock it: the entry has to stay
+                // usable for as long as the index does.
+                if (auto held = row.row.lock())
+                    slice->push_back({pageId, pageTitle, row.title, row.description, held});
             });
             built = pages[index].build(context_);
         }
-        pageEntries_.push_back(std::move(pageEntries));
+        // A rebuild of this page replaces whatever it contributed before.
+        pageEntries_.erase(std::remove_if(pageEntries_.begin(), pageEntries_.end(),
+                                          [&pageId](const std::shared_ptr<std::vector<SettingsIndexEntry>> &entry) {
+                                              return !entry->empty() && entry->front().pageId == pageId;
+                                          }),
+                           pageEntries_.end());
+        pageEntries_.push_back(std::move(slice));
         RebuildSearchIndex();
         return built;
     }
 
-    // Flattens per-page entry lists into the vector the search box reads. Cheap: a few hundred
-    // small structs, and it only runs when a page is built.
+    // Flattens per-page entry lists into the vector the search box reads.
     void RebuildSearchIndex()
     {
         auto flat = std::make_shared<std::vector<SettingsIndexEntry>>();
@@ -1688,13 +1701,32 @@ class SettingsWindowImpl : public HostServices
         {
             for (const SettingsIndexEntry &entry : *pageEntries)
             {
-                if (!entry.row.expired())
+                if (entry.row)
                     flat->push_back(entry);
             }
         }
         searchIndex_ = std::move(flat);
         if (sidebar_)
             sidebar_->Search()->SetIndex(searchIndex_);
+    }
+
+    // Builds the pages nobody has opened yet, one per timer tick, so every setting is findable
+    // from the first keystroke. A page builder is a few hundred control constructions; sixteen of
+    // them in one go would stall the first frame, so they are spread over ticks once the window is
+    // already up and responsive.
+    void IndexNextPage()
+    {
+        const auto &pages = Pages();
+        while (nextIndexPage_ < pages.size())
+        {
+            const size_t index = nextIndexPage_++;
+            // Already built for display, so its rows are in the index already.
+            if (index == current_ || pageCache_.count(index) != 0)
+                continue;
+            pageCache_[index] = BuildPageAndIndex(index);
+            return;
+        }
+        KillTimer(hwnd_, kIndexPageTimer);
     }
 
     // Switches to the entry's page and scrolls its row into view.
@@ -1706,14 +1738,12 @@ class SettingsWindowImpl : public HostServices
             if (entry.pageId != pages[i].id)
                 continue;
             ShowPageIndex(i, false);
-            if (auto held = entry.row.lock())
+            if (entry.row && window_)
             {
-                auto *row = static_cast<SettingRow *>(held.get());
+                auto *row = static_cast<SettingRow *>(entry.row.get());
                 ScrollIntoView(*row);
-                // The row is focusable only once its control is; focus the row itself so the
-                // scroll target is also where the keyboard goes next.
-                if (window_)
-                    window_->FocusVisual(row);
+                // Focus the row so the scroll target is also where the keyboard goes next.
+                window_->FocusVisual(row);
             }
             return;
         }
@@ -1727,8 +1757,11 @@ class SettingsWindowImpl : public HostServices
         pageEntries_.clear();
         RebuildSearchIndex();
         current_ = static_cast<size_t>(-1);
+        // Re-index from the start: the pages that were indexed before the rebuild no longer exist.
+        nextIndexPage_ = 0;
         if (current < Pages().size())
             ShowPageIndex(current, true);
+        SetTimer(hwnd_, kIndexPageTimer, 1, nullptr);
     }
 
     void OnHostMessage(const std::wstring &message)
@@ -2033,6 +2066,8 @@ class SettingsWindowImpl : public HostServices
     // Per-page search entries, one list per built page, flattened into `searchIndex_`.
     std::vector<std::shared_ptr<std::vector<SettingsIndexEntry>>> pageEntries_;
     std::shared_ptr<const std::vector<SettingsIndexEntry>> searchIndex_;
+    // Next page for the background indexer, which fills in the pages the user has not opened.
+    size_t nextIndexPage_ = 0;
     size_t current_ = static_cast<size_t>(-1);
     CaptionState caption_;
     bool themed_ = false;

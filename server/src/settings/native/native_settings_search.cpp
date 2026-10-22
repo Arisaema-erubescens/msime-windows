@@ -70,8 +70,7 @@ std::vector<SettingsIndexEntry> SearchSettings(const std::vector<SettingsIndexEn
     for (size_t i = 0; i < entries.size(); ++i)
     {
         const SettingsIndexEntry &entry = entries[i];
-        // A rebuilt page holds new rows; scoring against a dead one would offer a link to nothing.
-        if (entry.row.expired())
+        if (!entry.row)
             continue;
         const int titleSpan = MatchSpan(entry.title, query);
         if (titleSpan >= 0)
