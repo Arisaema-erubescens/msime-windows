@@ -333,6 +333,9 @@ void ProtectPlaintextCredentials();
 void RecoverLegacyAcpMangledConfig();
 void SyncConfigWithInstalledTemplate();
 
+// 配置文件的 FNV-1a 64 位摘要，用来在修改时间不可靠时判断内容是否真的变了。
+uint64_t HashFileContents(const std::filesystem::path &path);
+
 // ime_config_write.cpp
 bool WriteConfiguredValues(const std::vector<ConfigValueUpdate> &updates);
 bool WriteConfiguredValue(const std::string &section, const std::string &key, const std::string &replacement);

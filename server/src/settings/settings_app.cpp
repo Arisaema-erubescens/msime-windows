@@ -109,6 +109,23 @@ bool PostToPage(const std::wstring &message)
     return true;
 }
 
+// 给页面回一条只在宿主侧产生的消息。契约里的 server 段是穷举的，新类型必须同时写进
+// engine/contracts/webview/messages.json，否则 Validate 会拒。
+void PostToSettingsPage(const json::value &message)
+{
+    if (!g_native)
+        return;
+    PostToPage(string_to_wstring(json::serialize(message)));
+}
+
+// restartServer 的回执。页面那个「3 秒后恢复按钮」的定时器挂在设置窗口上，窗口一隐藏
+// 就随之失效，按钮会永远停在「重启中…」，所以由宿主在重启流程里统一发这一条。
+void PostRestartServerDone(bool ok)
+{
+    PostToSettingsPage(
+        json::value{{"type", "restartServerDone"}, {"protocolVersion", metasequoia::webview::Version}, {"ok", ok}});
+}
+
 // 冷启动打点：设置 METASEQUOIA_IME_SETTINGS_TRACE=1 后，各阶段距进程启动的毫秒数追加到
 // %TEMP%\metasequoia-settings-startup.log。UI 线程和 worker 都会调用。
 void TraceStartup(const char *stage)
@@ -1502,6 +1519,7 @@ void HandleClientMessage(HWND hwnd, const std::string &raw)
             {
                 MessageBoxW(g_settings_hwnd, L"未能重启输入法进程，请稍后重试。", L"水杉输入法",
                             MB_OK | MB_ICONWARNING);
+                PostRestartServerDone(false);
             }
             else if (g_worker && !g_closing)
             {
@@ -1510,6 +1528,7 @@ void HandleClientMessage(HWND hwnd, const std::string &raw)
                 // 不重启设置进程：避免单实例/重开时序问题和窗口闪现。
                 g_restart_refresh_remaining = kRestartRefreshTicks;
                 SetTimer(hwnd, kRestartRefreshTimer, 500, nullptr);
+                PostRestartServerDone(true);
             }
         }
         else if (type == "openExternalUrl")

@@ -392,17 +392,6 @@ void CheckForUpdate(PageContext &context, const std::shared_ptr<AboutState> &sta
             ShowUpdateDialog(*ctx, latest, releaseUrl, mirror, manifest);
         });
 }
-
-std::weak_ptr<Button> g_restartButton;
-void CALLBACK RestoreRestartButton(HWND hwnd, UINT, UINT_PTR id, DWORD)
-{
-    KillTimer(hwnd, id);
-    if (auto button = g_restartButton.lock())
-    {
-        button->SetDisabled(false);
-        button->SetText(L"重启");
-    }
-}
 } // namespace
 
 VisualPtr BuildAboutPage(PageContext &context)
@@ -486,20 +475,24 @@ VisualPtr BuildAboutPage(PageContext &context)
         Dropdown::Options linger;
         linger.minWidth = 150.0f;
         linger.matchToggleWidth = true;
-        HostServices *host = &context.host;
         auto restart = std::make_shared<Button>(L"重启", ButtonKind::Secondary);
-        g_restartButton = restart;
         std::weak_ptr<Button> weakRestart = restart;
-        restart->SetOnClick([model, host, weakRestart]() {
-            // The Watchdog owns the relaunch and never answers; hold the button for a moment
-            // so repeated clicks do not queue several exits.
+        restart->SetOnClick([model, weakRestart]() {
+            // 重启由 Watchdog 执行。按钮在收到宿主的 restartServerDone 之前保持禁用，
+            // 防止连点排队；这里不自己起定时器，窗口隐藏时它会随窗口一起失效。
             auto button = weakRestart.lock();
             if (!button || button->IsDisabled())
                 return;
             button->SetDisabled(true);
             button->SetText(L"重启中…");
             model->Post("restartServer");
-            SetTimer(host->Hwnd(), 0x4E60, 3000, &RestoreRestartButton);
+        });
+        context.OnMessage("restartServerDone", [weakRestart](const Json &) {
+            if (auto button = weakRestart.lock())
+            {
+                button->SetDisabled(false);
+                button->SetText(L"重启");
+            }
         });
         page.AddSection(MakeRows({
             MakeRow(L"重启输入法进程", L"立即重启输入法后台进程，使需要重启的设置生效。", restart),

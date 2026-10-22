@@ -263,6 +263,11 @@ std::filesystem::path g_config_path;
 namespace
 {
 std::optional<std::filesystem::file_time_type> g_config_last_write_time;
+// 最后一次读到的 config.toml 大小与内容摘要。修改时间只在秒以下精度的粒度上可信，
+// 连续两次写入可能落在同一个时间刻度上（尤其写入走的是临时文件 + MoveFileEx 替换），
+// 那时 last_write_time 相等但内容已经变了。只在时间戳没变时用它补一次判定。
+std::optional<std::uintmax_t> g_config_last_size;
+std::optional<uint64_t> g_config_last_content_hash;
 // ai_providers.json 的修改时间。服务商注册表不在 config.toml 里，只看 config.toml 的修改时间会漏掉它的变化。
 std::optional<std::filesystem::file_time_type> g_provider_store_last_write_time;
 bool g_provider_store_seen = false;
@@ -376,6 +381,19 @@ template <typename Node> bool TomlFlexibleBool(const Node &node, bool fallback)
 
 namespace ime_config_detail
 {
+uint64_t HashFileContents(const std::filesystem::path &path)
+{
+    // FNV-1a：只为判断「内容有没有变」，不做安全用途。ReadFileText 在文件缺失时返回空串。
+    const std::string text = ReadFileText(path);
+    uint64_t hash = 1469598103934665603ull;
+    for (const unsigned char byte : text)
+    {
+        hash ^= byte;
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
 void RememberConfigWriteTime()
 {
     std::error_code error;
@@ -383,6 +401,19 @@ void RememberConfigWriteTime()
     if (!error)
     {
         g_config_last_write_time = write_time;
+    }
+    // 与时间戳同时记下大小和内容摘要，供 ReloadImeConfigIfChanged 在时间戳没变时复核。
+    std::error_code size_error;
+    const auto size = std::filesystem::file_size(g_config_path, size_error);
+    if (!size_error)
+    {
+        g_config_last_size = size;
+        g_config_last_content_hash = ime_config_detail::HashFileContents(g_config_path);
+    }
+    else
+    {
+        g_config_last_size.reset();
+        g_config_last_content_hash.reset();
     }
 }
 
@@ -1240,7 +1271,27 @@ bool ReloadImeConfigIfChanged()
 {
     std::error_code error;
     const auto write_time = std::filesystem::last_write_time(g_config_path, error);
-    const bool config_changed = !error && !(g_config_last_write_time && write_time == *g_config_last_write_time);
+    bool config_changed = !error && !(g_config_last_write_time && write_time == *g_config_last_write_time);
+    if (!error && !config_changed)
+    {
+        // 修改时间没变不等于内容没变：写入是「临时文件 + MoveFileEx 替换」，连续两次写入可能落在
+        // 同一个时间刻度上。用大小和内容摘要复核一次，避免切换方案这类紧跟在另一次写入之后
+        // 的配置变更被当成「没动」而跳过，表现出来就是要重启才生效。
+        std::error_code size_error;
+        const auto size = std::filesystem::file_size(g_config_path, size_error);
+        if (!size_error && g_config_last_size && size != *g_config_last_size)
+        {
+            // 大小变了就一定变了，不必再算摘要。
+            config_changed = true;
+        }
+        else if (!size_error && g_config_last_content_hash && g_config_last_size && size == *g_config_last_size &&
+                 HashFileContents(g_config_path) != *g_config_last_content_hash)
+        {
+            // 大小没变再看内容；读不到大小或从没记过摘要时不据此判定变化，
+            // 否则会退化成每次轮询都全量重载。
+            config_changed = true;
+        }
+    }
     bool store_changed = false;
     if (!error && !config_changed && g_provider_store_seen)
     {

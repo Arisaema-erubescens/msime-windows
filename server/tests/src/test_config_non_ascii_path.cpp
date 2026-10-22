@@ -333,6 +333,42 @@ TEST_CASE(english_first_page_count_defaults_validates_and_round_trips)
     fs::remove_all(unique_root, ec);
 }
 
+TEST_CASE(config_reload_detects_a_change_that_keeps_the_same_timestamp)
+{
+    namespace fs = std::filesystem;
+    const fs::path unique_root = MakeProfileRoot() / L"reload-same-timestamp";
+    const fs::path data_dir = unique_root / L"metasequoiaime";
+    const fs::path config_path = data_dir / L"config.toml";
+    std::error_code ec;
+    fs::remove_all(unique_root, ec);
+    fs::create_directories(data_dir, ec);
+    REQUIRE(!ec);
+
+    {
+        ScopedConfigLocation location(unique_root);
+        WriteText(config_path, "[input]\nschema = \"quanpin\"\n");
+        InitImeConfig();
+        REQUIRE(GetConfiguredActiveInputScheme() == SchemeType::Quanpin);
+        const auto stamp = fs::last_write_time(config_path);
+
+        // 模拟「两次写入落在同一个时间刻度」：内容换成双拼，但修改时间保持原样。
+        // 服务端的 300ms 轮询靠 ReloadImeConfigIfChanged 判断有没有变，这时如果只看时间戳
+        // 就会认为没变，表现为切换输入方案要重启才生效。
+        WriteText(config_path, "[input]\nschema = \"shuangpin\"\n");
+        fs::last_write_time(config_path, stamp);
+        REQUIRE(fs::last_write_time(config_path) == stamp);
+
+        REQUIRE(ReloadImeConfigIfChanged());
+        REQUIRE(GetConfiguredActiveInputScheme() == SchemeType::Shuangpin);
+
+        // 内容确实没再变时不能每次都当成变了，否则轮询会退化成每次全量重载。
+        REQUIRE(!ReloadImeConfigIfChanged());
+        REQUIRE(!ReloadImeConfigIfChanged());
+    }
+
+    fs::remove_all(unique_root, ec);
+}
+
 TEST_CASE(trilingual_runtime_language_preserves_preferences_without_writing_config)
 {
     namespace fs = std::filesystem;
