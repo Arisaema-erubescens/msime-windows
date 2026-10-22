@@ -1,11 +1,13 @@
 #include "tests/includes/test_framework.h"
 
 #include "settings/native/native_settings_controls.h"
+#include "settings/native/native_page_help_widgets.h"
 
 #include "msimeui/Window.h"
 
 #include <functional>
 #include <memory>
+#include <string>
 
 namespace
 {
@@ -118,6 +120,57 @@ TEST_CASE(SettingsLabelHandlerOutlivesTheVisualItDestroys)
     REQUIRE(!label);
     REQUIRE(HandlerProbe::liveDuringCall >= 1);
     REQUIRE_EQ(HandlerProbe::live, 0);
+}
+
+// CssButton is the one the update dialog's download buttons use, and it is the one that shipped
+// broken. The generic probes above use native_settings::Button, so this gap went unnoticed.
+TEST_CASE(SettingsCssButtonHandlerOutlivesTheDialogItCloses)
+{
+    msimeui::Window window(L"settings-controls-tests", L"", 200, 200);
+    auto button = std::make_shared<native_settings::CssButton>(L"前往下载", native_settings::CssButton::Style());
+    native_settings::CssButton *raw = button.get();
+    raw->Attach(&window);
+    raw->Arrange({0.0f, 0.0f, 100.0f, 30.0f});
+    ResetProbe();
+    std::function<void()> release = [&button]() { button.reset(); };
+    raw->SetOnClick(HandlerProbe(&release));
+
+    const POINT point{10, 10};
+    REQUIRE(raw->OnMouseDown(point, 0));
+    REQUIRE(raw->OnMouseUp(point, 0));
+
+    REQUIRE(!button);
+    REQUIRE(HandlerProbe::liveDuringCall >= 1);
+    REQUIRE_EQ(HandlerProbe::live, 0);
+}
+
+// The update dialog's handlers do exactly this: close the modal, which destroys the button, and
+// then post a message. The message must still arrive. Before the handler copy, the closure was
+// gone by the time the post ran and the download buttons silently did nothing.
+TEST_CASE(SettingsCssButtonFinishesPostingAfterClosingItself)
+{
+    msimeui::Window window(L"settings-controls-tests", L"", 200, 200);
+    auto button = std::make_shared<native_settings::CssButton>(L"国内镜像下载", native_settings::CssButton::Style());
+    native_settings::CssButton *raw = button.get();
+    raw->Attach(&window);
+    raw->Arrange({0.0f, 0.0f, 100.0f, 30.0f});
+
+    int posted = 0;
+    std::string postedUrl;
+    const std::string mirror = "https://dl.msime.app/gh/example";
+    raw->SetOnClick([&button, &posted, &postedUrl, mirror]() {
+        button.reset();
+        ++posted;
+        postedUrl = mirror;
+    });
+
+    const POINT point{10, 10};
+    REQUIRE(raw->OnMouseDown(point, 0));
+    REQUIRE(raw->OnMouseUp(point, 0));
+
+    REQUIRE(!button);
+    REQUIRE_EQ(posted, 1);
+    REQUIRE_EQ(postedUrl, mirror);
 }
 
 TEST_CASE(SettingsButtonIgnoresDisabledAndOutsideClicks)

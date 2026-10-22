@@ -4,6 +4,7 @@ add_executable(test_native_settings_controls
     portable/main.cpp
     src/test_native_settings_controls.cpp
     ../src/settings/native/native_settings_controls.cpp
+    ../src/settings/native/native_page_help_widgets.cpp
     ../src/settings/native/native_settings_theme.cpp
     ../src/utils/common_utils.cpp
     ../src/utils/ime_paths.cpp)
