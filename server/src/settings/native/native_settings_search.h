@@ -36,9 +36,8 @@ struct SettingsIndexEntry
 // Not a full-text search. The settings tree has a few hundred rows with titles like
 // "候选框最大高度" and what people type is a fragment of one ("候选", "高度"). Every query
 // character must appear in the title in order, which is what a CJK user expects from a search box
-// with no pinyin input; a title match outranks a description-only match, then the tighter match
-// wins, then the shorter title, so "候选" surfaces the candidate-box rows before long rows that
-// merely mention the word.
+// with no pinyin input. A title match outranks a description-only match, then the tighter match
+// wins, so "候选" surfaces the candidate-box rows before long rows that merely mention the word.
 //
 // Comparison folds ASCII case and full-width forms, so "ai" finds "AI 与云联想" and "ＡＩ". Equal
 // scores keep index order, so the same query always gives the same list.
