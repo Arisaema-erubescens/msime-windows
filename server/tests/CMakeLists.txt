@@ -4,12 +4,14 @@ add_executable(test_native_settings_controls
     portable/main.cpp
     src/test_native_settings_controls.cpp
     ../src/settings/native/native_settings_controls.cpp
+    ../src/settings/native/native_page_help_widgets.cpp
     ../src/settings/native/native_settings_theme.cpp
     ../src/utils/common_utils.cpp
     ../src/utils/ime_paths.cpp)
 target_include_directories(test_native_settings_controls PRIVATE "${CMAKE_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/src")
 target_compile_definitions(test_native_settings_controls PRIVATE NOMINMAX=1)
-target_link_libraries(test_native_settings_controls PRIVATE msimeui Boost::locale shell32 advapi32)
+target_link_libraries(test_native_settings_controls PRIVATE msimeui Boost::locale shell32 advapi32
+    nlohmann_json::nlohmann_json)
 add_test(NAME native_settings_controls COMMAND test_native_settings_controls)
 
 add_executable(test_voice_control_dispatch src/test_voice_control_dispatch.cpp
