@@ -1,4 +1,5 @@
 #include "tests/includes/test_framework.h"
+#include "tests/includes/test_utf8_path.h"
 
 #include "skin/candidate_skin_catalog.h"
 
@@ -12,7 +13,7 @@ namespace
 struct SkinFixture
 {
     std::filesystem::path root =
-        std::filesystem::temp_directory_path() /
+        test::TempRoot() /
         ("msime-shared-bases-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
 
     ~SkinFixture()

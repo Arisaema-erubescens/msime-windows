@@ -603,6 +603,8 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
           {"quanpin",
            {{"autocorrect_transposition", GetConfiguredQuanpinAutocorrectTransposition()},
             {"autocorrect_neighbor", GetConfiguredQuanpinAutocorrectNeighbor()},
+            {"autocorrect_deletion", GetConfiguredQuanpinAutocorrectDeletion()},
+            {"autocorrect_insertion", GetConfiguredQuanpinAutocorrectInsertion()},
             {"autocorrect_marker", GetConfiguredQuanpinAutocorrectMarker()}}},
           {"statistics",
            {{"enabled", GetConfiguredStatisticsEnabled()}, {"retention", GetConfiguredStatisticsRetention()}}}}}};
@@ -1040,6 +1042,10 @@ bool ApplyConfigUpdate(const json::object &data)
         return SetConfiguredQuanpinAutocorrectTransposition(json::value_to<bool>(data.at("value")));
     if (path == "quanpin.autocorrect_neighbor")
         return SetConfiguredQuanpinAutocorrectNeighbor(json::value_to<bool>(data.at("value")));
+    if (path == "quanpin.autocorrect_deletion")
+        return SetConfiguredQuanpinAutocorrectDeletion(json::value_to<bool>(data.at("value")));
+    if (path == "quanpin.autocorrect_insertion")
+        return SetConfiguredQuanpinAutocorrectInsertion(json::value_to<bool>(data.at("value")));
     if (path == "quanpin.autocorrect_marker")
         return SetConfiguredQuanpinAutocorrectMarker(json::value_to<bool>(data.at("value")));
     return false;

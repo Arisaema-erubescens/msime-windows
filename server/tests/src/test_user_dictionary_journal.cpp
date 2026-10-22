@@ -59,8 +59,7 @@ class TestDatabase
 // drop the composition. In WAL mode the reads see the last committed snapshot.
 TEST_CASE(DictionaryReadsDoNotWaitForALearningWrite)
 {
-    const auto directory =
-        std::filesystem::temp_directory_path() / ("msime-wal-reads-" + std::to_string(GetCurrentProcessId()));
+    const auto directory = test::TempRoot() / ("msime-wal-reads-" + std::to_string(GetCurrentProcessId()));
     std::error_code ec;
     std::filesystem::remove_all(directory, ec);
     std::filesystem::create_directories(directory);
@@ -101,8 +100,7 @@ TEST_CASE(DictionaryReadsDoNotWaitForALearningWrite)
 
 TEST_CASE(UserDictionaryReplayIsIdempotentAcrossAllSettingsDictionaries)
 {
-    const auto directory =
-        std::filesystem::temp_directory_path() / ("msime-user-dictionary-" + std::to_string(GetCurrentProcessId()));
+    const auto directory = test::TempRoot() / ("msime-user-dictionary-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::create_directories(directory);
     const auto user_path = directory / "msime_user.db";
     const auto main_path = directory / "msime.db";
@@ -177,8 +175,7 @@ TEST_CASE(UserDictionaryReplayIsIdempotentAcrossAllSettingsDictionaries)
 // dictionary now keeps the new shipped weight for learned rows that sit below it.
 TEST_CASE(UserDictionaryReplayKeepsNewShippedWeightsWhenTheDictionaryChanged)
 {
-    const auto directory =
-        std::filesystem::temp_directory_path() / ("msime-replay-rebase-" + std::to_string(GetCurrentProcessId()));
+    const auto directory = test::TempRoot() / ("msime-replay-rebase-" + std::to_string(GetCurrentProcessId()));
     std::error_code ec;
     std::filesystem::remove_all(directory, ec);
     std::filesystem::create_directories(directory);
@@ -296,8 +293,7 @@ TEST_CASE(UserDictionaryReplayKeepsNewShippedWeightsWhenTheDictionaryChanged)
 
 TEST_CASE(UserDictionaryTracksOnlyExplicitUserInsertionsForExport)
 {
-    const auto directory =
-        std::filesystem::temp_directory_path() / ("msime-user-insert-" + std::to_string(GetCurrentProcessId()));
+    const auto directory = test::TempRoot() / ("msime-user-insert-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::create_directories(directory);
     const auto user_path = directory / "msime_user.db";
 
@@ -336,8 +332,7 @@ TEST_CASE(UserDictionaryTracksOnlyExplicitUserInsertionsForExport)
 
 TEST_CASE(EnterLearnedEnglishWordsAreValidatedPersistedAndIdempotent)
 {
-    const auto directory =
-        std::filesystem::temp_directory_path() / ("msime-enter-english-" + std::to_string(GetCurrentProcessId()));
+    const auto directory = test::TempRoot() / ("msime-enter-english-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::create_directories(directory);
     const auto user_path = directory / "msime_user.db";
     const auto english_path = directory / "english.db";
@@ -396,8 +391,7 @@ TEST_CASE(EnterLearnedEnglishWordsAreValidatedPersistedAndIdempotent)
 
 TEST_CASE(UserDictionarySupportsFixedPositionsAndDeferredSafeRanking)
 {
-    const auto directory =
-        std::filesystem::temp_directory_path() / ("msime-ranking-" + std::to_string(GetCurrentProcessId()));
+    const auto directory = test::TempRoot() / ("msime-ranking-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::create_directories(directory);
     const auto user_path = directory / "msime_user.db";
     const auto main_path = directory / "msime.db";
@@ -469,8 +463,7 @@ TEST_CASE(UserDictionarySupportsFixedPositionsAndDeferredSafeRanking)
 
 TEST_CASE(UserDictionaryRebalanceKeepsWeightsBounded)
 {
-    const auto directory =
-        std::filesystem::temp_directory_path() / ("msime-bounded-ranking-" + std::to_string(GetCurrentProcessId()));
+    const auto directory = test::TempRoot() / ("msime-bounded-ranking-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::create_directories(directory);
     const auto user_path = directory / "msime_user.db";
     const auto main_path = directory / "msime.db";
@@ -500,8 +493,7 @@ TEST_CASE(UserDictionaryRebalanceKeepsWeightsBounded)
 
 TEST_CASE(UserDictionaryPromoteDoesNotCrushPrefixSinglesFromSeriesQuery)
 {
-    const auto directory =
-        std::filesystem::temp_directory_path() / ("msime-xianwang-ranking-" + std::to_string(GetCurrentProcessId()));
+    const auto directory = test::TempRoot() / ("msime-xianwang-ranking-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::create_directories(directory);
     const auto user_path = directory / "msime_user.db";
     const auto main_path = directory / "msime.db";
@@ -585,8 +577,7 @@ TEST_CASE(UserDictionaryPromoteDoesNotCrushPrefixSinglesFromSeriesQuery)
 // 同音节的多个表仍互相比权，不受影响。
 TEST_CASE(UserDictionaryPromoteBasesWeightOnTheHeaviestCandidateNotTheTopmost)
 {
-    const auto directory =
-        std::filesystem::temp_directory_path() / ("msime-cross-table-ranking-" + std::to_string(GetCurrentProcessId()));
+    const auto directory = test::TempRoot() / ("msime-cross-table-ranking-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::create_directories(directory);
     const auto user_path = directory / "msime_user.db";
     const auto main_path = directory / "msime.db";
@@ -639,8 +630,7 @@ TEST_CASE(UserDictionaryPromoteBasesWeightOnTheHeaviestCandidateNotTheTopmost)
 // 「调多少次都没用」。比较集不再按音节数切开之后，基准取到 见，一次置顶就越过它。
 TEST_CASE(UserDictionaryPromoteLiftsAnAlternativeSegmentationAcrossKeys)
 {
-    const auto directory =
-        std::filesystem::temp_directory_path() / ("msime-cross-key-ranking-" + std::to_string(GetCurrentProcessId()));
+    const auto directory = test::TempRoot() / ("msime-cross-key-ranking-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::create_directories(directory);
     const auto user_path = directory / "msime_user.db";
     const auto main_path = directory / "msime.db";
@@ -686,8 +676,7 @@ TEST_CASE(UserDictionaryPromoteLiftsAnAlternativeSegmentationAcrossKeys)
 // 库里的新权重重排候选列表，模拟用户重新打一遍 jian 看到的顺序。
 TEST_CASE(UserDictionaryRepeatedPromotionWalksAnAlternativeSegmentationToTheTop)
 {
-    const auto directory =
-        std::filesystem::temp_directory_path() / ("msime-cross-key-walk-" + std::to_string(GetCurrentProcessId()));
+    const auto directory = test::TempRoot() / ("msime-cross-key-walk-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::create_directories(directory);
     const auto user_path = directory / "msime_user.db";
     const auto main_path = directory / "msime.db";
@@ -750,8 +739,7 @@ TEST_CASE(UserDictionaryRepeatedPromotionWalksAnAlternativeSegmentationToTheTop)
 
 TEST_CASE(UserDictionaryEqualWeightPromoteDoesNotWriteNegatives)
 {
-    const auto directory = std::filesystem::temp_directory_path() /
-                           ("msime-equal-weight-ranking-" + std::to_string(GetCurrentProcessId()));
+    const auto directory = test::TempRoot() / ("msime-equal-weight-ranking-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::create_directories(directory);
     const auto user_path = directory / "msime_user.db";
     const auto main_path = directory / "msime.db";
@@ -788,8 +776,7 @@ TEST_CASE(UserDictionaryEqualWeightPromoteDoesNotWriteNegatives)
 
 TEST_CASE(UserDictionaryReplaySkipsNonpositivePinyinUpserts)
 {
-    const auto directory = std::filesystem::temp_directory_path() /
-                           ("msime-skip-negative-replay-" + std::to_string(GetCurrentProcessId()));
+    const auto directory = test::TempRoot() / ("msime-skip-negative-replay-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::create_directories(directory);
     const auto user_path = directory / "msime_user.db";
     const auto main_path = directory / "msime.db";
@@ -831,8 +818,7 @@ TEST_CASE(UserDictionaryReplaySkipsNonpositivePinyinUpserts)
 // UPDATE 改不到任何东西，但日志照记，升级回放时 apply_pinyin 就把日文词插进了拼音表。
 TEST_CASE(UserDictionaryRankingDoesNotJournalRowsMissingFromTheDictionary)
 {
-    const auto directory = std::filesystem::temp_directory_path() /
-                           ("msime-ranking-missing-rows-" + std::to_string(GetCurrentProcessId()));
+    const auto directory = test::TempRoot() / ("msime-ranking-missing-rows-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::create_directories(directory);
     const auto user_path = directory / "msime_user.db";
     const auto main_path = directory / "msime.db";
@@ -862,8 +848,7 @@ TEST_CASE(UserDictionaryRankingDoesNotJournalRowsMissingFromTheDictionary)
 // 已经写进日志的那些残留：升级回放要跳过，打开日志时清掉；用户在设置页手动加的带假名词不能动。
 TEST_CASE(UserDictionaryReplaySkipsLearnedKanaPinyinUpserts)
 {
-    const auto directory =
-        std::filesystem::temp_directory_path() / ("msime-skip-kana-replay-" + std::to_string(GetCurrentProcessId()));
+    const auto directory = test::TempRoot() / ("msime-skip-kana-replay-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::create_directories(directory);
     const auto user_path = directory / "msime_user.db";
     const auto main_path = directory / "msime.db";
@@ -915,8 +900,7 @@ TEST_CASE(UserDictionaryReplaySkipsLearnedKanaPinyinUpserts)
 
 TEST_CASE(UserDictionaryLocalRebalanceKeepsPositiveSameKeyWeights)
 {
-    const auto directory =
-        std::filesystem::temp_directory_path() / ("msime-local-rebalance-" + std::to_string(GetCurrentProcessId()));
+    const auto directory = test::TempRoot() / ("msime-local-rebalance-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::create_directories(directory);
     const auto user_path = directory / "msime_user.db";
     const auto main_path = directory / "msime.db";
@@ -951,8 +935,8 @@ TEST_CASE(UserDictionaryLocalRebalanceKeepsPositiveSameKeyWeights)
 // 现网 -> xian'wang）。较短的那个键现在也参与比权，但写入必须只落在 entry_key 的行上。
 TEST_CASE(UserDictionaryRankingKeepsWritesOnTheEntryKeyWhenKeysAreReconstructed)
 {
-    const auto directory = std::filesystem::temp_directory_path() /
-                           ("msime-reconstructed-key-ranking-" + std::to_string(GetCurrentProcessId()));
+    const auto directory =
+        test::TempRoot() / ("msime-reconstructed-key-ranking-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::create_directories(directory);
     const auto user_path = directory / "msime_user.db";
     const auto main_path = directory / "msime.db";
@@ -981,8 +965,7 @@ TEST_CASE(UserDictionaryRankingKeepsWritesOnTheEntryKeyWhenKeysAreReconstructed)
 
 TEST_CASE(UserDictionaryWubiPromoteUpdatesWubiTable)
 {
-    const auto directory =
-        std::filesystem::temp_directory_path() / ("msime-wubi-ranking-" + std::to_string(GetCurrentProcessId()));
+    const auto directory = test::TempRoot() / ("msime-wubi-ranking-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::create_directories(directory);
     const auto user_path = directory / "msime_user.db";
     const auto main_path = directory / "msime.db";
@@ -1021,8 +1004,7 @@ TEST_CASE(UserDictionaryWubiPromoteUpdatesWubiTable)
 // 日期时间格式按格式 ID 调频：日期文本每天都变，学到的顺序和固定位置都不能按文字记。
 TEST_CASE(DateTimeFormatOrderIsLearnedPinnedAndFixedByFormatId)
 {
-    const auto directory =
-        std::filesystem::temp_directory_path() / ("msime-date-time-order-" + std::to_string(GetCurrentProcessId()));
+    const auto directory = test::TempRoot() / ("msime-date-time-order-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::remove_all(directory);
     std::filesystem::create_directories(directory);
     const std::string user_path = test::Utf8(directory / "msime_user.db");
