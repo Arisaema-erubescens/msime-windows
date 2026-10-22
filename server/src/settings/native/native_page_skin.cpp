@@ -369,7 +369,7 @@ void SkinPage::RebuildExternal()
 
     const Json *issues = model_->Find("appearance.candidate_skin_scan_issues");
     std::vector<std::wstring> entries;
-    // 加载失败的目录和能用但带提示的皮肤都进 issues，汇总里要分开数；两者由 Scan 标好，不按卡片是否已列出推断。
+    // 加载失败的目录和能用但带提示的皮肤都进 issues，汇总里要分开数。两者由 Scan 标好，设置页不按卡片是否已列出推断。
     size_t invalid = 0;
     size_t noticed = 0;
     if (issues && issues->is_array())

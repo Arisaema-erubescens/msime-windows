@@ -416,7 +416,11 @@ TEST_CASE(candidate_skin_catalog_v1_cannot_use_the_canvas_base)
 TEST_CASE(candidate_skin_catalog_v2_without_canvas_loads_as_v1_and_reports_an_issue)
 {
     // Even invalid v2 tables do not matter: they are not read at all.
-    const std::string window = std::string(kPanel) + R"toml(line_gap_dip = 6
+    const std::string window = R"toml(line_gap_dip = 6
+
+[candidate_window.border_image]
+source = "assets/mascot.apng"
+slice_dip = [12]
 
 [candidate_window.outer_insets_dip]
 top = 20
@@ -436,10 +440,12 @@ z_index = "high"
         REQUIRE(package.has_value());
         REQUIRE_EQ(package->schemaVersion, 1);
         REQUIRE_EQ(package->notices.size(), size_t{1});
-        // line_gap_dip above sits inside [candidate_window.border_image], so it is not one of the window's keys.
+        // Every canvas-only key the manifest writes is named, in the loader's key order; line_gap_dip is one of the
+        // window's own keys and a v1 skin would not read it either, so it is reported too.
         REQUIRE_EQ(package->notices.front(),
-                   std::string("candidate_window.border_image、candidate_window.outer_insets_dip、candidate_window."
-                               "decorations 只在 base = \"canvas\" 时生效，已忽略"));
+                   std::string("candidate_window.border_image、candidate_window.outer_insets_dip、"
+                               "candidate_window.line_gap_dip、candidate_window.decorations 只在 base = \"canvas\" "
+                               "时生效，已忽略"));
         REQUIRE(!package->borderImage.has_value());
         REQUIRE(!package->lineGapDip.has_value());
         REQUIRE(!package->outerInsetsDip.has_value());

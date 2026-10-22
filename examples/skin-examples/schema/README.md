@@ -1,6 +1,6 @@
 # 外部皮肤 manifest（TOML）
 
-每个皮肤目录需要 `skin.toml`，`id` 必须与文件夹名一致。`schema_version` 支持 `1` 与 `2`，同时也是 msime 各平台共用的清单版本：写在 `base = "canvas"` 上时由 Direct2D 候选窗完整绘制（九宫格面板、上下两层挂件、动图），写在别的基底上时按 `schema_version = 1` 加载，皮肤照常可用，只是用不上 canvas 那几张表。
+每个皮肤目录需要 `skin.toml`，`id` 必须与文件夹名一致。`schema_version` 支持 `1` 与 `2`，同时也是 msime 各平台共用的清单版本：写在 `base = "canvas"` 上时由 Direct2D 候选窗完整绘制（九宫格面板、上下两层挂件、动图）；写在别的基底上时按 `schema_version = 1` 加载，皮肤照常可用，只是九宫格面板、自由挂件、`line_gap_dip` 这些 canvas 专属键不生效，清单里写了它们时设置页会列出来。
 
 候选框和悬浮工具栏都由 `skin.toml` 声明，不要再提供 `cand.css` 或工具栏 CSS。所有图片路径都相对于皮肤目录，且不能指向目录之外。
 
