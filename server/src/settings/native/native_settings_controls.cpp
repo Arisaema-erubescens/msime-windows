@@ -1251,9 +1251,11 @@ thread_local std::vector<RowCollectorState> g_rowCollectorStack;
 std::shared_ptr<SettingRow> MakeRow(std::wstring title, std::wstring description, VisualPtr control, bool subItem)
 {
     auto row = std::make_shared<SettingRow>(MakeTitleBlock(title, description, subItem), std::move(control));
-    row->SetSearchText(title, description);
+    // Search text is kept on the row because the index is built from it later; the labels above
+    // only own their own copies.
+    row->SetSearchText(std::move(title), std::move(description));
     if (!g_rowCollectorStack.empty() && g_rowCollectorStack.back().collector)
-        g_rowCollectorStack.back().collector({title, description, row});
+        g_rowCollectorStack.back().collector({row->SearchTitle(), row->SearchDescription(), row});
     return row;
 }
 

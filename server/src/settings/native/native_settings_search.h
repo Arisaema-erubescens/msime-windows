@@ -14,21 +14,21 @@
 
 namespace native_settings
 {
+class SettingRow;
+
 // One indexed settings row.
 //
-// The entry owns its row rather than pointing at a page's copy. Pages are built for the index
-// without being shown, so if the index only pointed weakly the rows would die the moment the
-// builder returned; holding them keeps a background-indexed page's rows alive for as long as the
-// index needs them, which is what lets every setting be searchable before it has been opened.
-// The cost is one visual tree per page that was indexed but never visited, which is what the
-// window would have held anyway once the user visited it.
+// `row` is a weak handle on the page's row, and the page stays in the window's page cache for as
+// long as the entry is useful, so locking it gives back the very visual that is on screen. A
+// weak_ptr needs only a forward declaration, which is what keeps this header free of the control
+// headers and their D2D dependency; the portable test target includes this one.
 struct SettingsIndexEntry
 {
     std::string pageId;
     std::wstring pageTitle;
     std::wstring title;
     std::wstring description;
-    std::shared_ptr<void> row;
+    std::weak_ptr<SettingRow> row;
 };
 
 // Matches `query` against entry titles and descriptions, best first.

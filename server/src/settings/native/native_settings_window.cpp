@@ -610,16 +610,10 @@ class SidebarSearch : public msimeui::Panel
     }
 
     // Rows collected so far, in page order. The window rebuilds this as pages get built.
+    // Re-runs the current query against a new index.
     void SetIndex(const std::shared_ptr<const std::vector<SettingsIndexEntry>> &index)
     {
         index_ = index;
-        if (!Query().empty())
-            Search(Query());
-    }
-
-    // Re-runs the current query, e.g. after the index grew.
-    void Refresh()
-    {
         if (!Query().empty())
             Search(Query());
     }
@@ -628,12 +622,6 @@ class SidebarSearch : public msimeui::Panel
     {
         if (field_ && window_)
             window_->FocusVisual(field_->Box().get());
-    }
-
-    // Results currently shown; the sidebar asks for the extra size they need.
-    bool HasResults() const
-    {
-        return !results_.empty();
     }
 
     SizeF Measure(const SizeF &availableSize) override
@@ -1361,7 +1349,7 @@ class RootPanel : public msimeui::Panel
     {
         const Columns c = Split(availableSize);
         titleBar_->MeasureInLayout({availableSize.width, kTitleBarHeight});
-        sidebar_->MeasureInLayout({kSidebarWidth, c.bodyHeight});
+        sidebar_->MeasureInLayout({c.sidebarWidth, c.bodyHeight});
         content_->MeasureInLayout({c.contentWidth, c.bodyHeight - 2.0f});
         modal_->MeasureInLayout({availableSize.width, c.bodyHeight});
         toast_->MeasureInLayout(availableSize);
@@ -1374,7 +1362,7 @@ class RootPanel : public msimeui::Panel
         bounds_ = finalRect;
         const Columns c = Split({finalRect.width, finalRect.height});
         titleBar_->ArrangeInLayout({finalRect.x, finalRect.y, finalRect.width, kTitleBarHeight});
-        sidebar_->ArrangeInLayout({finalRect.x, finalRect.y + kTitleBarHeight, kSidebarWidth, c.bodyHeight});
+        sidebar_->ArrangeInLayout({finalRect.x, finalRect.y + kTitleBarHeight, c.sidebarWidth, c.bodyHeight});
         // #content-container { margin-top: 2px }
         content_->ArrangeInLayout({finalRect.x + c.sidebarWidth, finalRect.y + kTitleBarHeight + 2.0f, c.contentWidth,
                                    std::max(c.bodyHeight - 2.0f, 0.0f)});
@@ -1519,6 +1507,9 @@ class SettingsWindowImpl : public HostServices
                      SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         model_.Post("configRequest");
         ShowPage(initialPage.empty() ? std::string("input") : initialPage);
+        // Fill in the pages the user has not opened, one per tick, so search covers the whole
+        // settings tree rather than only what has been visited this session.
+        SetTimer(hwnd_, kIndexPageTimer, 1, nullptr);
         if (model_.HasConfig())
             splash_->Dismiss();
         else
@@ -1675,10 +1666,7 @@ class SettingsWindowImpl : public HostServices
         VisualPtr built;
         {
             SettingsIndexScope scope(pageId, [slice, pageId, pageTitle](const SettingsIndexScope::Row &row) {
-                // Row::row is weak and the page owns the row, so lock it: the entry has to stay
-                // usable for as long as the index does.
-                if (auto held = row.row.lock())
-                    slice->push_back({pageId, pageTitle, row.title, row.description, held});
+                slice->push_back({pageId, pageTitle, row.title, row.description, row.row});
             });
             built = pages[index].build(context_);
         }
@@ -1701,7 +1689,7 @@ class SettingsWindowImpl : public HostServices
         {
             for (const SettingsIndexEntry &entry : *pageEntries)
             {
-                if (entry.row)
+                if (!entry.row.expired())
                     flat->push_back(entry);
             }
         }
@@ -1720,8 +1708,10 @@ class SettingsWindowImpl : public HostServices
         while (nextIndexPage_ < pages.size())
         {
             const size_t index = nextIndexPage_++;
-            // Already built for display, so its rows are in the index already.
-            if (index == current_ || pageCache_.count(index) != 0)
+            // Built already: either it is on screen, or the indexer got to it earlier. Both are
+            // in `pageCache_`, so membership is the only test needed and a page cannot be skipped
+            // just because it happens to be the one showing.
+            if (pageCache_.count(index) != 0)
                 continue;
             pageCache_[index] = BuildPageAndIndex(index);
             return;
@@ -1738,12 +1728,12 @@ class SettingsWindowImpl : public HostServices
             if (entry.pageId != pages[i].id)
                 continue;
             ShowPageIndex(i, false);
-            if (entry.row && window_)
+            if (auto row = entry.row.lock())
             {
-                auto *row = static_cast<SettingRow *>(entry.row.get());
                 ScrollIntoView(*row);
                 // Focus the row so the scroll target is also where the keyboard goes next.
-                window_->FocusVisual(row);
+                if (window_)
+                    window_->FocusVisual(row.get());
             }
             return;
         }
@@ -1851,6 +1841,12 @@ class SettingsWindowImpl : public HostServices
             {
                 KillTimer(hwnd_, kSplashTimer);
                 splash_->Dismiss();
+                result = 0;
+                return true;
+            }
+            if (wParam == kIndexPageTimer)
+            {
+                IndexNextPage();
                 result = 0;
                 return true;
             }

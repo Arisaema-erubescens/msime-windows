@@ -11,16 +11,24 @@ namespace
 using native_settings::SearchSettings;
 using native_settings::SettingsIndexEntry;
 
-// A live stand-in for a settings row. The index stores only a weak handle, so the tests need
-// something to keep alive and let die; it carries no data of its own.
-struct FakeRow
+// A live stand-in for a settings row. The header only forward-declares SettingRow, so the test
+// cannot construct one; a non-null pointer with a no-op deleter is enough to make the weak handle
+// lock and a null one to make it expired, which is all SearchSettings looks at.
+native_settings::SettingRow *FakeRowPointer()
 {
-};
+    static char storage = 0;
+    return reinterpret_cast<native_settings::SettingRow *>(&storage);
+}
+
+std::shared_ptr<native_settings::SettingRow> MakeFakeRow()
+{
+    return std::shared_ptr<native_settings::SettingRow>(FakeRowPointer(), [](native_settings::SettingRow *) {});
+}
 
 struct RowBuilder
 {
     std::vector<SettingsIndexEntry> entries;
-    std::vector<std::shared_ptr<FakeRow>> kept;
+    std::vector<std::shared_ptr<native_settings::SettingRow>> kept;
 
     // `alive = false` gives an entry with no row, the way a malformed entry or one built for a
     // page that was torn down would look.
@@ -34,7 +42,7 @@ struct RowBuilder
         entry.description = description;
         if (alive)
         {
-            auto row = std::make_shared<FakeRow>();
+            auto row = MakeFakeRow();
             kept.push_back(row);
             entry.row = row;
         }
