@@ -651,7 +651,7 @@ class SidebarSearch : public msimeui::Panel
     void Search(const std::wstring &query)
     {
         results_.clear();
-        auto fresh = std::make_shared<msimeui::Column>(0.0f);
+        auto fresh = std::make_shared<Column>(0.0f);
         if (index_ && !query.empty())
         {
             results_ = SearchSettings(*index_, query);
