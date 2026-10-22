@@ -597,7 +597,11 @@ class ActionButton : public msimeui::Visual
         const bool clicked = pressed_ && window_ && HitTest(window_->ClientPixelsToDips(point));
         pressed_ = false;
         if (clicked && onClick_ && !disabled_)
-            onClick_();
+        {
+            // A handler may tear down the visual that owns onClick_ while it runs.
+            const auto handler = onClick_;
+            handler();
+        }
         return true;
     }
 
@@ -638,13 +642,20 @@ class RecordButton : public ActionButton
 
     bool OnKeyDown(WPARAM key, LPARAM lParam) override
     {
-        return onKey_ && onKey_(key, lParam);
+        if (!onKey_)
+            return false;
+        // The handler may rebuild the editor list and destroy this button.
+        const auto handler = onKey_;
+        return handler(key, lParam);
     }
 
     void OnFocusChanged(bool focused) override
     {
         if (!focused && onBlur_)
-            onBlur_();
+        {
+            const auto handler = onBlur_;
+            handler();
+        }
     }
 
   private:
