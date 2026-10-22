@@ -79,4 +79,22 @@ float WheelScrollDelta(short wheelDelta, float notchDistance);
 // content into view while moving as little as possible; a span longer than the
 // viewport shows its start.
 float OffsetToReveal(const ScrollExtent &extent, float offset, float spanStart, float spanLength);
+
+// Smooth scrolling from `from` to `target`, easing out (cubic) over `durationMs`.
+struct ScrollGlide
+{
+    float from = 0.0f;
+    float target = 0.0f;
+    double startMs = 0.0;
+    double durationMs = 0.0;
+
+    // A glide that starts at `nowMs` from `from`, where the content moves at `velocity`
+    // DIPs per ms. When it already moves towards `target` faster than a glide of
+    // `durationMs` would start, the glide is shortened so the speed carries on.
+    static ScrollGlide Start(float from, float velocity, float target, double nowMs, double durationMs);
+    float OffsetAt(double nowMs) const;
+    // DIPs per ms.
+    float VelocityAt(double nowMs) const;
+    bool IsDoneAt(double nowMs) const;
+};
 } // namespace msimeui

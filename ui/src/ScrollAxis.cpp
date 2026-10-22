@@ -1,6 +1,7 @@
 #include "msimeui/ScrollAxis.h"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace msimeui
@@ -140,5 +141,40 @@ float OffsetToReveal(const ScrollExtent &extent, float offset, float spanStart, 
         revealed = std::min(spanStart, spanEnd - viewport);
     }
     return ClampScrollOffset(revealed, extent);
+}
+
+ScrollGlide ScrollGlide::Start(float from, float velocity, float target, double nowMs, double durationMs)
+{
+    // An ease-out cubic starts at 3 * distance / duration. When the content already moves
+    // faster than that in the same direction, the duration shrinks until the glide starts
+    // at the current speed.
+    const double distance = static_cast<double>(target) - static_cast<double>(from);
+    const double speed = std::fabs(static_cast<double>(velocity));
+    double duration = durationMs;
+    if (static_cast<double>(velocity) * distance > 0.0 && speed * duration > 3.0 * std::fabs(distance))
+    {
+        duration = std::max(3.0 * std::fabs(distance) / speed, 1.0);
+    }
+    return {from, target, nowMs, duration};
+}
+
+float ScrollGlide::OffsetAt(double nowMs) const
+{
+    const double progress = std::clamp((nowMs - startMs) / std::max(durationMs, 1.0), 0.0, 1.0);
+    const double rest = 1.0 - progress;
+    return from + (target - from) * static_cast<float>(1.0 - rest * rest * rest);
+}
+
+float ScrollGlide::VelocityAt(double nowMs) const
+{
+    const double duration = std::max(durationMs, 1.0);
+    const double progress = std::clamp((nowMs - startMs) / duration, 0.0, 1.0);
+    const double rest = 1.0 - progress;
+    return static_cast<float>(3.0 * (target - from) * rest * rest / duration);
+}
+
+bool ScrollGlide::IsDoneAt(double nowMs) const
+{
+    return nowMs >= startMs + durationMs;
 }
 } // namespace msimeui
