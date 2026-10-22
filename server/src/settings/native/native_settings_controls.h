@@ -1,5 +1,6 @@
 #pragma once
 
+#include "settings/native/native_settings_search.h"
 #include "settings/native/native_settings_theme.h"
 
 #include "msimeui/Animation.h"
@@ -380,6 +381,20 @@ class SettingRow : public msimeui::Panel
     // `left` is usually a Column of title + description; `control` may be null.
     SettingRow(VisualPtr left, VisualPtr control);
 
+    // Searchable text of this row: the title, and the description as secondary matches. Set by
+    // MakeRow, which is where every settings row is built; pages that hand-build a SettingRow are
+    // simply not indexed. Kept here rather than read back out of the title labels so the index
+    // does not depend on how a row happens to lay out its left column.
+    void SetSearchText(std::wstring title, std::wstring description);
+    const std::wstring &SearchTitle() const
+    {
+        return searchTitle_;
+    }
+    const std::wstring &SearchDescription() const
+    {
+        return searchDescription_;
+    }
+
     SizeF Measure(const SizeF &availableSize) override;
     void Arrange(const RectF &finalRect) override;
     void Render(msimeui::DeviceResources &dr) override;
@@ -389,6 +404,8 @@ class SettingRow : public msimeui::Panel
     VisualPtr control_;
     SizeF leftSize_ = {};
     SizeF controlSize_ = {};
+    std::wstring searchTitle_;
+    std::wstring searchDescription_;
 };
 
 // Title (+ description) block used on the left of a SettingRow.
@@ -396,6 +413,31 @@ VisualPtr MakeTitleBlock(std::wstring title, std::wstring description = {}, bool
 // The common row: section title, optional description, control on the right.
 std::shared_ptr<SettingRow> MakeRow(std::wstring title, std::wstring description, VisualPtr control,
                                     bool subItem = false);
+
+// Scope that tells MakeRow which page is being built, so every row it creates lands in that
+// page's slice of the search index. Set by the window around a PageInfo::build call; nested
+// scopes restore the previous one. Without it rows still build, they are just not indexed, which
+// is what happens in the control tests.
+class SettingsIndexScope
+{
+  public:
+    struct Row
+    {
+        std::wstring title;
+        std::wstring description;
+        std::weak_ptr<SettingRow> row;
+    };
+
+    // `collector` is called once per row created inside the scope, in build order.
+    SettingsIndexScope(std::string pageId, std::function<void(const Row &)> collector);
+    ~SettingsIndexScope();
+    SettingsIndexScope(const SettingsIndexScope &) = delete;
+    SettingsIndexScope &operator=(const SettingsIndexScope &) = delete;
+};
+
+// One indexed settings row, plus the matcher that ranks it. Defined in native_settings_search.h
+// because that header and its .cpp stay free of D2D so they can run in the portable test target.
+// (including the header here re-exports them to every page, which is what the pages want)
 
 // `.content-header` + sections, wrapped in the page column (max 900, centered).
 class PageBuilder

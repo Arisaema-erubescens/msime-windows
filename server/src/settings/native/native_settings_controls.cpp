@@ -1181,6 +1181,12 @@ SettingRow::SettingRow(VisualPtr left, VisualPtr control) : left_(std::move(left
         AddChild(control_);
 }
 
+void SettingRow::SetSearchText(std::wstring title, std::wstring description)
+{
+    searchTitle_ = std::move(title);
+    searchDescription_ = std::move(description);
+}
+
 SizeF SettingRow::Measure(const SizeF &availableSize)
 {
     constexpr float kGap = 10.0f;
@@ -1230,10 +1236,36 @@ VisualPtr MakeTitleBlock(std::wstring title, std::wstring description, bool subI
     return column;
 }
 
+namespace
+{
+// Innermost SettingsIndexScope, or empty when no page is being indexed.
+struct RowCollectorState
+{
+    std::string pageId;
+    std::function<void(const SettingsIndexScope::Row &)> collector;
+};
+
+thread_local std::vector<RowCollectorState> g_rowCollectorStack;
+} // namespace
+
 std::shared_ptr<SettingRow> MakeRow(std::wstring title, std::wstring description, VisualPtr control, bool subItem)
 {
-    return std::make_shared<SettingRow>(MakeTitleBlock(std::move(title), std::move(description), subItem),
-                                        std::move(control));
+    auto row = std::make_shared<SettingRow>(MakeTitleBlock(title, description, subItem), std::move(control));
+    row->SetSearchText(title, description);
+    if (!g_rowCollectorStack.empty() && g_rowCollectorStack.back().collector)
+        g_rowCollectorStack.back().collector({title, description, row});
+    return row;
+}
+
+SettingsIndexScope::SettingsIndexScope(std::string pageId, std::function<void(const Row &)> collector)
+{
+    g_rowCollectorStack.push_back({std::move(pageId), std::move(collector)});
+}
+
+SettingsIndexScope::~SettingsIndexScope()
+{
+    if (!g_rowCollectorStack.empty())
+        g_rowCollectorStack.pop_back();
 }
 
 PageBuilder::PageBuilder(std::wstring title) : column_(std::make_shared<Column>(0.0f))
