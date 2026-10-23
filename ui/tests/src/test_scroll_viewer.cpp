@@ -190,6 +190,7 @@ class RenderSurface
     class HiddenWindow
     {
       public:
+        HiddenWindow() = default;
         ~HiddenWindow()
         {
             if (hwnd_)
