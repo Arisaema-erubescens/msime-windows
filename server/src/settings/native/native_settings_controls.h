@@ -6,6 +6,7 @@
 #include "msimeui/Animation.h"
 #include "msimeui/Controls.h"
 #include "msimeui/Layout.h"
+#include "msimeui/ScrollAxis.h"
 
 #include <dwrite.h>
 #include <wrl/client.h>
@@ -496,6 +497,65 @@ class ToggleSwitch : public msimeui::Visual
     bool disabled_ = false;
     msimeui::Tween knob_{0.0f};
     ChangeHandler onChanged_;
+};
+
+// The scrollbar of a `.compact-scroll-menu` list (dropdown menus, the AI model list): a
+// 4 DIP thumb 2 DIPs from the list's right edge and 4 from each end, at least 24 long. A
+// band along the right edge, wider than the thumb, takes presses and hover while the
+// content overflows. It owns the list's scroll offset; the list draws its rows at
+// GetPlacedOffset and forwards the mouse here first.
+//
+// The list calls Layout whenever its content or box changes, before any other call.
+class CompactMenuScrollbar
+{
+  public:
+    // `contentHeight` covers the rows and their inset. `viewport` is the height shown, or
+    // the height the list asks for while it is not arranged yet. `bounds` is the list's
+    // box.
+    void Layout(float contentHeight, float viewport, const RectF &bounds);
+    // Back to the top, with no drag or hover.
+    void Reset();
+
+    bool CanScroll() const;
+    float GetOffset() const;
+    // The offset rounded to whole device pixels at `dpi`: scrolled rows keep the pixel
+    // phase they have unscrolled.
+    float GetPlacedOffset(float dpi) const;
+    // The following return whether the list has to be redrawn.
+    bool SetOffset(float offset);
+    // Scrolls as little as possible to show content [start, start + length).
+    bool Reveal(float start, float length);
+    bool Wheel(short delta);
+
+    bool IsOnScrollbar(const PointF &point) const;
+    bool IsDragging() const;
+    // Drawn in the hot color: the pointer is over the scrollbar, or dragging the thumb
+    // wherever it is.
+    bool IsHot() const;
+    // A press on the scrollbar starts a drag that lasts until Release; the pointer may
+    // leave the list meanwhile.
+    bool Press(const PointF &point);
+    // Pointer moves: drags while dragging with the left button held, otherwise tracks
+    // hover.
+    bool Move(const PointF &point, WPARAM keyState);
+    bool Release(const PointF &point);
+    bool Leave();
+
+    // `hotColor` while IsHot.
+    void Render(msimeui::DeviceResources &dr, const D2D1_COLOR_F &color, const D2D1_COLOR_F &hotColor) const;
+
+  private:
+    msimeui::ScrollExtent Extent() const;
+    msimeui::ScrollTrack Track() const;
+
+    float contentHeight_ = 0.0f;
+    float viewport_ = 0.0f;
+    RectF bounds_ = {};
+    float offset_ = 0.0f;
+    bool hovered_ = false;
+    bool dragging_ = false;
+    // Where along the thumb the pointer holds it while dragging.
+    float grip_ = 0.0f;
 };
 
 // One entry of a dropdown menu.

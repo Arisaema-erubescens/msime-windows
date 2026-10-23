@@ -252,6 +252,46 @@ target_link_libraries(${TEST_EXECUTABLE_NAME}
 
 add_test(NAME ${TEST_EXECUTABLE_NAME} COMMAND ${TEST_EXECUTABLE_NAME})
 
+# Settings-window controls driven through a real msimeui::Window. The settings executable's own
+# sources are compiled in, all but its entry point, so the controls under test are the shipped ones
+# and the list cannot fall behind the executable's.
+get_target_property(_settings_sources ${SETTINGS_EXECUTABLE_NAME} SOURCES)
+set(SETTINGS_UI_TEST_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/settings_ui_main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/test_settings_dropdown_scroll.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/test_settings_ai_model_list_scroll.cpp"
+)
+foreach(_source IN LISTS _settings_sources)
+    if(_source MATCHES "settings_app\\.cpp$" OR NOT _source MATCHES "\\.cpp$")
+        continue()
+    endif()
+    get_filename_component(_source "${_source}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+    list(APPEND SETTINGS_UI_TEST_SOURCES "${_source}")
+endforeach()
+add_executable(MetasequoiaImeSettingsUiTests ${SETTINGS_UI_TEST_SOURCES})
+target_include_directories(MetasequoiaImeSettingsUiTests PRIVATE "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/include")
+target_link_libraries(MetasequoiaImeSettingsUiTests PRIVATE
+    msimeui
+    MetasequoiaIme::Engine
+    fmt::fmt
+    Boost::locale
+    Boost::json
+    nlohmann_json::nlohmann_json
+    unofficial::sqlite3::sqlite3
+    spdlog::spdlog
+    cpp-pinyin::cpp-pinyin
+    CURL::libcurl
+    ZLIB::ZLIB
+    bcrypt
+    winhttp
+    dwmapi
+    dcomp
+    d2d1
+    dwrite
+    shell32
+)
+add_test(NAME MetasequoiaImeSettingsUiTests COMMAND MetasequoiaImeSettingsUiTests)
+
 # The identical fixture file also runs in Engine's JavaScript contract CI.
 add_executable(test_webview_contract "${MSIME_ENGINE_DIR}/contracts/webview/test.cpp")
 target_link_libraries(test_webview_contract PRIVATE Boost::json)
