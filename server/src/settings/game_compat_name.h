@@ -13,10 +13,10 @@
 // (windows/src/Register/Register.cpp reads it so installs and upgrades keep it) and rewrites the profile Description
 // that games and the language bar read. The game only reads the name when it starts.
 //
-// Description alone was not enough before: at that time the profile was registered with bEnabledByDefault and never
-// installed into the user's keyboard list, so the name the user saw stayed at the old cached one. Register.cpp now
-// calls InstallLayoutOrTip as well, and an existing install that predates it is brought up to date the first time the
-// switch is applied.
+// Description alone was not enough before: the profile was enabled by default in HKLM but never installed into the
+// user's keyboard list, so the name the user saw stayed at the old cached one. The installer now installs it as the
+// original user (input_method_install.h), and an existing install that predates that is brought up to date the first
+// time the switch is applied.
 
 #include <Windows.h>
 

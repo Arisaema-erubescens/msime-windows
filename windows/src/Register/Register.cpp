@@ -139,45 +139,6 @@ BOOL RegisterProfiles()
         goto Exit;
     }
 
-    // bEnabledByDefault above only writes Enable in HKLM: the profile gets listed for switching but never reaches
-    // Control Panel\International\User Profile, so the name the language bar and the settings page show is not the
-    // Description registered here (a renamed profile keeps its old name there, see the game compat switch).
-    // InstallLayoutOrTip puts the profile into the user's keyboard list for zh-CN, which is what makes that name
-    // visible. It writes HKCU only and does not need elevation, which is why it can run from an elevated
-    // registration too. Failure is not fatal: the input method stays usable the way it was before.
-    HINSTANCE inputLibrary = LoadLibraryExW(L"input.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
-    if (inputLibrary)
-    {
-        typedef BOOL(WINAPI * InstallLayoutOrTipFn)(LPCWSTR, DWORD);
-        InstallLayoutOrTipFn install =
-            reinterpret_cast<InstallLayoutOrTipFn>(GetProcAddress(inputLibrary, "InstallLayoutOrTip"));
-        if (install)
-        {
-            WCHAR profileId[96];
-            hr = StringCchPrintfW(
-                profileId, ARRAYSIZE(profileId),
-                L"%04X:{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}"
-                L"{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
-                TEXTSERVICE_LANGID, Global::MetasequoiaIMECLSID.Data1, Global::MetasequoiaIMECLSID.Data2,
-                Global::MetasequoiaIMECLSID.Data3, Global::MetasequoiaIMECLSID.Data4[0],
-                Global::MetasequoiaIMECLSID.Data4[1], Global::MetasequoiaIMECLSID.Data4[2],
-                Global::MetasequoiaIMECLSID.Data4[3], Global::MetasequoiaIMECLSID.Data4[4],
-                Global::MetasequoiaIMECLSID.Data4[5], Global::MetasequoiaIMECLSID.Data4[6],
-                Global::MetasequoiaIMECLSID.Data4[7], Global::MetasequoiaIMEGuidProfile.Data1,
-                Global::MetasequoiaIMEGuidProfile.Data2, Global::MetasequoiaIMEGuidProfile.Data3,
-                Global::MetasequoiaIMEGuidProfile.Data4[0], Global::MetasequoiaIMEGuidProfile.Data4[1],
-                Global::MetasequoiaIMEGuidProfile.Data4[2], Global::MetasequoiaIMEGuidProfile.Data4[3],
-                Global::MetasequoiaIMEGuidProfile.Data4[4], Global::MetasequoiaIMEGuidProfile.Data4[5],
-                Global::MetasequoiaIMEGuidProfile.Data4[6], Global::MetasequoiaIMEGuidProfile.Data4[7]);
-            if (SUCCEEDED(hr))
-            {
-                install(profileId, 0);
-            }
-        }
-        FreeLibrary(inputLibrary);
-    }
-    hr = S_OK;
-
 Exit:
     if (pITfInputProcessorProfileMgr)
     {

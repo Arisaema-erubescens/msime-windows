@@ -9,6 +9,7 @@
 #include "settings/neural_model.h"
 #include "settings/default_input_method.h"
 #include "settings/game_compat_name.h"
+#include "settings/input_method_install.h"
 #include "settings/dictionary_manager.h"
 #include "settings/native/native_settings_window.h"
 
@@ -1951,6 +1952,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_pa
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line, int show_command)
 {
     TraceStartup("wWinMain");
+    // Per-user keyboard list entry, started by the installer as the original user; no window, no single-instance
+    // check. Must come before the elevated half below: that one writes HKLM and must not touch HKCU.
+    if (const int profile_result = input_method_install::RunRegisterProfileIfRequested(command_line);
+        profile_result >= 0)
+        return profile_result;
     // The elevated half of the game-compat switch: write HKLM and exit, no window, no single-instance check.
     if (const int elevated_result = game_compat_name::RunElevatedApplyIfRequested(command_line); elevated_result >= 0)
         return elevated_result;

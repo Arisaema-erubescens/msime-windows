@@ -1,5 +1,7 @@
 #include "game_compat_name.h"
 
+#include "settings/input_method_install.h"
+
 #include <shellapi.h>
 
 #include <vector>
@@ -17,13 +19,10 @@ constexpr wchar_t kRecordKey[] = L"Software\\Metasequoia\\MetasequoiaIME";
 constexpr wchar_t kRecordValue[] = L"GameCompatProfileName";
 // Where windows/src/Register/Register.cpp registers the profile, and the only place a TSF profile name lives:
 // GetLanguageProfileDescription and the language bar read Display Description if the key has one and Description
-// otherwise, so writing Description here is enough once the profile is installed in the user's keyboard list.
-// Before windows/src/Register/Register.cpp started calling InstallLayoutOrTip it was not, and the name stayed at
-// whatever the keyboard list had cached.
+// otherwise. What those views actually show is the keyboard list entry the user has, which is why the profile has to
+// be installed there (input_method_install.h) for a rename to be visible at all.
 constexpr wchar_t kTipProfileKey[] = L"SOFTWARE\\Microsoft\\CTF\\TIP\\{E3062E9A-D834-4637-8958-ED8CFA427D01}"
                                      L"\\LanguageProfile\\0x00000804\\{4D59B1B4-D503-44AE-9259-BAD9BB2778AB}";
-// The profile as the keyboard list names it: language id, CLSID and profile GUID.
-constexpr wchar_t kProfileId[] = L"0804:{e3062e9a-d834-4637-8958-ed8cfa427d01}{4d59b1b4-d503-44ae-9259-bad9bb2778ab}";
 // TEXTSERVICE_DESC in windows/src/Register/Register.cpp: what the profile is called with the switch off.
 constexpr wchar_t kProductName[] = L"Metasequoia 水杉输入法";
 
@@ -72,42 +71,6 @@ bool IsTipRegistered()
     return true;
 }
 
-// Whether the profile already sits in the user's keyboard list. Until windows/src/Register/Register.cpp called
-// InstallLayoutOrTip at registration, every install was in the other state, and writing Description in that state
-// changed nothing the user could see.
-bool IsInstalledForUser()
-{
-    const std::wstring language = L"Control Panel\\International\\User Profile\\zh-Hans-CN";
-    HKEY key = nullptr;
-    // Native views of HKCU: the registration that runs this is 64-bit, but the value is the same in both views.
-    if (RegOpenKeyExW(reinterpret_cast<HKEY>(static_cast<ULONG_PTR>(0x80000001)), language.c_str(), 0,
-                      KEY_READ | KEY_WOW64_64KEY, &key) != ERROR_SUCCESS)
-        return false;
-    DWORD order = 0;
-    DWORD bytes = sizeof(order);
-    const LSTATUS status =
-        RegQueryValueExW(key, kProfileId, nullptr, nullptr, reinterpret_cast<BYTE *>(&order), &bytes);
-    RegCloseKey(key);
-    return status == ERROR_SUCCESS;
-}
-
-// Puts the profile into the user's keyboard list so the registered name reaches the language bar and the settings
-// page. InstallLayoutOrTip only writes HKCU, so elevation is not needed; failure leaves the input method as usable as
-// it was before, which is why it is not reported.
-void InstallForUser()
-{
-    if (IsInstalledForUser())
-        return;
-    HINSTANCE input = LoadLibraryExW(L"input.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
-    if (input == nullptr)
-        return;
-    typedef BOOL(WINAPI * InstallLayoutOrTipFn)(LPCWSTR, DWORD);
-    const auto install = reinterpret_cast<InstallLayoutOrTipFn>(GetProcAddress(input, "InstallLayoutOrTip"));
-    if (install != nullptr)
-        install(kProfileId, 0);
-    FreeLibrary(input);
-}
-
 int ApplyElevated(bool enabled, const std::wstring &name)
 {
     if (enabled && !IsValidName(name))
@@ -128,8 +91,6 @@ int ApplyElevated(bool enabled, const std::wstring &name)
     }
     if (!WriteHklmString(kTipProfileKey, L"Description", enabled ? name : std::wstring(kProductName), false))
         return RecordFailed;
-    if (enabled)
-        InstallForUser();
     return Ok;
 }
 
@@ -193,6 +154,10 @@ bool Apply(HWND owner, bool enabled, const std::wstring &name, std::string &erro
         error = DescribeExitCode(BadArguments);
         return false;
     }
+    // The keyboard list is per user and this process is not elevated, so the entry the elevated half below cannot
+    // write is added here. That covers installs which predate the installer running it as the original user.
+    if (enabled)
+        input_method_install::EnsureInKeyboardList();
     const std::wstring executable = OwnExecutablePath();
     if (executable.empty())
     {
