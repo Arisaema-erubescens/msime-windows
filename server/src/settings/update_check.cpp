@@ -60,6 +60,19 @@ std::wstring Widen(const std::string &text)
     return wide;
 }
 
+std::string Narrow(const std::wstring &wide)
+{
+    if (wide.empty())
+        return {};
+    const int length =
+        WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), nullptr, 0, nullptr, nullptr);
+    if (length <= 0)
+        return {};
+    std::string text(static_cast<size_t>(length), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), text.data(), length, nullptr, nullptr);
+    return text;
+}
+
 // GET 一个文本地址。成功返回 true。与其它联网路径一致地走用户配置的代理。
 bool HttpGetText(const std::string &url, std::string &body)
 {
@@ -217,8 +230,9 @@ bool LaunchPendingInstaller(const std::wstring &requested_installer)
     if (directory.empty())
         return false;
     const std::filesystem::path path = directory / std::filesystem::path(requested_installer);
-    // 只认自己写下的那一份：文件存在、名字合法、就在这个版本目录里。
-    if (!native_settings::update_download::IsInstallerName(requested_installer))
+    // 只认自己写下的那一份：名字合法、就在这个版本目录里、文件真的存在。
+    // 名字的校验函数吃窄字符，这里转一次；文件名一直是 ASCII。
+    if (!native_settings::update_download::IsInstallerName(Narrow(requested_installer)))
         return false;
     std::error_code ec;
     if (!std::filesystem::is_regular_file(path, ec))
