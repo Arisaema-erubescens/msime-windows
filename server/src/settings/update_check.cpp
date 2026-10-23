@@ -304,6 +304,22 @@ void CheckOnce()
         return;
     }
     const std::filesystem::path existing = directory / std::filesystem::path(candidate.installer);
+    const auto now_seconds = [] {
+        return static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch())
+                .count());
+    };
+    const auto write_progress = [&](update_channel::DownloadProgress::State state, std::uint64_t received,
+                                    std::uint64_t total, const std::string &reason) {
+        update_channel::DownloadProgress progress;
+        progress.state = state;
+        progress.version = candidate.version;
+        progress.received = received;
+        progress.total = total;
+        progress.reason = reason;
+        progress.updated_at = now_seconds();
+        update_channel::WriteProgress(progress);
+    };
     const auto download = [&]() {
         native_settings::update_download::Request request;
         request.current_version = CurrentVersion();
@@ -311,8 +327,17 @@ void CheckOnce()
         request.installer_name = candidate.installer;
         request.installer_sha256 = candidate.sha256;
         request.directory = directory;
-        return native_settings::update_download::Download(request).outcome ==
-               native_settings::update_download::Outcome::Ok;
+        // 每收一块就写一次进度，设置页靠它显示百分比。写的是临时文件加改名，
+        // 读的一侧不会看到半截内容。
+        request.on_progress = [&write_progress](std::uint64_t received, std::uint64_t total) {
+            write_progress(update_channel::DownloadProgress::State::Downloading, received, total, {});
+        };
+        const native_settings::update_download::Result result = native_settings::update_download::Download(request);
+        if (result.outcome == native_settings::update_download::Outcome::Ok)
+            return true;
+        write_progress(update_channel::DownloadProgress::State::Failed, 0, 0,
+                       result.message.empty() ? std::string("下载失败") : result.message);
+        return false;
     };
 
     std::error_code ec;
@@ -332,7 +357,8 @@ void CheckOnce()
         done(std::string());
         return;
     }
-    // 已经下过并校验过了，只差提示。
+    // 已经下过并校验过了，只差提示。进度停在「等待安装」，设置页据此显示提示。
+    write_progress(update_channel::DownloadProgress::State::Ready, 0, 0, {});
     done(candidate.version);
     BroadcastInstallerReady(candidate.version, existing, candidate.installer);
 }

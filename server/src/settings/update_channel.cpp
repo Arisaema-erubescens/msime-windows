@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <fstream>
+#include <map>
 #include <regex>
 
 namespace update_channel
@@ -84,6 +86,21 @@ int CompareIdentifier(const std::string &left, const std::string &right)
     if (left == right)
         return 0;
     return left < right ? -1 : 1;
+}
+
+// 进度文件里的数字字段。读不通就当 0，那种文件不值得报错。
+std::uint64_t ParseUnsigned(const std::string &text)
+{
+    std::uint64_t value = 0;
+    if (text.empty())
+        return 0;
+    for (const char ch : text)
+    {
+        if (ch < '0' || ch > '9')
+            return 0;
+        value = value * 10 + static_cast<std::uint64_t>(ch - '0');
+    }
+    return value;
 }
 } // namespace
 
@@ -202,5 +219,96 @@ std::filesystem::path InstallerDirectory(const std::string &version)
     if (data.empty())
         return {};
     return std::filesystem::path(data) / std::filesystem::path(L"updates") / std::filesystem::path(version);
+}
+
+std::filesystem::path ProgressPath()
+{
+    const std::wstring data = CommonUtils::get_ime_data_path_w();
+    if (data.empty())
+        return {};
+    return std::filesystem::path(data) / std::filesystem::path(L"updates") / std::filesystem::path(L"progress.txt");
+}
+
+DownloadProgress ReadProgress()
+{
+    DownloadProgress progress;
+    const std::filesystem::path path = ProgressPath();
+    if (path.empty())
+        return progress;
+    std::ifstream file(path, std::ios::binary);
+    if (!file)
+        return progress;
+
+    std::map<std::string, std::string> fields;
+    std::string line;
+    while (std::getline(file, line))
+    {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        const size_t equals = line.find('=');
+        if (equals == std::string::npos)
+            continue;
+        fields[line.substr(0, equals)] = line.substr(equals + 1);
+    }
+
+    const std::string state = fields["state"];
+    if (state == "downloading")
+        progress.state = DownloadProgress::State::Downloading;
+    else if (state == "ready")
+        progress.state = DownloadProgress::State::Ready;
+    else if (state == "failed")
+        progress.state = DownloadProgress::State::Failed;
+    else
+        return progress; // 认不出来的状态按 Idle 处理，宁可不显示也不显示错
+
+    progress.version = fields["version"];
+    progress.reason = fields["reason"];
+    progress.received = ParseUnsigned(fields["received"]);
+    progress.total = ParseUnsigned(fields["total"]);
+    progress.updated_at = ParseUnsigned(fields["updated_at"]);
+    return progress;
+}
+
+void WriteProgress(const DownloadProgress &progress)
+{
+    const std::filesystem::path path = ProgressPath();
+    if (path.empty())
+        return;
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    std::string text;
+    switch (progress.state)
+    {
+    case DownloadProgress::State::Downloading:
+        text += "state=downloading\n";
+        break;
+    case DownloadProgress::State::Ready:
+        text += "state=ready\n";
+        break;
+    case DownloadProgress::State::Failed:
+        text += "state=failed\n";
+        break;
+    case DownloadProgress::State::Idle:
+    default:
+        text += "state=idle\n";
+        break;
+    }
+    text += "version=" + progress.version + "\n";
+    text += "received=" + std::to_string(progress.received) + "\n";
+    text += "total=" + std::to_string(progress.total) + "\n";
+    text += "reason=" + progress.reason + "\n";
+    text += "updated_at=" + std::to_string(progress.updated_at) + "\n";
+
+    std::filesystem::path temporary = path;
+    temporary += L".tmp";
+    {
+        std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+        if (!file)
+            return;
+        file << text;
+    }
+    // 改名是原子的：读的一侧要么看到旧内容，要么看到完整的新内容。
+    if (!MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        std::filesystem::remove(temporary, ec);
 }
 } // namespace update_channel

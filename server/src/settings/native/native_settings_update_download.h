@@ -23,6 +23,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -74,6 +75,9 @@ struct Request
     std::uint64_t deadline_seconds = 900;
     // 测试用：把每个通道的地址换掉。空表示用真实地址。
     std::vector<std::string> override_channel_urls;
+    // 下载进度：(已收字节, 服务端声明的总长，0 表示没声明)。在下载线程上同步调用，
+    // 实现必须尽快返回；重试换通道时从 0 重新计。可以为空。
+    std::function<void(std::uint64_t received, std::uint64_t total)> on_progress;
 };
 
 // 按通道顺序把安装包下载并校验到 request.directory。

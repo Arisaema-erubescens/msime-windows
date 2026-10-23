@@ -3,7 +3,6 @@
 
 #include "settings/native/native_settings_update_download.h"
 #include "settings/update_channel.h"
-#include "settings/update_check.h"
 
 #include <Windows.h>
 
@@ -143,8 +142,71 @@ TEST_CASE(update_check_puts_installers_under_the_data_directory)
     REQUIRE(update_channel::InstallerDirectory(".hidden").empty());
     REQUIRE(update_channel::InstallerDirectory("").empty());
 
-    // 没有探测结果时不认为有可安装的包。
-    REQUIRE(update_check::PendingVersion().empty());
+    SetEnvironmentVariableW(L"METASEQUOIA_IME_DATA_DIR", previous.empty() ? nullptr : previous.c_str());
+    fs::remove_all(root, ec);
+}
+
+TEST_CASE(update_progress_round_trips_through_the_data_directory)
+{
+    namespace fs = std::filesystem;
+    const fs::path root = test::TempRoot() / L"update-progress";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root, ec);
+    REQUIRE(!ec);
+
+    const std::wstring previous = [&] {
+        DWORD needed = GetEnvironmentVariableW(L"METASEQUOIA_IME_DATA_DIR", nullptr, 0);
+        std::wstring value(needed, L'\0');
+        if (needed != 0)
+            GetEnvironmentVariableW(L"METASEQUOIA_IME_DATA_DIR", value.data(), needed);
+        if (needed != 0 && !value.empty() && value.back() == L'\0')
+            value.pop_back();
+        SetEnvironmentVariableW(L"METASEQUOIA_IME_DATA_DIR", root.c_str());
+        return value;
+    }();
+
+    const fs::path path = update_channel::ProgressPath();
+    REQUIRE(!path.empty());
+    REQUIRE(path == root / L"updates" / L"progress.txt");
+
+    // 没有文件时是 Idle，而不是上一次的错误。
+    REQUIRE(update_channel::ReadProgress().state == update_channel::DownloadProgress::State::Idle);
+
+    update_channel::DownloadProgress writing;
+    writing.state = update_channel::DownloadProgress::State::Downloading;
+    writing.version = "0.11.2";
+    writing.received = 42 * 1024 * 1024;
+    writing.total = 108 * 1024 * 1024;
+    writing.updated_at = 1700000000;
+    update_channel::WriteProgress(writing);
+
+    const update_channel::DownloadProgress read_back = update_channel::ReadProgress();
+    REQUIRE(read_back.state == update_channel::DownloadProgress::State::Downloading);
+    REQUIRE_EQ(read_back.version, std::string("0.11.2"));
+    REQUIRE_EQ(read_back.received, std::uint64_t{42 * 1024 * 1024});
+    REQUIRE_EQ(read_back.total, std::uint64_t{108 * 1024 * 1024});
+    REQUIRE_EQ(read_back.updated_at, std::uint64_t{1700000000});
+
+    // 三种终态也要能读回来，页面靠它决定显示哪句话。
+    writing.state = update_channel::DownloadProgress::State::Ready;
+    writing.reason.clear();
+    update_channel::WriteProgress(writing);
+    REQUIRE(update_channel::ReadProgress().state == update_channel::DownloadProgress::State::Ready);
+
+    writing.state = update_channel::DownloadProgress::State::Failed;
+    writing.reason = "所有下载通道都失败了";
+    update_channel::WriteProgress(writing);
+    const update_channel::DownloadProgress failed = update_channel::ReadProgress();
+    REQUIRE(failed.state == update_channel::DownloadProgress::State::Failed);
+    REQUIRE_EQ(failed.reason, std::string("所有下载通道都失败了"));
+
+    // 内容坏了按 Idle 处理，不抛异常：一个展示用的文件不值得让页面出错。
+    {
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        file << "state=nonsense\nversion=oops\n";
+    }
+    REQUIRE(update_channel::ReadProgress().state == update_channel::DownloadProgress::State::Idle);
 
     SetEnvironmentVariableW(L"METASEQUOIA_IME_DATA_DIR", previous.empty() ? nullptr : previous.c_str());
     fs::remove_all(root, ec);

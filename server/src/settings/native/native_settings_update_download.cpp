@@ -86,7 +86,8 @@ std::string HexDigest(const unsigned char raw[32])
 
 // 一次尝试。测速阶段失败会把 outcome 标成 Failed 并带上原因；测速通过后
 // 就一直下到流结束。
-Attempt FetchOnce(const std::string &url, const std::filesystem::path &target, Clock::time_point deadline)
+Attempt FetchOnce(const std::string &url, const std::filesystem::path &target, Clock::time_point deadline,
+                  const std::function<void(std::uint64_t, std::uint64_t)> &progress)
 {
     Attempt attempt;
     attempt.url = url;
@@ -261,6 +262,8 @@ Attempt FetchOnce(const std::string &url, const std::filesystem::path &target, C
             break;
         }
         attempt.bytes += read;
+        if (progress)
+            progress(attempt.bytes, total);
 
         // 首段测速。收到足够样本或窗口结束就下判决，测速期间的数据不丢，继续使用。
         // 用毫秒算，不用整数秒：按秒取整会让门槛随样本量漂移，一条恰好卡在 50 KB/s
@@ -492,7 +495,7 @@ Result Download(const Request &request)
                 result.message = "下载超时";
                 return result;
             }
-            Attempt attempt = FetchOnce(channel, part_path, deadline);
+            Attempt attempt = FetchOnce(channel, part_path, deadline, request.on_progress);
             attempt.url = channel;
             result.attempts.push_back(attempt);
             if (attempt.outcome == Outcome::Ok)

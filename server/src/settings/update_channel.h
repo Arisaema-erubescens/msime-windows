@@ -11,6 +11,7 @@
 // 当前只在正式版上真正下载安装包，nightly 与 dev 的判断保留在这里，是为了让
 // SupportsAutoUpdate 的语义完整；见 native_settings_update_download.h 的
 // IsReleaseVersion。
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -60,4 +61,33 @@ std::string TagFromReleaseUrl(const std::string &url);
 // 后台下载把安装包放在数据目录的 updates/<版本>/ 下。版本号直接当目录名，所以这里
 // 先挡掉路径穿越；版本号不可用或数据目录未知时返回空。
 std::filesystem::path InstallerDirectory(const std::string &version);
+
+// 后台下载的进度。设置页靠它显示「正在下载 42%（约 12 分钟）」，Server 每收到一块
+// 数据就更新一次。数值只用于展示，不参与任何安全判断。
+struct DownloadProgress
+{
+    enum class State
+    {
+        Idle,        // 没在下载，也没有已完成的包
+        Downloading, // 正在下载
+        Ready,       // 已经下好并校验通过，等待用户安装
+        Failed,      // 最近一次失败，reason 里是原因
+    };
+
+    State state = State::Idle;
+    std::string version;          // 目标版本号
+    std::uint64_t received = 0;   // 已收字节
+    std::uint64_t total = 0;      // 服务端声明的总长；0 表示没声明
+    std::string reason;           // Failed 时的中文原因
+    std::uint64_t updated_at = 0; // 最后一次写入的 Unix 秒，用来判断状态是不是旧的
+};
+
+// 进度文件路径：数据目录下的 updates/progress.txt。数据目录不可用时返回空。
+std::filesystem::path ProgressPath();
+
+// 读进度。文件不存在或内容损坏时返回 Idle，绝不因此报错。
+DownloadProgress ReadProgress();
+
+// 写进度。走临时文件加改名，读的一侧不会看到半截内容。
+void WriteProgress(const DownloadProgress &progress);
 } // namespace update_channel

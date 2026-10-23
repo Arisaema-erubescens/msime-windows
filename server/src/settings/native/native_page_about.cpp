@@ -2,6 +2,7 @@
 
 #include "msime_version.h"
 #include "settings/native/native_settings_update_download.h"
+#include "settings/update_channel.h"
 
 #include "msimeui/DeviceResources.h"
 #include "msimeui/Window.h"
@@ -612,6 +613,65 @@ VisualPtr BuildAboutPage(PageContext &context)
             MakeLabel(L"发现新版本时由输入法后台下载并校验，下载完成后询问是否安装", DocStyle(12.0f), TextRole::Muted);
         detail->SetMargin({0.0f, 5.0f, 0.0f, 0.0f});
         left->Add(detail);
+        // 后台进度：Server 每收到一块数据就更新一次 progress.txt，这里定时读。
+        // 页面不显示时定时器也会继续跑，但只读一个小文件，不值得为它做启停。
+        auto progressLabel = MakeLabel(L"", DocStyle(11.0f), TextRole::Muted);
+        auto progressBox = std::make_shared<Hideable>(progressLabel, false);
+        progressBox->SetMargin({0.0f, 3.0f, 0.0f, 0.0f});
+        left->Add(progressBox);
+        // 只持有弱引用：timer 每跑一次就拿一次标签，页面没了就不再碰它，也不会拖住页面。
+        std::weak_ptr<Label> weakLabel = progressLabel;
+        std::weak_ptr<Hideable> weakBox = progressBox;
+        const auto refresh = [weakLabel, weakBox]() {
+            const std::shared_ptr<Label> label = weakLabel.lock();
+            const std::shared_ptr<Hideable> box = weakBox.lock();
+            if (!label || !box)
+                return false;
+            const update_channel::DownloadProgress progress = update_channel::ReadProgress();
+            std::wstring text;
+            TextRole role = TextRole::Muted;
+            switch (progress.state)
+            {
+            case update_channel::DownloadProgress::State::Downloading: {
+                text = L"正在下载 v" + Widen(progress.version);
+                if (progress.total > 0)
+                {
+                    const auto percent = static_cast<unsigned>(progress.received * 100 / progress.total);
+                    text += L"：" + std::to_wstring(percent) + L"%";
+                }
+                else if (progress.received > 0)
+                {
+                    text += L"：" + std::to_wstring(progress.received / (1024 * 1024)) + L" MB";
+                }
+                break;
+            }
+            case update_channel::DownloadProgress::State::Ready:
+                text = L"v" + Widen(progress.version) + L" 已下载并通过校验，等待安装";
+                role = TextRole::Accent;
+                break;
+            case update_channel::DownloadProgress::State::Failed:
+                text = L"上次自动下载失败：" + Widen(progress.reason);
+                role = TextRole::Danger;
+                break;
+            case update_channel::DownloadProgress::State::Idle:
+            default:
+                break;
+            }
+            label->SetText(text);
+            label->SetRole(role);
+            box->SetVisible(!text.empty());
+            return true;
+        };
+        refresh();
+        // 每秒读一次进度。tick 里只拿弱引用，页面销毁后下一次触发就自我重置，顺带 KillTimer。
+        auto timer = std::make_shared<std::unique_ptr<UiTimer>>();
+        std::weak_ptr<std::unique_ptr<UiTimer>> weakTimer = timer;
+        *timer = std::make_unique<UiTimer>(context.host.Hwnd(), 1000, [refresh, weakTimer]() {
+            if (refresh())
+                return;
+            if (const auto held = weakTimer.lock())
+                held->reset();
+        });
         links->Add(std::make_shared<AboutRow>(left, BindToggle(context, "appearance.auto_download_update"), false));
     }
     struct Link
