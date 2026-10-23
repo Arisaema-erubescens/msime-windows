@@ -15,9 +15,15 @@ constexpr wchar_t kClearSwitch[] = L"--clear-game-compat-name";
 // Read by windows/src/Register/Register.cpp at registration time; keep the two in step.
 constexpr wchar_t kRecordKey[] = L"Software\\Metasequoia\\MetasequoiaIME";
 constexpr wchar_t kRecordValue[] = L"GameCompatProfileName";
-// Same profile as default_input_method.cpp and windows/src/Global/Globals.cpp.
+// Where windows/src/Register/Register.cpp registers the profile, and the only place a TSF profile name lives:
+// GetLanguageProfileDescription and the language bar read Display Description if the key has one and Description
+// otherwise, so writing Description here is enough once the profile is installed in the user's keyboard list.
+// Before windows/src/Register/Register.cpp started calling InstallLayoutOrTip it was not, and the name stayed at
+// whatever the keyboard list had cached.
 constexpr wchar_t kTipProfileKey[] = L"SOFTWARE\\Microsoft\\CTF\\TIP\\{E3062E9A-D834-4637-8958-ED8CFA427D01}"
                                      L"\\LanguageProfile\\0x00000804\\{4D59B1B4-D503-44AE-9259-BAD9BB2778AB}";
+// The profile as the keyboard list names it: language id, CLSID and profile GUID.
+constexpr wchar_t kProfileId[] = L"0804:{e3062e9a-d834-4637-8958-ed8cfa427d01}{4d59b1b4-d503-44ae-9259-bad9bb2778ab}";
 // TEXTSERVICE_DESC in windows/src/Register/Register.cpp: what the profile is called with the switch off.
 constexpr wchar_t kProductName[] = L"Metasequoia 水杉输入法";
 
@@ -27,7 +33,6 @@ enum ExitCode : int
     BadArguments = 2,
     RecordFailed = 3,
     NotRegistered = 4,
-    DescriptionFailed = 5,
 };
 
 std::wstring ReadHklmString(const wchar_t *subkey, const wchar_t *value)
@@ -67,6 +72,42 @@ bool IsTipRegistered()
     return true;
 }
 
+// Whether the profile already sits in the user's keyboard list. Until windows/src/Register/Register.cpp called
+// InstallLayoutOrTip at registration, every install was in the other state, and writing Description in that state
+// changed nothing the user could see.
+bool IsInstalledForUser()
+{
+    const std::wstring language = L"Control Panel\\International\\User Profile\\zh-Hans-CN";
+    HKEY key = nullptr;
+    // Native views of HKCU: the registration that runs this is 64-bit, but the value is the same in both views.
+    if (RegOpenKeyExW(reinterpret_cast<HKEY>(static_cast<ULONG_PTR>(0x80000001)), language.c_str(), 0,
+                      KEY_READ | KEY_WOW64_64KEY, &key) != ERROR_SUCCESS)
+        return false;
+    DWORD order = 0;
+    DWORD bytes = sizeof(order);
+    const LSTATUS status =
+        RegQueryValueExW(key, kProfileId, nullptr, nullptr, reinterpret_cast<BYTE *>(&order), &bytes);
+    RegCloseKey(key);
+    return status == ERROR_SUCCESS;
+}
+
+// Puts the profile into the user's keyboard list so the registered name reaches the language bar and the settings
+// page. InstallLayoutOrTip only writes HKCU, so elevation is not needed; failure leaves the input method as usable as
+// it was before, which is why it is not reported.
+void InstallForUser()
+{
+    if (IsInstalledForUser())
+        return;
+    HINSTANCE input = LoadLibraryExW(L"input.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (input == nullptr)
+        return;
+    typedef BOOL(WINAPI * InstallLayoutOrTipFn)(LPCWSTR, DWORD);
+    const auto install = reinterpret_cast<InstallLayoutOrTipFn>(GetProcAddress(input, "InstallLayoutOrTip"));
+    if (install != nullptr)
+        install(kProfileId, 0);
+    FreeLibrary(input);
+}
+
 int ApplyElevated(bool enabled, const std::wstring &name)
 {
     if (enabled && !IsValidName(name))
@@ -85,9 +126,11 @@ int ApplyElevated(bool enabled, const std::wstring &name)
         if (status != ERROR_SUCCESS && status != ERROR_FILE_NOT_FOUND && status != ERROR_PATH_NOT_FOUND)
             return RecordFailed;
     }
-    return WriteHklmString(kTipProfileKey, L"Description", enabled ? name : std::wstring(kProductName), false)
-               ? Ok
-               : DescriptionFailed;
+    if (!WriteHklmString(kTipProfileKey, L"Description", enabled ? name : std::wstring(kProductName), false))
+        return RecordFailed;
+    if (enabled)
+        InstallForUser();
+    return Ok;
 }
 
 std::string DescribeExitCode(DWORD code)
@@ -100,8 +143,6 @@ std::string DescribeExitCode(DWORD code)
         return "无法写入设置，请确认在弹出的授权窗口中选择了「是」。";
     case NotRegistered:
         return "水杉输入法没有在系统中注册，请重新安装输入法。";
-    case DescriptionFailed:
-        return "无法修改输入法在系统中登记的名称。";
     default:
         return "应用失败（错误码 " + std::to_string(code) + "）。";
     }
