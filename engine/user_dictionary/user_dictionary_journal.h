@@ -27,8 +27,20 @@ std::string default_user_db_path();
 // invisible next to a reset composition.
 constexpr int kJournalBusyTimeoutMs = 200;
 
+// Pages of WAL after which the committing connection copies the log back into the database. SQLite's default is
+// 1000, which is roughly 4 MiB, and that is exactly where a real install's WAL sat -- so the checkpoint was firing
+// inside an ordinary keystroke's write, on the thread the user is waiting for. Copying less at a time spreads that
+// cost, and the writer runs a checkpoint of its own once its queue empties.
+constexpr int kWalAutocheckpointPages = 128;
+
 // Compatibility no-op; journal connections are operation-scoped.
 void close_default_user_database();
+
+// Copies the user journal's write-ahead log back into the database once it has grown past a few pages. The automatic
+// checkpoint fires on whichever commit crosses the threshold, i.e. inside a selection the user is waiting for; running
+// this while the writer has nothing queued moves that work off the keystroke path. PASSIVE never blocks a reader and
+// simply does nothing while one is active, so calling it is always safe.
+void checkpoint_user_journal_if_needed();
 
 bool record_upsert(const std::string &user_db_path, DictionaryKind kind, const std::string &key,
                    const std::string &value, std::int64_t weight, const std::string &display = {});

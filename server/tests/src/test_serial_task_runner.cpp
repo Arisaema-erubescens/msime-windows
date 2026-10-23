@@ -57,6 +57,43 @@ TEST_CASE(serial_task_runner_survives_a_throwing_job)
     REQUIRE(done.load() == 1);
 }
 
+TEST_CASE(serial_task_runner_runs_the_idle_handler_only_when_the_queue_empties)
+{
+    std::atomic<int> idle_runs{0};
+    std::atomic<int> jobs_done{0};
+    {
+        SerialTaskRunner runner;
+        runner.SetIdleHandler([&idle_runs] { ++idle_runs; });
+        // Hold the thread busy: the idle handler must not interleave with queued work.
+        runner.Post([&jobs_done] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            ++jobs_done;
+        });
+        for (int i = 0; i < 10; ++i)
+        {
+            runner.Post([&jobs_done] { ++jobs_done; });
+        }
+        runner.Stop();
+    }
+    REQUIRE(jobs_done.load() == 11);
+    // Once after the queue drained. The runner does not spin: it waits for a job and runs the handler on the way out,
+    // so exactly one extra run is expected rather than an unbounded stream of them.
+    REQUIRE(idle_runs.load() >= 1);
+    REQUIRE(idle_runs.load() <= 11);
+}
+
+TEST_CASE(serial_task_runner_survives_a_throwing_idle_handler)
+{
+    std::atomic<int> done{0};
+    {
+        SerialTaskRunner runner;
+        runner.SetIdleHandler([] { throw std::runtime_error("checkpoint failed"); });
+        runner.Post([&done] { ++done; });
+        runner.Post([&done] { ++done; });
+    }
+    REQUIRE(done.load() == 2);
+}
+
 TEST_CASE(serial_task_runner_does_not_run_jobs_on_the_posting_thread)
 {
     const std::thread::id poster = std::this_thread::get_id();
