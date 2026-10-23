@@ -276,6 +276,13 @@ set(SRC_FILES
     "./src/settings/api_credential_test_request.h"
     "./src/settings/collocation_model.cpp"
     "./src/settings/collocation_model.h"
+    # 后台检查更新与自动下载：轮询跑在常驻的 Server 上，关掉设置窗口也不中断。
+    "./src/settings/update_channel.cpp"
+    "./src/settings/update_channel.h"
+    "./src/settings/update_check.cpp"
+    "./src/settings/update_check.h"
+    "./src/settings/native/native_settings_update_download.cpp"
+    "./src/settings/native/native_settings_update_download.h"
     "./src/skin/candidate_skin_catalog.cpp"
     "./src/skin/candidate_skin_catalog.h"
     "./src/session/engine_input_session.cpp"
@@ -516,6 +523,9 @@ add_executable(${SETTINGS_EXECUTABLE_NAME} WIN32
     "./src/settings/default_input_method.h"
     "./src/settings/game_compat_name.cpp"
     "./src/settings/game_compat_name.h"
+    # 设置页要判断通道、读后台下载的结果，只用到通道判定与状态文件，不引轮询线程。
+    "./src/settings/update_channel.cpp"
+    "./src/settings/update_channel.h"
     "./src/settings/settings_launcher.cpp"
     "./src/settings/settings_launcher.h"
     "./src/settings/native/native_settings_bindings.cpp"

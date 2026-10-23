@@ -602,6 +602,18 @@ VisualPtr BuildAboutPage(PageContext &context)
         });
         links->Add(std::make_shared<AboutRow>(left, state->check, false));
     }
+    // 自动下载是一个独立设置行，不塞进上面的按钮行：它改的是后台行为，和「现在检查一次」
+    // 是两件事。只有正式版参与自动更新，dev 与 nightly 渲染出来只会是个勾了也没用的开关。
+    if (update_download::IsReleaseVersion(MSIME_PRODUCT_VERSION))
+    {
+        auto left = std::make_shared<Column>(0.0f);
+        left->Add(MakeLabel(L"自动下载更新", DocStyle(13.0f, DWRITE_FONT_WEIGHT_MEDIUM), TextRole::Primary));
+        auto detail =
+            MakeLabel(L"发现新版本时由输入法后台下载并校验，下载完成后询问是否安装", DocStyle(12.0f), TextRole::Muted);
+        detail->SetMargin({0.0f, 5.0f, 0.0f, 0.0f});
+        left->Add(detail);
+        links->Add(std::make_shared<AboutRow>(left, BindToggle(context, "appearance.auto_download_update"), false));
+    }
     struct Link
     {
         const wchar_t *title;

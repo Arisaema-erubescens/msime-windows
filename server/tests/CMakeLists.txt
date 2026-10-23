@@ -188,6 +188,9 @@ set(TEST_SOURCE_FILES
     "${CMAKE_SOURCE_DIR}/src/utils/ime_paths.cpp"
     "${CMAKE_SOURCE_DIR}/src/utils/network_proxy.cpp"
     "${CMAKE_SOURCE_DIR}/src/settings/native/native_settings_update_download.cpp"
+    # 通道判定与安装包落点都要能在没有网络的情况下测，所以链接真实的翻译单元。
+    # update_check.cpp 不进测试：它带轮询线程与 IPC 广播，那两样在测试进程里没有意义。
+    "${CMAKE_SOURCE_DIR}/src/settings/update_channel.cpp"
     "${CMAKE_SOURCE_DIR}/src/settings/dictionary_validation.cpp"
     # The catalog/download/delete behaviors under test live in collocation_model.cpp, so the
     # activation-fallback and id-guard cases link the real translation unit.
