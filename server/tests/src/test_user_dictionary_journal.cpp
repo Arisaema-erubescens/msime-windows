@@ -52,6 +52,43 @@ class TestDatabase
 };
 } // namespace
 
+TEST_CASE(DictionaryLockWaitEndsBeforeTheClientGivesUp)
+{
+    // The wait exists to absorb a lock held for one commit. Anything longer than the client's own reply window cannot
+    // end in a reply the client is still listening for, so the reader is better off failing the page than holding a
+    // key until the client resets the composition. windows/src/IPC/Ipc.h owns the numbers; keep this the shorter of
+    // the two.
+    static_assert(user_dictionary::kJournalBusyTimeoutMs < 300,
+                  "must fit inside FANY_IME_COMMIT_REPLY_SESSION_WAIT_MS");
+
+    const auto directory = test::TempRoot() / ("msime-lock-wait-" + std::to_string(GetCurrentProcessId()));
+    std::error_code ec;
+    std::filesystem::remove_all(directory, ec);
+    std::filesystem::create_directories(directory);
+    const auto user_path = directory / "msime_user.db";
+    // A path other than default_user_db_path(): acquire_database only caches the default journal's connection, so this
+    // one is opened per call and closed when the operation returns, which is what lets the directory be deleted below.
+    REQUIRE(user_dictionary::ensure_user_database(test::Utf8(user_path)));
+
+    {
+        // Hold the journal's write lock from a separate connection, the way a learning commit would.
+        TestDatabase holder(user_path);
+        holder.exec("BEGIN IMMEDIATE");
+
+        const ULONGLONG started = GetTickCount64();
+        const bool wrote = user_dictionary::set_fixed_position(test::Utf8(user_path), "ni", "ni", "乙", 1);
+        const ULONGLONG waited = GetTickCount64() - started;
+
+        // The write must lose, and must lose quickly, rather than sit on the lock until the client has already given
+        // up. A write that somehow succeeded would also mean the lock was not real, so neither branch may pass.
+        REQUIRE(!wrote);
+        REQUIRE(waited < 300);
+        holder.exec("ROLLBACK");
+    }
+
+    std::filesystem::remove_all(directory, ec);
+}
+
 // The dictionary writer thread commits learned weights while the key thread
 // builds candidates from the same files. In rollback-journal mode a commit's
 // exclusive lock made those reads wait out the whole commit -- up to a second
