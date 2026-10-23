@@ -66,8 +66,8 @@ TEST_CASE(DictionaryLockWaitEndsBeforeTheClientGivesUp)
     std::filesystem::remove_all(directory, ec);
     std::filesystem::create_directories(directory);
     const auto user_path = directory / "msime_user.db";
-    // Not the default path: acquire_database caches the default journal's connection per thread, and this test has to
-    // delete its directory afterwards, which Windows refuses while a connection is still open.
+    // A path other than default_user_db_path(): acquire_database only caches the default journal's connection, so this
+    // one is opened per call and closed when the operation returns, which is what lets the directory be deleted below.
     REQUIRE(user_dictionary::ensure_user_database(test::Utf8(user_path)));
 
     {
@@ -86,8 +86,6 @@ TEST_CASE(DictionaryLockWaitEndsBeforeTheClientGivesUp)
         holder.exec("ROLLBACK");
     }
 
-    // Let go of the cached connection before deleting the directory.
-    user_dictionary::close_default_user_database();
     std::filesystem::remove_all(directory, ec);
 }
 

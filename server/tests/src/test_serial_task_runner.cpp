@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -61,8 +62,24 @@ TEST_CASE(serial_task_runner_runs_the_idle_handler_only_when_the_queue_empties)
 {
     std::atomic<int> idle_runs{0};
     std::atomic<int> jobs_done{0};
+    // Signalled from the runner thread the first time it goes idle, so the test knows the handler has run instead of
+    // waiting on a clock and racing Stop() against the runner's own idle check.
+    std::promise<void> idle_ran;
+    std::future<void> idle_seen = idle_ran.get_future();
     SerialTaskRunner runner;
-    runner.SetIdleHandler([&idle_runs] { ++idle_runs; });
+    runner.SetIdleHandler([&idle_runs, &idle_ran] {
+        if (++idle_runs == 1)
+        {
+            try
+            {
+                idle_ran.set_value();
+            }
+            catch (...)
+            {
+                // Already satisfied; the handler is allowed to run more than once.
+            }
+        }
+    });
     // Hold the thread busy first, so the handler cannot run between the posts below.
     runner.Post([&jobs_done] {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -72,23 +89,14 @@ TEST_CASE(serial_task_runner_runs_the_idle_handler_only_when_the_queue_empties)
     {
         runner.Post([&jobs_done] { ++jobs_done; });
     }
-    // Wait for the queue to drain without calling Stop(): Stop() sets stopping_, and the runner returns instead of
-    // running the idle handler once it is stopping, which is the behaviour under test.
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-    while (jobs_done.load() < 11 && std::chrono::steady_clock::now() < deadline)
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
-    while (idle_runs.load() == 0 && std::chrono::steady_clock::now() < deadline)
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
+    // Stop() sets stopping_, and the runner returns instead of running the idle handler once it is stopping, so the
+    // handler has to be observed before the queue is torn down.
+    REQUIRE(idle_seen.wait_for(std::chrono::seconds(10)) == std::future_status::ready);
     runner.Stop();
     REQUIRE(jobs_done.load() == 11);
-    // The handler runs after the last queued job and again only when the queue drains once more; either way it must
-    // have run, and never more often than there were idle moments.
     REQUIRE(idle_runs.load() >= 1);
-    REQUIRE(idle_runs.load() <= 12);
+    // At most once per drain, and there are only the 11 jobs here: the handler must never outnumber them.
+    REQUIRE(idle_runs.load() <= 11);
 }
 
 TEST_CASE(serial_task_runner_survives_a_throwing_idle_handler)

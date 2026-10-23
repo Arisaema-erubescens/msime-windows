@@ -78,9 +78,9 @@ void SerialTaskRunner::Run()
         catch (...)
         {
         }
-        // Housekeeping runs only once the queue is empty, i.e. the caller has nothing more for this thread and the
-        // user has stopped typing. It is copied out under the lock and run outside it so a job posted meanwhile is
-        // still picked up immediately.
+        // Housekeeping runs only when this instant finds the queue empty, which in practice means the caller has
+        // nothing more queued and the user has stopped typing. It is copied out under the lock and run outside it so a
+        // job posted meanwhile is still picked up immediately.
         std::function<void()> idle;
         {
             std::lock_guard<std::mutex> lock(mutex_);

@@ -27,10 +27,11 @@ std::string default_user_db_path();
 // invisible next to a reset composition.
 constexpr int kJournalBusyTimeoutMs = 200;
 
-// Pages of WAL after which the committing connection copies the log back into the database. SQLite's default is
-// 1000, which is roughly 4 MiB, and that is exactly where a real install's WAL sat -- so the checkpoint was firing
-// inside an ordinary keystroke's write, on the thread the user is waiting for. Copying less at a time spreads that
-// cost, and the writer runs a checkpoint of its own once its queue empties.
+// Pages of WAL after which the committing connection copies the log back into the database. SQLite's default is 1000
+// pages, about 4 MB at the default 4096-byte page size; a real install's WAL was sitting at 4,132,392 bytes, i.e. right
+// at the threshold, so the checkpoint was firing inside an ordinary keystroke's write. The threshold is in pages, not
+// bytes, so the file size only tells us it was near the limit. Copying less at a time spreads that cost, and the
+// writer runs a checkpoint of its own once its queue empties.
 constexpr int kWalAutocheckpointPages = 128;
 
 // Compatibility no-op; journal connections are operation-scoped.

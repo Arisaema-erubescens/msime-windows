@@ -125,8 +125,16 @@ bool use_write_ahead_log(sqlite3 *db)
 // (see the checkpoint the dictionary writer runs after its queue empties).
 bool tune_wal(sqlite3 *db)
 {
-    return execute_sql(db, "PRAGMA synchronous=NORMAL") &&
-           execute_sql(db, ("PRAGMA wal_autocheckpoint=" + std::to_string(kWalAutocheckpointPages)).c_str());
+    // Both pragmas are cheap and idempotent, and a database that refuses one is still usable at the default, so this
+    // retries once rather than escalating: the engine has no logging channel, and a failure here costs the #1012
+    // optimisation rather than correctness. The retry covers a transient lock the caller cannot do anything about.
+    for (int attempt = 0; attempt < 2; ++attempt)
+    {
+        if (execute_sql(db, "PRAGMA synchronous=NORMAL") &&
+            execute_sql(db, ("PRAGMA wal_autocheckpoint=" + std::to_string(kWalAutocheckpointPages)).c_str()))
+            return true;
+    }
+    return false;
 }
 
 bool bind_text(sqlite3_stmt *stmt, int index, const std::string &value)
