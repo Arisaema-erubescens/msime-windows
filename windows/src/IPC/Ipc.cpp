@@ -36,7 +36,7 @@ static thread_local std::map<uint64_t, FanyImeNamedpipeDataToTsf> pendingReplies
 static thread_local std::deque<FanyImeNamedpipeDataToTsf> unsolicitedReplies;
 static thread_local uint64_t nextRequestId = 0;
 static thread_local uint64_t nextFocusSessionToken = 0;
-static thread_local const void *boundFocusStateOwner = nullptr;
+static thread_local CMetasequoiaIME *boundFocusStateOwner = nullptr;
 static thread_local bool *boundFocusResetPending = nullptr;
 static thread_local bool *boundActivationRequired = nullptr;
 static thread_local std::atomic<uint64_t> *boundExpectedWorkerFocusToken = nullptr;
@@ -636,7 +636,7 @@ bool TryOpenClientPipe(HANDLE &hPipeHandle, const wchar_t *pipeName, UINT pipeRo
 }
 } // namespace
 
-void BindNamedpipeFocusState(const void *owner, bool *focusResetPending, bool *activationRequired,
+void BindNamedpipeFocusState(CMetasequoiaIME *owner, bool *focusResetPending, bool *activationRequired,
                              std::atomic<uint64_t> *expectedWorkerFocusToken,
                              std::atomic<bool> *localSessionResetPending, std::atomic<UINT> *localSessionResetToken,
                              std::atomic<bool> *workerCommitReady, std::atomic<uint64_t> *acknowledgedWorkerFocusToken,
@@ -695,6 +695,45 @@ void UnbindNamedpipeFocusState(const void *owner)
 bool IsNamedpipeFocusStateOwner(const void *owner)
 {
     return owner != nullptr && boundFocusStateOwner == owner;
+}
+
+// Same test as the Server's IsForegroundInputThreadClient: the foreground
+// window's thread, or the thread owning its keyboard focus (a child window
+// hosted across threads), is this one.
+bool IsCurrentThreadForegroundInput()
+{
+    const HWND foreground = GetForegroundWindow();
+    const DWORD foregroundThread = foreground ? GetWindowThreadProcessId(foreground, nullptr) : 0;
+    if (foregroundThread == 0)
+    {
+        return false;
+    }
+    const DWORD currentThread = GetCurrentThreadId();
+    if (foregroundThread == currentThread)
+    {
+        return true;
+    }
+    GUITHREADINFO info{sizeof(info)};
+    return GetGUIThreadInfo(foregroundThread, &info) && info.hwndFocus &&
+           GetWindowThreadProcessId(info.hwndFocus, nullptr) == currentThread;
+}
+
+bool IsNamedpipeThreadFocused()
+{
+    ITfThreadMgr *threadMgr = boundFocusStateOwner ? boundFocusStateOwner->_GetThreadMgr() : nullptr;
+    if (!threadMgr)
+    {
+        return false;
+    }
+    BOOL focused = FALSE;
+    if (SUCCEEDED(threadMgr->IsThreadFocus(&focused)))
+    {
+        return focused != FALSE;
+    }
+    // A host that cannot report TSF focus must neither stay offline forever
+    // nor let a windowless process (headless Chromium started in the
+    // background) take over the Server. Ask Win32 instead.
+    return IsCurrentThreadForegroundInput();
 }
 
 UINT BeginNamedpipeLocalSessionReset()
@@ -1201,6 +1240,22 @@ void QueueTsfHostWindowDiagnostic(_In_z_ const wchar_t *event, const std::wstrin
         DescribeWindowForDiagnostic(haveGui ? gui.hwndActive : nullptr),
         DescribeWindowForDiagnostic(haveGui ? gui.hwndCaret : nullptr), gui.rcCaret.left, gui.rcCaret.top,
         gui.rcCaret.right, gui.rcCaret.bottom, gui.flags));
+}
+
+void QueueNamedpipeFocusGateDiagnostic(bool allowed)
+{
+    if (!Global::TsfDiagnosticLogEnabled.load(std::memory_order_relaxed))
+    {
+        return;
+    }
+    // Both signals, so a host where TSF and Win32 disagree shows up in the log.
+    ITfThreadMgr *threadMgr = boundFocusStateOwner ? boundFocusStateOwner->_GetThreadMgr() : nullptr;
+    BOOL focused = FALSE;
+    const HRESULT hr = threadMgr ? threadMgr->IsThreadFocus(&focused) : E_POINTER;
+    QueueTsfDiagnosticLog(fmt::format(L"[focus-gate] activation={} tsf_hr={:#x} tsf_focus={} win32_foreground={} "
+                                      L"process={}",
+                                      allowed ? L"sent" : L"deferred", static_cast<uint32_t>(hr), focused != FALSE,
+                                      IsCurrentThreadForegroundInput(), Global::current_process_name));
 }
 
 void QueueTsfDiagnosticLog(const std::wstring &line)
@@ -1984,6 +2039,21 @@ bool EnsureNamedpipeFocusSessionActivated()
                 return true;
             }
             break;
+        }
+
+        // Every activation path ends here, including a TIP that has just been
+        // activated in a process started in the background (headless Chromium
+        // under Playwright, WebView2 before its window shows) and ordinary
+        // background packets. Only the TSF thread that currently owns input
+        // focus may replace the Server's active client and composition. Keep
+        // pending activation intact until thread focus returns; this is not a
+        // failure of the transport. Already acknowledged sessions may still
+        // clean up.
+        const bool threadFocused = IsNamedpipeThreadFocused();
+        QueueNamedpipeFocusGateDiagnostic(threadFocused);
+        if (!threadFocused)
+        {
+            return false;
         }
 
         const uint64_t token =
