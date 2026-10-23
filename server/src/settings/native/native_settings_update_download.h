@@ -7,6 +7,10 @@
 // 通道顺序固定为 GitHub 官方在前、国内镜像在后。镜像只是加速与兜底，不保证新版本
 // 一发就缓存到（它按需回源），所以 404 单独处理：直接换下一条，不占重试次数。
 //
+// 安装包下载只在正式版上开放。nightly 与 dev 构建不下载：nightly 的清单不由官网提供
+// （msime-web 只认 MAJOR.MINOR.PATCH 的 tag，固定 tag「nightly」解析不出可比版本），
+// dev 构建的版本号每天变，比较结果没有意义。见 IsReleaseVersion。
+//
 // 每条通道最多试 3 次。每次从头开始，不做断点续传：续传要处理服务器不支持 Range
 // 的情况，风险大于收益，而一条已经证明慢的通道续下去也不会变快。
 //
@@ -57,6 +61,9 @@ struct Result
 
 struct Request
 {
+    // 本机版本号。只有正式版会下载安装包，nightly 与 dev 构建在这里被挡掉，
+    // 见 IsReleaseVersion。
+    std::string current_version;
     // 发布页地址，用来推资产的下载地址；安装包名与摘要来自清单。
     std::string release_url;
     std::string installer_name;
@@ -84,10 +91,18 @@ std::vector<std::string> ChannelUrls(const std::string &release_url, const std::
 // 清单里的 installerSha256 是否合法：64 个小写十六进制字符。
 bool IsSha256Hex(const std::string &text);
 
+// 这个版本号能不能参与安装包下载。只有正式版可以：MAJOR.MINOR.PATCH，带 v/V 前缀
+// 也行，不允许任何预发布标签。nightly 与 dev 构建一律返回 false。
+//
+// 判定只看版本号本身，不看配置，因为通道是编译进去的事实，不是用户选项。
+bool IsReleaseVersion(const std::string &version);
+
 // 安装包文件名合法性：MetasequoiaIME_Setup_v<版本>.exe，大小写不敏感。
 bool IsInstallerName(const std::string &name);
 
-// 下载目录：数据目录下的 updates，没有数据目录时返回空。
+// 下载目录：系统临时目录下按进程号命名的子目录。装机级的数据目录是中等完整性、
+// 对所有用户可写的，从那里拉起的 exe 在「校验完成」到「用户点 UAC」之间可能被同机
+// 其他进程替换，所以安装包落在临时目录，再套一层进程唯一的子目录。
 std::filesystem::path DefaultDirectory();
 
 // 清掉目录里除 keep 之外的旧安装包与临时文件。

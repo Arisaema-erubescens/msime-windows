@@ -374,120 +374,6 @@ void ShowUpdateDialog(PageContext &context, const Version &latest, const std::st
     context.host.ShowModal(column);
 }
 
-// 自动下载：先取清单，发现新版本就按通道顺序把安装包拉到数据目录并校验。
-//
-// 与 CheckForUpdate 分开是因为两者对用户的承诺不同：手动检查只回答「有没有新版本」，
-// 自动下载还要负责把包拿到手。混在一起会让一次失败的下载看起来像检查失败。
-void DownloadUpdate(PageContext &context, const std::shared_ptr<AboutState> &state)
-{
-    Version current;
-    if (!ParseVersion(kShownVersion, current))
-    {
-        state->status->SetText(L"无法识别当前版本");
-        state->status->SetRole(TextRole::Danger);
-        state->statusBox->SetVisible(true);
-        return;
-    }
-    state->check->SetDisabled(true);
-    state->check->SetText(L"正在检查…");
-    state->status->SetText(L"正在检查更新");
-    state->status->SetRole(TextRole::Muted);
-    state->statusBox->SetVisible(true);
-
-    PageContext *ctx = &context;
-    const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
-    const std::string url = std::string(kUpdateManifestUrl) + "?t=" + std::to_string(stamp);
-    std::weak_ptr<AboutState> weak = state;
-    RunInBackground(
-        context.host.Hwnd(), [url]() { return HttpGet(url); },
-        [ctx, state, weak, current](const std::string &body) {
-            const nlohmann::json manifest = nlohmann::json::parse(body, nullptr, false);
-            Version latest;
-            std::string releaseUrl;
-            bool valid = manifest.is_object() && manifest.contains("version") && manifest["version"].is_string() &&
-                         manifest.contains("releaseUrl") && manifest["releaseUrl"].is_string();
-            if (valid)
-            {
-                releaseUrl = manifest["releaseUrl"].get<std::string>();
-                valid =
-                    (releaseUrl == kReleasesPageUrl || releaseUrl.rfind(std::string(kReleasesPageUrl) + "/", 0) == 0) &&
-                    ParseVersion(manifest["version"].get<std::string>(), latest);
-            }
-            if (!valid)
-            {
-                FinishUpdateDownload(state, false, L"检查更新失败，请稍后重试");
-                return;
-            }
-            if (CompareVersions(latest, current) <= 0)
-            {
-                FinishUpdateDownload(state, true, L"已是最新版本");
-                return;
-            }
-
-            const std::string name = manifest.value("installerName", std::string());
-            const std::string digest = manifest.value("installerSha256", std::string());
-            if (!update_download::IsInstallerName(name) || !update_download::IsSha256Hex(digest))
-            {
-                // 清单没给可用的包装与摘要，退回到原来那条路：让用户自己去下载页。
-                state->check->SetDisabled(false);
-                state->check->SetText(L"检查更新");
-                state->status->SetText(L"发现新版本 v" + Widen(latest.display) + L"，请在弹窗里选择下载方式");
-                state->status->SetRole(TextRole::Accent);
-                state->statusBox->SetVisible(true);
-                ShowUpdateDialog(*ctx, latest, releaseUrl, std::string(), manifest);
-                return;
-            }
-
-            state->check->SetText(L"正在下载…");
-            state->status->SetText(L"正在下载 v" + Widen(latest.display) + L"，稍等几分钟");
-            state->status->SetRole(TextRole::Muted);
-
-            update_download::Request request;
-            request.release_url = releaseUrl;
-            request.installer_name = name;
-            request.installer_sha256 = digest;
-            request.directory = update_download::DefaultDirectory();
-            // 下载本身在后台线程上跑，进度只能靠结束后一次性回报，所以把整个下载
-            // 放进 RunInBackground 的 work 里；返回一个编码过的结果串交给窗口线程。
-            RunInBackground(
-                ctx->host.Hwnd(),
-                [request]() {
-                    const update_download::Result result = update_download::Download(request);
-                    if (result.outcome == update_download::Outcome::Ok)
-                    {
-                        update_download::PruneOldInstallers(request.directory, request.installer_name);
-                        // 四段结果：状态、路径、摘要、说明，用换行分隔。
-                        return std::string("ok\n") + result.path.u8string() + "\n" + request.installer_sha256 + "\n";
-                    }
-                    return std::string("err\n\n\n") + result.message;
-                },
-                [weak](const std::string &encoded) {
-                    const std::shared_ptr<AboutState> locked = weak.lock();
-                    if (!locked)
-                        return;
-                    // 四段：状态、路径、摘要、说明。状态不是 ok 时按失败收尾。
-                    const auto next = [&encoded](size_t &start) {
-                        const size_t end = encoded.find('\n', start);
-                        const std::string field =
-                            encoded.substr(start, end == std::string::npos ? std::string::npos : end - start);
-                        start = end == std::string::npos ? encoded.size() : end + 1;
-                        return field;
-                    };
-                    size_t cursor = 0;
-                    const std::string status = next(cursor);
-                    const std::string path = next(cursor);
-                    const std::string digest = next(cursor);
-                    const std::string note = cursor < encoded.size() ? encoded.substr(cursor) : std::string();
-                    if (status == "ok")
-                        FinishUpdateDownload(locked, path, digest, note);
-                    else
-                        FinishUpdateDownload(locked, std::string(), std::string(),
-                                             note.empty() ? std::string("下载失败") : note);
-                });
-        });
-}
-} // namespace
-
 // 手动检查：只回答「有没有新版本」，新版本由用户自己决定去哪下载。
 void CheckForUpdate(PageContext &context, const std::shared_ptr<AboutState> &state)
 {
@@ -548,6 +434,126 @@ void CheckForUpdate(PageContext &context, const std::shared_ptr<AboutState> &sta
             ShowUpdateDialog(*ctx, latest, releaseUrl, mirror, manifest);
         });
 }
+
+// 下载并校验安装包。只在正式版上真正下载，非正式版退回到 CheckForUpdate。
+void DownloadUpdate(PageContext &context, const std::shared_ptr<AboutState> &state)
+{
+    Version current;
+    if (!ParseVersion(kShownVersion, current))
+    {
+        state->status->SetText(L"无法识别当前版本");
+        state->status->SetRole(TextRole::Danger);
+        state->statusBox->SetVisible(true);
+        return;
+    }
+    // 安装包下载只在正式版上开放。nightly 与 dev 构建点这个按钮仍然要能知道有没有
+    // 新版本，但不去下载：它们的清单不由官网提供，下载下来也没有可以比较的版本。
+    // 所以非正式版走 CheckForUpdate，结果落在同一块状态文字里。
+    if (!update_download::IsReleaseVersion(MSIME_PRODUCT_VERSION))
+    {
+        CheckForUpdate(context, state);
+        return;
+    }
+    state->check->SetDisabled(true);
+    state->check->SetText(L"正在检查…");
+    state->status->SetText(L"正在检查更新");
+    state->status->SetRole(TextRole::Muted);
+    state->statusBox->SetVisible(true);
+
+    PageContext *ctx = &context;
+    const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
+    const std::string url = std::string(kUpdateManifestUrl) + "?t=" + std::to_string(stamp);
+    std::weak_ptr<AboutState> weak = state;
+    RunInBackground(
+        context.host.Hwnd(), [url]() { return HttpGet(url); },
+        [ctx, state, weak, current](const std::string &body) {
+            const nlohmann::json manifest = nlohmann::json::parse(body, nullptr, false);
+            Version latest;
+            std::string releaseUrl;
+            bool valid = manifest.is_object() && manifest.contains("version") && manifest["version"].is_string() &&
+                         manifest.contains("releaseUrl") && manifest["releaseUrl"].is_string();
+            if (valid)
+            {
+                releaseUrl = manifest["releaseUrl"].get<std::string>();
+                valid =
+                    (releaseUrl == kReleasesPageUrl || releaseUrl.rfind(std::string(kReleasesPageUrl) + "/", 0) == 0) &&
+                    ParseVersion(manifest["version"].get<std::string>(), latest);
+            }
+            if (!valid)
+            {
+                FinishUpdateDownload(state, false, L"检查更新失败，请稍后重试");
+                return;
+            }
+            if (CompareVersions(latest, current) <= 0)
+            {
+                FinishUpdateDownload(state, true, L"已是最新版本");
+                return;
+            }
+
+            const std::string name = manifest.value("installerName", std::string());
+            const std::string digest = manifest.value("installerSha256", std::string());
+            if (!update_download::IsInstallerName(name) || !update_download::IsSha256Hex(digest))
+            {
+                // 清单没给可用的包装与摘要，退回到原来那条路：让用户自己去下载页。
+                state->check->SetDisabled(false);
+                state->check->SetText(L"检查更新");
+                state->status->SetText(L"发现新版本 v" + Widen(latest.display) + L"，请在弹窗里选择下载方式");
+                state->status->SetRole(TextRole::Accent);
+                state->statusBox->SetVisible(true);
+                ShowUpdateDialog(*ctx, latest, releaseUrl, std::string(), manifest);
+                return;
+            }
+
+            state->check->SetText(L"正在下载…");
+            state->status->SetText(L"正在下载 v" + Widen(latest.display) + L"，稍等几分钟");
+            state->status->SetRole(TextRole::Muted);
+
+            update_download::Request request;
+            request.current_version = MSIME_PRODUCT_VERSION;
+            request.release_url = releaseUrl;
+            request.installer_name = name;
+            request.installer_sha256 = digest;
+            request.directory = update_download::DefaultDirectory();
+            // 下载本身在后台线程上跑，进度只能靠结束后一次性回报，所以把整个下载
+            // 放进 RunInBackground 的 work 里；返回一个编码过的结果串交给窗口线程。
+            RunInBackground(
+                ctx->host.Hwnd(),
+                [request]() {
+                    const update_download::Result result = update_download::Download(request);
+                    if (result.outcome == update_download::Outcome::Ok)
+                    {
+                        update_download::PruneOldInstallers(request.directory, request.installer_name);
+                        // 四段结果：状态、路径、摘要、说明，用换行分隔。
+                        return std::string("ok\n") + result.path.u8string() + "\n" + request.installer_sha256 + "\n";
+                    }
+                    return std::string("err\n\n\n") + result.message;
+                },
+                [weak](const std::string &encoded) {
+                    const std::shared_ptr<AboutState> locked = weak.lock();
+                    if (!locked)
+                        return;
+                    // 四段：状态、路径、摘要、说明。状态不是 ok 时按失败收尾。
+                    const auto next = [&encoded](size_t &start) {
+                        const size_t end = encoded.find('\n', start);
+                        const std::string field =
+                            encoded.substr(start, end == std::string::npos ? std::string::npos : end - start);
+                        start = end == std::string::npos ? encoded.size() : end + 1;
+                        return field;
+                    };
+                    size_t cursor = 0;
+                    const std::string status = next(cursor);
+                    const std::string path = next(cursor);
+                    const std::string digest = next(cursor);
+                    const std::string note = cursor < encoded.size() ? encoded.substr(cursor) : std::string();
+                    if (status == "ok")
+                        FinishUpdateDownload(locked, path, digest, note);
+                    else
+                        FinishUpdateDownload(locked, std::string(), std::string(),
+                                             note.empty() ? std::string("下载失败") : note);
+                });
+        });
+}
+} // namespace
 
 VisualPtr BuildAboutPage(PageContext &context)
 {

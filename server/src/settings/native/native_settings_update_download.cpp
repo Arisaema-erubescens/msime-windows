@@ -330,6 +330,15 @@ bool IsInstallerName(const std::string &name)
     return name.size() <= 120 && std::regex_match(name, pattern);
 }
 
+bool IsReleaseVersion(const std::string &version)
+{
+    // 三段数字，不许有预发布标签与构建元数据。`0.11.1-dev.20261010.d1adf7df7682` 和
+    // `0.11.1-nightly.20261010.d1adf7df7682` 都在这里被挡掉；`v0.11.1` 放行，因为发布页的
+    // tag 就带 v，清单里的 version 字段两种写法都出现过。
+    static const std::regex pattern(R"(^\s*[vV]?\d+\.\d+\.\d+\s*$)");
+    return std::regex_match(version, pattern);
+}
+
 std::vector<std::string> ChannelUrls(const std::string &release_url, const std::string &installer_name)
 {
     // 发布页地址换成资产地址：releases/tag/<tag> → releases/download/<tag>/<name>。
@@ -430,6 +439,13 @@ bool FileMatchesDigest(const std::filesystem::path &path, const std::string &exp
 Result Download(const Request &request)
 {
     Result result;
+    // 下载只在正式版上开放。nightly 与 dev 构建的清单不由官网提供，版本比较也没有
+    // 意义，所以在这里一刀切，而不是让它们下到一半再失败。
+    if (!IsReleaseVersion(request.current_version))
+    {
+        result.message = "当前构建不是正式版，不自动下载安装包";
+        return result;
+    }
     if (!IsInstallerName(request.installer_name))
     {
         result.message = "更新清单里的安装包名无效";

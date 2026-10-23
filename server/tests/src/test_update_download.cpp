@@ -12,7 +12,7 @@ TEST_CASE(update_download_rejects_installer_names_it_would_never_write)
 {
     using native_settings::update_download::IsInstallerName;
     REQUIRE(IsInstallerName("MetasequoiaIME_Setup_v0.11.1.exe"));
-    REQUIRE(IsInstallerName("MetasequoiaIME_Setup_v0.11.1-dev.20261022.7fa6fb1a.exe"));
+    REQUIRE(IsInstallerName("MetasequoiaIME_Setup_v0.11.1-dev.20261010.d1adf7df7682.exe"));
     // 只要不是这个名字形状，就说明清单不可信，不下载。
     REQUIRE(!IsInstallerName("setup.exe"));
     REQUIRE(!IsInstallerName("MetasequoiaIME_Setup_v0.11.1.exe.part"));
@@ -56,6 +56,7 @@ TEST_CASE(update_download_refuses_to_start_without_a_digest)
 {
     using namespace native_settings::update_download;
     Request request;
+    request.current_version = "0.11.1";
     request.release_url = "https://github.com/metasequoiaime/MSIME-Windows/releases/tag/v0.11.1";
     request.installer_name = "MetasequoiaIME_Setup_v0.11.1.exe";
     request.directory = test::TempRoot() / L"update-download-unit";
@@ -72,6 +73,46 @@ TEST_CASE(update_download_refuses_to_start_without_a_digest)
     result = Download(request);
     REQUIRE(result.outcome == Outcome::Failed);
     REQUIRE(result.attempts.empty());
+}
+
+TEST_CASE(update_download_only_runs_on_release_builds)
+{
+    using native_settings::update_download::IsReleaseVersion;
+
+    // 正式版放行。发布页的 tag 带 v，清单里的 version 字段两种写法都出现过。
+    REQUIRE(IsReleaseVersion("0.11.1"));
+    REQUIRE(IsReleaseVersion("v0.11.1"));
+    REQUIRE(IsReleaseVersion("V0.11.1"));
+    REQUIRE(IsReleaseVersion(" 0.11.1 "));
+
+    // nightly 与 dev 构建一律不下载：厂商不给它们的清单，版本号也每天变。
+    REQUIRE(!IsReleaseVersion("0.11.1-dev.20261010.d1adf7df7682"));
+    REQUIRE(!IsReleaseVersion("0.11.1-nightly.20261010.d1adf7df7682"));
+    REQUIRE(!IsReleaseVersion("0.11.1-beta.3"));
+    REQUIRE(!IsReleaseVersion("0.11.1+build.5"));
+
+    // 不是三段数字就谈不上正式版。
+    REQUIRE(!IsReleaseVersion(""));
+    REQUIRE(!IsReleaseVersion("0.11"));
+    REQUIRE(!IsReleaseVersion("0.11.1.2"));
+    REQUIRE(!IsReleaseVersion("abc"));
+}
+
+TEST_CASE(update_download_refuses_nightly_builds_before_touching_the_network)
+{
+    using namespace native_settings::update_download;
+    Request request;
+    request.current_version = "0.11.1-nightly.20261010.d1adf7df7682";
+    request.release_url = "https://github.com/metasequoiaime/MSIME-Windows/releases/tag/0.11.1";
+    request.installer_name = "MetasequoiaIME_Setup_v0.11.1.exe";
+    request.installer_sha256 = std::string(64, 'a');
+    request.directory = test::TempRoot() / L"update-download-nightly";
+
+    // 版本号这一关排在摘要与地址检查之前：nightly 构建连一次 HTTP 都不该发。
+    const Result result = Download(request);
+    REQUIRE(result.outcome == Outcome::Failed);
+    REQUIRE(result.attempts.empty());
+    REQUIRE(!result.message.empty());
 }
 
 TEST_CASE(update_download_keeps_the_installer_out_of_the_data_directory)
