@@ -523,6 +523,8 @@ add_executable(${SETTINGS_EXECUTABLE_NAME} WIN32
     "./src/settings/default_input_method.h"
     "./src/settings/game_compat_name.cpp"
     "./src/settings/game_compat_name.h"
+    "./src/settings/input_method_install.cpp"
+    "./src/settings/input_method_install.h"
     # 设置页要判断通道、读后台下载的结果，只用到通道判定与状态文件，不引轮询线程。
     "./src/settings/update_channel.cpp"
     "./src/settings/update_channel.h"
