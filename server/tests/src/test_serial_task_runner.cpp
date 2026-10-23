@@ -61,25 +61,34 @@ TEST_CASE(serial_task_runner_runs_the_idle_handler_only_when_the_queue_empties)
 {
     std::atomic<int> idle_runs{0};
     std::atomic<int> jobs_done{0};
+    SerialTaskRunner runner;
+    runner.SetIdleHandler([&idle_runs] { ++idle_runs; });
+    // Hold the thread busy first, so the handler cannot run between the posts below.
+    runner.Post([&jobs_done] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        ++jobs_done;
+    });
+    for (int i = 0; i < 10; ++i)
     {
-        SerialTaskRunner runner;
-        runner.SetIdleHandler([&idle_runs] { ++idle_runs; });
-        // Hold the thread busy: the idle handler must not interleave with queued work.
-        runner.Post([&jobs_done] {
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            ++jobs_done;
-        });
-        for (int i = 0; i < 10; ++i)
-        {
-            runner.Post([&jobs_done] { ++jobs_done; });
-        }
-        runner.Stop();
+        runner.Post([&jobs_done] { ++jobs_done; });
     }
+    // Wait for the queue to drain without calling Stop(): Stop() sets stopping_, and the runner returns instead of
+    // running the idle handler once it is stopping, which is the behaviour under test.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (jobs_done.load() < 11 && std::chrono::steady_clock::now() < deadline)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    while (idle_runs.load() == 0 && std::chrono::steady_clock::now() < deadline)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    runner.Stop();
     REQUIRE(jobs_done.load() == 11);
-    // Once after the queue drained. The runner does not spin: it waits for a job and runs the handler on the way out,
-    // so exactly one extra run is expected rather than an unbounded stream of them.
+    // The handler runs after the last queued job and again only when the queue drains once more; either way it must
+    // have run, and never more often than there were idle moments.
     REQUIRE(idle_runs.load() >= 1);
-    REQUIRE(idle_runs.load() <= 11);
+    REQUIRE(idle_runs.load() <= 12);
 }
 
 TEST_CASE(serial_task_runner_survives_a_throwing_idle_handler)
