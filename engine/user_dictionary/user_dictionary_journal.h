@@ -17,6 +17,16 @@ enum class DictionaryKind
 };
 
 std::string default_user_db_path();
+
+// How long a journal connection waits for a lock before giving up. This is deliberately shorter than every client
+// wait it can end up inside: the TSF client gives a commit reply FANY_IME_COMMIT_REPLY_TIMEOUT_MS (1500 ms) overall
+// and FANY_IME_COMMIT_REPLY_SESSION_WAIT_MS (300 ms) in the one shot it takes inside an edit session, and it treats
+// running out of either as a transport failure that drops the key, the queue and the composition. A wait longer than
+// that window cannot end in success; all it can do is hold the caller until the client has already reset. Ending the
+// wait early costs one failed read on a page that comes back a moment later, or one lost frequency adjustment, both
+// invisible next to a reset composition.
+constexpr int kJournalBusyTimeoutMs = 200;
+
 // Compatibility no-op; journal connections are operation-scoped.
 void close_default_user_database();
 

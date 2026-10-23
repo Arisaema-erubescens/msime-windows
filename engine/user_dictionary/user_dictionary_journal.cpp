@@ -73,7 +73,7 @@ Db open_database(const std::string &path, int flags)
             sqlite3_close(raw);
         return {};
     }
-    sqlite3_busy_timeout(raw, 5000);
+    sqlite3_busy_timeout(raw, kJournalBusyTimeoutMs);
     return Db(raw);
 }
 
@@ -659,7 +659,10 @@ bool set_fixed_position(const std::string &user_db_path, const std::string &cont
     UserDatabase db(user_db_path);
     if (!db)
         return false;
-    sqlite3_exec(db.get(), "BEGIN IMMEDIATE", nullptr, nullptr, nullptr);
+    // Checked, not assumed: a short busy timeout means the write lock can be unavailable, and carrying on without a
+    // transaction would apply the two statements as separately auto-committed changes.
+    if (!execute_sql(db.get(), "BEGIN IMMEDIATE"))
+        return false;
     auto clear_slot = prepare(db.get(), "DELETE FROM fixed_candidate_positions WHERE context_key=?1 AND position=?2");
     auto upsert = prepare(
         db.get(), "INSERT INTO fixed_candidate_positions(context_key,entry_key,value,position) VALUES(?1,?2,?3,?4)"
