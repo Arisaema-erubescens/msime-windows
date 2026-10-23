@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <windows.h>
 
 using namespace msimeui;
 
@@ -146,20 +147,10 @@ class RenderSurface
   public:
     RenderSurface()
     {
-        REQUIRE(SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)));
-        hwnd_ = CreateWindowExW(0, L"STATIC", L"scroll viewer render", WS_POPUP, 0, 0, 256, 256, nullptr, nullptr,
-                                GetModuleHandleW(nullptr), nullptr);
-        REQUIRE(hwnd_ != nullptr);
+        REQUIRE(com_.Initialized());
+        REQUIRE(window_.Created());
         resources_ = std::make_unique<DeviceResources>();
-        REQUIRE(resources_->EnsureForWindow(hwnd_));
-    }
-
-    ~RenderSurface()
-    {
-        // The Direct2D and WIC objects go before the window and COM they were made on.
-        resources_.reset();
-        DestroyWindow(hwnd_);
-        CoUninitialize();
+        REQUIRE(resources_->EnsureForWindow(window_.Handle()));
     }
 
     void Draw(Visual &visual)
@@ -170,7 +161,62 @@ class RenderSurface
     }
 
   private:
-    HWND hwnd_ = nullptr;
+    // Each step that must be undone lives in a member, so a REQUIRE that throws from the
+    // constructor still unwinds it. Members are destroyed last-declared first, which puts
+    // the Direct2D and WIC objects before the window, and the window before COM.
+    class Com
+    {
+      public:
+        Com() : result_(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))
+        {
+        }
+        ~Com()
+        {
+            if (Initialized())
+                CoUninitialize();
+        }
+        Com(const Com &) = delete;
+        Com &operator=(const Com &) = delete;
+
+        bool Initialized() const
+        {
+            return SUCCEEDED(result_);
+        }
+
+      private:
+        HRESULT result_ = E_FAIL;
+    };
+
+    class HiddenWindow
+    {
+      public:
+        ~HiddenWindow()
+        {
+            if (hwnd_)
+                DestroyWindow(hwnd_);
+        }
+        HiddenWindow(const HiddenWindow &) = delete;
+        HiddenWindow &operator=(const HiddenWindow &) = delete;
+
+        bool Created()
+        {
+            if (hwnd_)
+                return true;
+            hwnd_ = CreateWindowExW(0, L"STATIC", L"scroll viewer render", WS_POPUP, 0, 0, 256, 256, nullptr, nullptr,
+                                    GetModuleHandleW(nullptr), nullptr);
+            return hwnd_ != nullptr;
+        }
+        HWND Handle() const
+        {
+            return hwnd_;
+        }
+
+      private:
+        HWND hwnd_ = nullptr;
+    };
+
+    Com com_;
+    HiddenWindow window_;
     std::unique_ptr<DeviceResources> resources_;
 };
 } // namespace

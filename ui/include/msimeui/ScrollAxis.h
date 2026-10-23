@@ -69,7 +69,7 @@ UINT SystemWheelScrollLines();
 using WheelScrollLinesSource = UINT (*)();
 WheelScrollLinesSource SetWheelScrollLinesSource(WheelScrollLinesSource source);
 // Distance of one wheel notch: `stepAtThreeLines` scaled by lines / 3, 0 for 0 lines,
-// and seven eighths of the viewport (at least `stepAtThreeLines`) for WHEEL_PAGESCROLL.
+// and 0.875 of the viewport (at least `stepAtThreeLines`) for WHEEL_PAGESCROLL.
 float WheelNotchDistance(UINT lines, float stepAtThreeLines, float viewport);
 // Change of offset for a wheel delta: a positive delta (wheel away from the user)
 // scrolls towards the start, WHEEL_DELTA per notch.

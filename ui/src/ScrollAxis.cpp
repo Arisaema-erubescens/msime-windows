@@ -175,6 +175,6 @@ float ScrollGlide::VelocityAt(double nowMs) const
 
 bool ScrollGlide::IsDoneAt(double nowMs) const
 {
-    return nowMs >= startMs + durationMs;
+    return nowMs >= startMs + std::max(durationMs, 1.0);
 }
 } // namespace msimeui
