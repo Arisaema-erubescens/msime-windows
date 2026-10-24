@@ -240,9 +240,12 @@ VisualPtr Keys(std::initializer_list<const wchar_t *> tokens)
     return row;
 }
 
+// A shortcut's name; indexed for search like MakeTitle.
 std::shared_ptr<Label> RowLabel(std::wstring text, TextRole role = TextRole::Primary)
 {
-    return std::make_shared<Label>(std::move(text), Font(kFontBody, DWRITE_FONT_WEIGHT_NORMAL, 0.0f, true), role);
+    auto label = std::make_shared<Label>(text, Font(kFontBody, DWRITE_FONT_WEIGHT_NORMAL, 0.0f, true), role);
+    IndexSettingTitle(label, std::move(text));
+    return label;
 }
 
 // `.shortcut-section-heading`: title + description, optional badge, `padding: 18px 22px`.
@@ -253,7 +256,7 @@ VisualPtr Heading(std::wstring title, std::wstring description, VisualPtr badge 
     row->SetJustify(Row::Justify::SpaceBetween);
     auto text = std::make_shared<Column>(0.0f);
     if (!title.empty())
-        text->Add(MakeTitle(std::move(title)));
+        text->Add(MakeTitle(title, description));
     if (!description.empty())
     {
         auto desc = MakeDescription(std::move(description));
@@ -324,6 +327,7 @@ class SystemGuide : public msimeui::Container
         auto title = std::make_shared<Label>(L"修改或关闭 Ctrl+Space（系统）",
                                              Font(13.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, 1.7f, true));
         title->SetMargin({0.0f, 0.0f, 0.0f, 4.0f});
+        IndexSettingTitle(title, L"修改或关闭 Ctrl+Space（系统）");
         column->Add(title);
         column->Add(std::make_shared<Label>(L"请前往 Windows 系统设置修改“输入法 / 非输入法切换”的按键顺序：", Body(),
                                             TextRole::Secondary));
