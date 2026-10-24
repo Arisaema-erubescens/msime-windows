@@ -1527,22 +1527,22 @@ void HandleClientMessage(HWND hwnd, const std::string &raw)
                 MessageBoxW(g_settings_hwnd, L"未能重启输入法进程，请稍后重试。", L"水杉输入法",
                             MB_OK | MB_ICONWARNING);
                 PostRestartServerDone(false);
+                return;
             }
-            else if (g_worker && !g_closing)
+            if (!g_worker || g_closing)
             {
-                // Watchdog 拉起新 Server 后才会落位 .gram.new；设置进程不会因为这次重启
-                // 收到配置变化，所以在接下来几秒主动拉快照，待更新清掉或次数用完就停。
-                // 不重启设置进程：避免单实例/重开时序问题和窗口闪现。
-                g_restart_refresh_remaining = kRestartRefreshTicks;
-                SetTimer(hwnd, kRestartRefreshTimer, 500, nullptr);
-                PostRestartServerDone(true);
-            }
-            else
-            {
-                // 正在关闭或宿主不可用：重启请求没有人会再来收尾，回执必须在这里补发，
-                // 否则页面按钮永远停在「重启中…」。
+                // 理论上到不了：函数开头的 g_closing || !g_worker 已经挡过一遍，中间也不会清空
+                // g_worker。留着是为了让「重启必有回执」在分支结构上完整，而不是靠那条前置检查
+                // 隐式保证；以后谁挪动前置检查，这里仍然会发回执。
                 PostRestartServerDone(false);
+                return;
             }
+            // Watchdog 拉起新 Server 后才会落位 .gram.new；设置进程不会因为这次重启
+            // 收到配置变化，所以在接下来几秒主动拉快照，待更新清掉或次数用完就停。
+            // 不重启设置进程：避免单实例/重开时序问题和窗口闪现。
+            g_restart_refresh_remaining = kRestartRefreshTicks;
+            SetTimer(hwnd, kRestartRefreshTimer, 500, nullptr);
+            PostRestartServerDone(true);
         }
         else if (type == "openExternalUrl")
         {
