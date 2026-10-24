@@ -115,9 +115,12 @@ VisualPtr BasicRow(VisualPtr left, VisualPtr right, float minHeight = 44.0f, flo
     return std::make_shared<MinHeight>(row, minHeight, Thickness{0.0f, paddingY, 0.0f, paddingY});
 }
 
-std::shared_ptr<Label> RowText(std::wstring text)
+// A row's title; indexed for search like MakeTitle.
+std::shared_ptr<Label> RowText(std::wstring text, std::wstring searchDescription = {})
 {
-    return std::make_shared<Label>(std::move(text), BodyStyle());
+    auto label = std::make_shared<Label>(text, BodyStyle());
+    IndexSettingTitle(label, std::move(text), std::move(searchDescription));
+    return label;
 }
 
 // `.voice-section > .voice-description { margin: -6px 0 16px }`
@@ -462,6 +465,7 @@ struct VoicePage : std::enable_shared_from_this<VoicePage>
         // 录音提示音
         {
             auto expander = std::make_shared<PlainExpander>(L"录音提示音", BodyStyle());
+            IndexSettingTitle(expander, L"录音提示音");
             soundMaster = std::make_shared<ToggleSwitch>(true);
             startSound = std::make_shared<ToggleSwitch>(true);
             endSound = std::make_shared<ToggleSwitch>(true);
@@ -633,7 +637,9 @@ struct VoicePage : std::enable_shared_from_this<VoicePage>
             auto endpointRow = std::make_shared<Row>(4.0f);
             TextStyle inherited = BodyStyle();
             inherited.size = kFontDefault;
-            endpointRow->Add(std::make_shared<Label>(L"流式接口", inherited));
+            auto endpointLabel = std::make_shared<Label>(L"流式接口", inherited);
+            IndexSettingTitle(endpointLabel, L"流式接口");
+            endpointRow->Add(endpointLabel);
             endpointRow->Add(doubaoEndpoint);
             options->Add(endpointRow);
             options->Add(
@@ -641,7 +647,7 @@ struct VoicePage : std::enable_shared_from_this<VoicePage>
                                 L"双向流式返回增量结果，实时上屏刷新更频繁。选择后会同步写入上方“接口地址”。"));
             auto optionRow = [this](const wchar_t *title, const wchar_t *description, const char *path) {
                 auto left = std::make_shared<Column>(0.0f);
-                left->Add(RowText(title));
+                left->Add(RowText(title, description));
                 auto desc = MakeDescription(description);
                 desc->SetMargin({0.0f, 2.0f, 0.0f, 0.0f});
                 left->Add(desc);

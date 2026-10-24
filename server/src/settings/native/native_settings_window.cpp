@@ -45,6 +45,8 @@ constexpr UINT_PTR kSplashTimer = 0x4E56;
 // keystroke. One page per tick: a page builder is a few hundred control constructions, which is
 // milliseconds, but sixteen of them in one go would be a visible hitch on a cold start.
 constexpr UINT_PTR kIndexPageTimer = 0x4E57;
+// Hover delay before a cut-off search suggestion shows its full text.
+constexpr UINT_PTR kSearchTipTimer = 0x4E58;
 
 // 系统「显示动画」关闭时预览里的动图只显示首帧，与候选窗同一个开关；读不到时按开启处理。
 bool SystemAnimationsEnabled()
@@ -446,27 +448,419 @@ class NavItem : public msimeui::Visual
     bool pressed_ = false;
 };
 
-// One line of the settings search results: the row title, with its page name under it when the
-// title alone is ambiguous. Clicking it jumps to the row.
-class SearchResultItem : public msimeui::Visual
+// WinUI 3 control colors for the search box and its suggestions. The search box follows the
+// Fluent AutoSuggestBox rather than the form controls ported from the web page, so it takes the
+// system's token values (ControlFill*, ControlStroke*, SubtleFill*) instead of the CSS palette.
+struct FluentColors
+{
+    D2D1_COLOR_F fillRest;
+    D2D1_COLOR_F fillHover;
+    D2D1_COLOR_F fillFocused;
+    D2D1_COLOR_F stroke;
+    // The darker bottom edge that gives a text box its sunken look.
+    D2D1_COLOR_F strokeBottom;
+    D2D1_COLOR_F subtleHover;
+    D2D1_COLOR_F subtlePressed;
+    D2D1_COLOR_F glyph;
+    D2D1_COLOR_F flyoutFill;
+    D2D1_COLOR_F flyoutStroke;
+};
+
+const FluentColors &Fluent(const Palette &p)
+{
+    static const FluentColors light = {
+        Rgba(255, 255, 255, 0.70f), Rgba(249, 249, 249, 0.50f), Hex(0xFFFFFF),
+        Rgba(0, 0, 0, 0.06f),       Rgba(0, 0, 0, 0.45f),       Rgba(0, 0, 0, 0.037f),
+        Rgba(0, 0, 0, 0.024f),      Rgba(0, 0, 0, 0.62f),       Hex(0xF9F9F9),
+        Rgba(0, 0, 0, 0.06f),
+    };
+    static const FluentColors dark = {
+        Rgba(255, 255, 255, 0.06f), Rgba(255, 255, 255, 0.08f), Rgba(30, 30, 30, 0.70f),
+        Rgba(255, 255, 255, 0.07f), Rgba(255, 255, 255, 0.54f), Rgba(255, 255, 255, 0.06f),
+        Rgba(255, 255, 255, 0.04f), Rgba(255, 255, 255, 0.79f), Hex(0x2C2C2C),
+        Rgba(255, 255, 255, 0.08f),
+    };
+    return p.light ? light : dark;
+}
+
+// Segoe Fluent Icons code points.
+constexpr wchar_t kGlyphSearch[] = L"\xE721";
+constexpr wchar_t kGlyphClear[] = L"\xE894";
+
+void DrawGlyph(msimeui::DeviceResources &dr, const wchar_t *glyph, float size, const RectF &box,
+               const D2D1_COLOR_F &color)
+{
+    TextStyle style;
+    style.family = IconFontFamily();
+    style.size = size;
+    style.lineHeight = 1.0f;
+    DrawTextInRect(dr, glyph, style, box, color, true);
+}
+
+// A TextBox that reports the pointer coming and going: the search field draws the chrome around
+// it, and its hover look has to follow the pointer over the text too.
+class HoverTextBox : public msimeui::TextBox
 {
   public:
-    SearchResultItem(std::wstring title, std::wstring pageTitle, std::function<void()> onActivate)
-        : onActivate_(std::move(onActivate))
+    using msimeui::TextBox::TextBox;
+
+    void SetOnHoverChanged(std::function<void(bool hovered)> handler)
     {
-        TextStyle style;
-        style.size = kFontDefault;
-        title_.Set(std::move(title), style);
-        TextStyle meta = style;
-        meta.size = kFontCaption;
-        page_.Set(std::move(pageTitle), meta);
-        SetMargin({8.0f, 1.0f, 8.0f, 1.0f});
+        onHoverChanged_ = std::move(handler);
+    }
+
+    void OnMouseEnter() override
+    {
+        msimeui::TextBox::OnMouseEnter();
+        if (onHoverChanged_)
+            onHoverChanged_(true);
+    }
+
+    void OnMouseLeave() override
+    {
+        msimeui::TextBox::OnMouseLeave();
+        if (onHoverChanged_)
+            onHoverChanged_(false);
+    }
+
+    // Clicking into the box keeps its suggestion flyout open.
+    bool KeepsPopupsOpenOnClick() const override
+    {
+        return true;
+    }
+
+  private:
+    std::function<void(bool hovered)> onHoverChanged_;
+};
+
+// The Fluent AutoSuggestBox field: a 4px-rounded box with the sunken bottom edge, an accent
+// underline while focused, the search glyph on the right and a clear button in front of it while
+// there is text to clear.
+class SearchField : public msimeui::Visual
+{
+  public:
+    SearchField()
+    {
+        box_ = std::make_shared<HoverTextBox>(kHeight, L"搜索设置");
+        box_->SetChromeVisible(false);
+        box_->SetFontSize(kFontBody);
+        box_->SetPlaceholderFontSize(kFontBody);
+        box_->SetOnHoverChanged([this](bool hovered) {
+            boxHovered_ = hovered;
+            InvalidateVisual();
+        });
+        box_->SetOnTextChanged([this](const std::wstring &text) {
+            InvalidateArrange();
+            if (onChanged_)
+                onChanged_(text);
+        });
+        box_->SetOnFocusChanged([this](bool focused) {
+            InvalidateArrange();
+            InvalidateVisual();
+            if (onFocusChanged_)
+                onFocusChanged_(focused);
+        });
+        box_->SetOnSubmit([this]() {
+            if (onSubmit_)
+                onSubmit_();
+        });
+        AdoptChild(box_);
+    }
+
+    void SetOnChanged(std::function<void(const std::wstring &)> handler)
+    {
+        onChanged_ = std::move(handler);
+    }
+
+    void SetOnSubmit(std::function<void()> handler)
+    {
+        onSubmit_ = std::move(handler);
+    }
+
+    void SetOnFocusChanged(std::function<void(bool focused)> handler)
+    {
+        onFocusChanged_ = std::move(handler);
+    }
+
+    std::wstring GetText() const
+    {
+        return box_->GetText();
+    }
+
+    // Clears the text and reports it, the same as the clear button.
+    void Clear()
+    {
+        box_->SetText(L"");
+        InvalidateArrange();
+        if (onChanged_)
+            onChanged_(std::wstring());
+    }
+
+    bool IsFocused() const
+    {
+        return box_->IsFocused();
+    }
+
+    void Focus()
+    {
+        if (window_)
+            window_->FocusVisual(box_.get());
     }
 
     SizeF Measure(const SizeF &availableSize) override
     {
-        // padding 6px 12px; two stacked lines, the second one small.
-        return {availableSize.width, LineHeight(title_.Style()) + LineHeight(page_.Style()) + 10.0f};
+        box_->MeasureInLayout({availableSize.width, kHeight});
+        return {availableSize.width, kHeight};
+    }
+
+    void Arrange(const RectF &finalRect) override
+    {
+        bounds_ = finalRect;
+        const float right = ClearVisible() ? ClearRect().x : GlyphRect().x;
+        box_->ArrangeInLayout(
+            {bounds_.x + kTextInset, bounds_.y, std::max(0.0f, right - bounds_.x - kTextInset), kHeight});
+    }
+
+    void Render(msimeui::DeviceResources &dr) override
+    {
+        const Palette &p = CurrentPalette();
+        const FluentColors &c = Fluent(p);
+        if (themedLight_ != (p.light ? 1 : 0))
+        {
+            themedLight_ = p.light ? 1 : 0;
+            msimeui::TextBox::Appearance appearance;
+            appearance.borderWidth = 0.0f;
+            appearance.paddingX = 0.0f;
+            appearance.paddingY = (kHeight - LineHeight(BodyStyle())) * 0.5f;
+            appearance.fontFamily = UiFontFamily();
+            appearance.text = p.text;
+            appearance.placeholder = p.textMuted;
+            appearance.selection = WithAlpha(p.accent, 0.45f);
+            box_->SetAppearance(appearance);
+        }
+
+        const bool focused = box_->IsFocused();
+        const bool hovered = boxHovered_ || selfHovered_;
+        const D2D1_COLOR_F fill = focused ? c.fillFocused : hovered ? c.fillHover : c.fillRest;
+        FillRounded(dr, bounds_, kRadius, fill);
+        StrokeRounded(dr, bounds_, kRadius, c.stroke, CssBorder());
+        // The bottom edge, inside the rounded outline so the corners curve up into it: one hairline
+        // at rest, a two-pixel accent bar while focused.
+        RenderBottomEdge(dr, focused ? p.accent : c.strokeBottom, focused ? CssBorder(2.0f) : CssBorder());
+
+        box_->Render(dr);
+
+        if (ClearVisible())
+        {
+            const RectF clear = ClearRect();
+            if (clearPressed_ && clearHovered_)
+                FillRounded(dr, clear, kRadius, c.subtlePressed);
+            else if (clearHovered_)
+                FillRounded(dr, clear, kRadius, c.subtleHover);
+            DrawGlyph(dr, kGlyphClear, 10.0f, clear, c.glyph);
+        }
+        DrawGlyph(dr, kGlyphSearch, 12.0f, GlyphRect(), c.glyph);
+    }
+
+    void Attach(msimeui::Window *window) override
+    {
+        msimeui::Visual::Attach(window);
+        box_->Attach(window);
+    }
+
+    msimeui::Visual *FindVisualAt(const PointF &point) override
+    {
+        if (!Contains(bounds_, point))
+            return nullptr;
+        if (box_->HitTest(point) && !(ClearVisible() && Contains(ClearRect(), point)))
+            return box_.get();
+        return this;
+    }
+
+    msimeui::Visual *FindFocusableAt(const PointF &point) override
+    {
+        if (!Contains(bounds_, point))
+            return nullptr;
+        // The clear button keeps whatever focus there is; anywhere else in the field focuses the
+        // text, like clicking the padding of an <input>.
+        if (ClearVisible() && Contains(ClearRect(), point))
+            return nullptr;
+        return box_->HitTest(point) ? box_.get() : nullptr;
+    }
+
+    msimeui::Visual *FindFirstFocusableDescendant() override
+    {
+        return box_.get();
+    }
+
+    bool OnMouseDown(const POINT &point, WPARAM) override
+    {
+        if (!window_)
+            return false;
+        const PointF dip = window_->ClientPixelsToDips(point);
+        if (ClearVisible() && Contains(ClearRect(), dip))
+        {
+            clearPressed_ = true;
+            InvalidateVisual();
+            return true;
+        }
+        Focus();
+        return true;
+    }
+
+    bool OnMouseUp(const POINT &point, WPARAM) override
+    {
+        if (!clearPressed_)
+            return false;
+        clearPressed_ = false;
+        InvalidateVisual();
+        if (window_ && ClearVisible() && Contains(ClearRect(), window_->ClientPixelsToDips(point)))
+        {
+            Clear();
+            Focus();
+        }
+        return true;
+    }
+
+    bool OnMouseMove(const POINT &point, WPARAM) override
+    {
+        const bool over = window_ && ClearVisible() && Contains(ClearRect(), window_->ClientPixelsToDips(point));
+        if (over != clearHovered_)
+        {
+            clearHovered_ = over;
+            InvalidateVisual();
+        }
+        return true;
+    }
+
+    void OnMouseEnter() override
+    {
+        selfHovered_ = true;
+        InvalidateVisual();
+    }
+
+    void OnMouseLeave() override
+    {
+        selfHovered_ = false;
+        clearHovered_ = false;
+        clearPressed_ = false;
+        InvalidateVisual();
+    }
+
+    HCURSOR GetCursor() const override
+    {
+        return LoadCursor(nullptr, clearHovered_ ? IDC_ARROW : IDC_IBEAM);
+    }
+
+    bool KeepsPopupsOpenOnClick() const override
+    {
+        return true;
+    }
+
+  private:
+    static constexpr float kHeight = 32.0f;
+    static constexpr float kRadius = 4.0f;
+    static constexpr float kTextInset = 11.0f;
+    static constexpr float kGlyphWidth = 32.0f;
+    static constexpr float kClearSize = 24.0f;
+
+    bool ClearVisible() const
+    {
+        return box_->IsFocused() && !box_->GetText().empty();
+    }
+
+    RectF GlyphRect() const
+    {
+        return {bounds_.x + bounds_.width - kGlyphWidth, bounds_.y, kGlyphWidth, bounds_.height};
+    }
+
+    RectF ClearRect() const
+    {
+        const RectF glyph = GlyphRect();
+        return {glyph.x - kClearSize + 4.0f, bounds_.y + (bounds_.height - kClearSize) * 0.5f, kClearSize, kClearSize};
+    }
+
+    void RenderBottomEdge(msimeui::DeviceResources &dr, const D2D1_COLOR_F &color, float thickness)
+    {
+        ID2D1RenderTarget *target = dr.GetRenderTarget();
+        ID2D1SolidColorBrush *brush = target ? dr.GetSolidColorBrush(color) : nullptr;
+        if (!brush)
+            return;
+        Microsoft::WRL::ComPtr<ID2D1Factory> factory;
+        target->GetFactory(factory.GetAddressOf());
+        Microsoft::WRL::ComPtr<ID2D1RoundedRectangleGeometry> shape;
+        if (!factory || FAILED(factory->CreateRoundedRectangleGeometry(
+                            D2D1::RoundedRect(ToD2D(bounds_), kRadius, kRadius), shape.GetAddressOf())))
+            return;
+        target->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), shape.Get()), nullptr);
+        const float bottom = bounds_.y + bounds_.height;
+        target->FillRectangle(D2D1::RectF(bounds_.x, bottom - thickness, bounds_.x + bounds_.width, bottom), brush);
+        target->PopLayer();
+    }
+
+    std::shared_ptr<HoverTextBox> box_;
+    std::function<void(const std::wstring &)> onChanged_;
+    std::function<void()> onSubmit_;
+    std::function<void(bool focused)> onFocusChanged_;
+    int themedLight_ = -1;
+    bool boxHovered_ = false;
+    bool selfHovered_ = false;
+    bool clearHovered_ = false;
+    bool clearPressed_ = false;
+};
+
+// One suggestion under the search box: the page icon, the row title, and the page it is on.
+// Clicking it jumps to the row. The keyboard selection is marked like a Fluent list item, with a
+// short accent pill on the left.
+class SearchResultItem : public msimeui::Visual
+{
+  public:
+    SearchResultItem(std::wstring title, std::wstring pageTitle, std::wstring icon, std::function<void()> onActivate)
+        : onActivate_(std::move(onActivate)), title_(std::move(title)), page_(std::move(pageTitle)),
+          icon_(std::move(icon))
+    {
+        SetMargin({0.0f, 1.0f, 0.0f, 1.0f});
+    }
+
+    void SetHighlighted(bool highlighted)
+    {
+        if (highlighted_ == highlighted)
+            return;
+        highlighted_ = highlighted;
+        InvalidateVisual();
+    }
+
+    void SetOnHoverChanged(std::function<void(SearchResultItem *item, bool hovered)> handler)
+    {
+        onHoverChanged_ = std::move(handler);
+    }
+
+    // Whether either line is cut at the item's edge, so the full text needs a tooltip.
+    bool IsTruncated() const
+    {
+        const float width = TextWidth();
+        return MeasureTextWidth(title_, BodyStyle()) > width + 0.5f ||
+               MeasureTextWidth(page_, PageStyle()) > width + 0.5f;
+    }
+
+    // The tooltip text: the full title, and the page name too when that is what got cut.
+    std::wstring ToolTipText() const
+    {
+        if (MeasureTextWidth(page_, PageStyle()) > TextWidth() + 0.5f)
+            return title_ + L"\n" + page_;
+        return title_;
+    }
+
+    // Where the text starts, for lining the tooltip up with it.
+    float TextX() const
+    {
+        return bounds_.x + 12.0f + 16.0f + 12.0f;
+    }
+
+    SizeF Measure(const SizeF &availableSize) override
+    {
+        // Two stacked lines with 6px above and below, never shorter than a Fluent list item.
+        return {availableSize.width, std::max(40.0f, LineHeight(BodyStyle()) + LineHeight(PageStyle()) + 12.0f)};
     }
 
     void Arrange(const RectF &finalRect) override
@@ -477,14 +871,31 @@ class SearchResultItem : public msimeui::Visual
     void Render(msimeui::DeviceResources &dr) override
     {
         const Palette &p = CurrentPalette();
-        if (hovered_ || pressed_)
-            FillRounded(dr, bounds_, 5.0f, p.sidebarHover);
-        const float textX = bounds_.x + 12.0f;
-        const SizeF title = title_.Measure(bounds_.width - 24.0f);
-        const SizeF page = page_.Measure(bounds_.width - 24.0f);
-        const float blockY = bounds_.y + (bounds_.height - (title.height + page.height)) * 0.5f;
-        title_.Draw(dr, {textX, blockY}, p.text, bounds_.width - 24.0f);
-        page_.Draw(dr, {textX, blockY + title.height}, p.textMuted, bounds_.width - 24.0f);
+        const FluentColors &c = Fluent(p);
+        if (pressed_ && hovered_)
+            FillRounded(dr, bounds_, 4.0f, c.subtlePressed);
+        else if (hovered_ || highlighted_)
+            FillRounded(dr, bounds_, 4.0f, c.subtleHover);
+        if (highlighted_)
+            FillRounded(dr, {bounds_.x, bounds_.y + (bounds_.height - 16.0f) * 0.5f, 3.0f, 16.0f}, 1.5f, p.accent);
+
+        const float iconX = bounds_.x + 12.0f;
+        if (!icon_.empty())
+            DrawSvg(dr, ThemedSvg(icon_, p.light), {iconX, bounds_.y + (bounds_.height - 16.0f) * 0.5f, 16.0f, 16.0f});
+        const float textX = TextX();
+        const float textWidth = TextWidth();
+        // Clipped to the item: a long title is cut at the edge rather than drawn over the list.
+        const float titleHeight = LineHeight(BodyStyle());
+        const float pageHeight = LineHeight(PageStyle());
+        const float blockY = bounds_.y + (bounds_.height - (titleHeight + pageHeight)) * 0.5f;
+        if (fittedWidth_ != textWidth)
+        {
+            fittedWidth_ = textWidth;
+            fittedTitle_ = Ellipsize(title_, BodyStyle(), textWidth);
+            fittedPage_ = Ellipsize(page_, PageStyle(), textWidth);
+        }
+        DrawTextInRect(dr, fittedTitle_, BodyStyle(), {textX, blockY, textWidth, titleHeight}, p.text);
+        DrawTextInRect(dr, fittedPage_, PageStyle(), {textX, blockY + titleHeight, textWidth, pageHeight}, p.textMuted);
     }
 
     bool OnMouseDown(const POINT &point, WPARAM) override
@@ -512,6 +923,11 @@ class SearchResultItem : public msimeui::Visual
     {
         hovered_ = true;
         InvalidateVisual();
+        if (onHoverChanged_)
+        {
+            const auto handler = onHoverChanged_;
+            handler(this, true);
+        }
     }
 
     void OnMouseLeave() override
@@ -519,6 +935,11 @@ class SearchResultItem : public msimeui::Visual
         hovered_ = false;
         pressed_ = false;
         InvalidateVisual();
+        if (onHoverChanged_)
+        {
+            const auto handler = onHoverChanged_;
+            handler(this, false);
+        }
     }
 
     HCURSOR GetCursor() const override
@@ -527,11 +948,319 @@ class SearchResultItem : public msimeui::Visual
     }
 
   private:
+    static TextStyle PageStyle()
+    {
+        TextStyle style;
+        style.size = kFontCaption;
+        return style;
+    }
+
+    float TextWidth() const
+    {
+        return std::max(0.0f, bounds_.x + bounds_.width - 8.0f - TextX());
+    }
+
+    // `text` as it fits in `width`, ending in "…" when it does not (Fluent's character trimming).
+    static std::wstring Ellipsize(const std::wstring &text, const TextStyle &style, float width)
+    {
+        if (MeasureTextWidth(text, style) <= width + 0.5f)
+            return text;
+        // Longest prefix that still fits with the ellipsis after it.
+        size_t low = 0;
+        size_t high = text.size();
+        while (low < high)
+        {
+            const size_t mid = (low + high + 1) / 2;
+            if (MeasureTextWidth(text.substr(0, mid) + L"\x2026", style) <= width + 0.5f)
+                low = mid;
+            else
+                high = mid - 1;
+        }
+        // Never split a surrogate pair.
+        if (low > 0 && IS_HIGH_SURROGATE(text[low - 1]))
+            --low;
+        return text.substr(0, low) + L"\x2026";
+    }
+
     std::function<void()> onActivate_;
-    TextLayout title_;
-    TextLayout page_;
+    std::function<void(SearchResultItem *item, bool hovered)> onHoverChanged_;
+    // The lines as drawn at `fittedWidth_`, trimmed once per width rather than every frame.
+    std::wstring fittedTitle_;
+    std::wstring fittedPage_;
+    float fittedWidth_ = -1.0f;
+    std::wstring title_;
+    std::wstring page_;
+    std::wstring icon_;
+    bool highlighted_ = false;
     bool hovered_ = false;
     bool pressed_ = false;
+};
+
+// The suggestion rows, scrolling once there are more than the popup has room for.
+//
+// It scrolls by itself rather than through msimeui::ScrollViewer: that one relayouts every popup
+// whenever it arranges its content, which from inside a popup re-enters the popup's own layout.
+class SearchResultsList : public msimeui::Visual
+{
+  public:
+    explicit SearchResultsList(std::shared_ptr<Column> column) : column_(std::move(column))
+    {
+        AdoptChild(column_);
+    }
+
+    void SetMaxHeight(float height)
+    {
+        if (maxListHeight_ == height)
+            return;
+        maxListHeight_ = height;
+        InvalidateMeasure();
+    }
+
+    // Scrolls just enough to show `rect` (window DIPs), for the row picked with the keyboard.
+    void Reveal(const RectF &rect)
+    {
+        const float top = rect.y - bounds_.y + offset_;
+        float offset = offset_;
+        if (top < offset)
+            offset = top;
+        else if (top + rect.height > offset + bounds_.height)
+            offset = top + rect.height - bounds_.height;
+        ScrollTo(offset);
+    }
+
+    void Wheel(short delta)
+    {
+        // Three 16 DIP lines per notch, like the system's default wheel setting.
+        ScrollTo(offset_ - static_cast<float>(delta) / WHEEL_DELTA * 48.0f);
+    }
+
+    SizeF Measure(const SizeF &availableSize) override
+    {
+        contentHeight_ = column_->MeasureInLayout({availableSize.width, 1000000.0f}).height;
+        return {availableSize.width, std::min({contentHeight_, maxListHeight_, availableSize.height})};
+    }
+
+    void Arrange(const RectF &finalRect) override
+    {
+        bounds_ = finalRect;
+        offset_ = std::clamp(offset_, 0.0f, MaxOffset());
+        ArrangeContent();
+    }
+
+    void Render(msimeui::DeviceResources &dr) override
+    {
+        dr.PushClip(bounds_);
+        column_->Render(dr);
+        dr.PopClip();
+        if (MaxOffset() <= 0.0f)
+            return;
+        // A thin Fluent scroll indicator; the wheel and the arrow keys do the scrolling.
+        const float track = bounds_.height - 4.0f;
+        const float thumb = std::max(24.0f, track * bounds_.height / contentHeight_);
+        const float y = bounds_.y + 2.0f + (track - thumb) * (offset_ / MaxOffset());
+        FillRounded(dr, {bounds_.x + bounds_.width - 4.0f, y, 2.0f, thumb}, 1.0f, CurrentPalette().scrollbarThumb);
+    }
+
+    void Attach(msimeui::Window *window) override
+    {
+        msimeui::Visual::Attach(window);
+        column_->Attach(window);
+    }
+
+    msimeui::Visual *FindVisualAt(const PointF &point) override
+    {
+        if (!Contains(bounds_, point))
+            return nullptr;
+        msimeui::Visual *hit = column_->FindVisualAt(point);
+        return hit ? hit : this;
+    }
+
+    msimeui::Visual *FindFocusableAt(const PointF &point) override
+    {
+        // The rows are not focusable, so a click on one leaves the keyboard in the search box.
+        return Contains(bounds_, point) ? column_->FindFocusableAt(point) : nullptr;
+    }
+
+  private:
+    float MaxOffset() const
+    {
+        return std::max(0.0f, contentHeight_ - bounds_.height);
+    }
+
+    void ArrangeContent()
+    {
+        // Whole device pixels, so text does not resample at fractional offsets.
+        const float scale = window_ ? window_->GetDpi() / 96.0f : 1.0f;
+        const float offset = std::round(offset_ * scale) / scale;
+        column_->ArrangeInLayout({bounds_.x, bounds_.y - offset, bounds_.width, contentHeight_});
+    }
+
+    void ScrollTo(float offset)
+    {
+        offset = std::clamp(offset, 0.0f, MaxOffset());
+        if (offset == offset_)
+            return;
+        offset_ = offset;
+        ArrangeContent();
+        if (window_)
+        {
+            window_->RefreshHover();
+            window_->Invalidate();
+        }
+    }
+
+    std::shared_ptr<Column> column_;
+    float contentHeight_ = 0.0f;
+    float offset_ = 0.0f;
+    float maxListHeight_ = 400.0f;
+};
+
+// The suggestion flyout: a layer of its own over the window, like an open dropdown menu, anchored
+// under the search box and wider than the sidebar so titles have room.
+class SearchPopup : public msimeui::Popup
+{
+  public:
+    explicit SearchPopup(const std::shared_ptr<SearchResultsList> &list) : msimeui::Popup(list), list_(list.get())
+    {
+        const Palette &p = CurrentPalette();
+        SetPadding(4.0f);
+        SetPlacement(msimeui::PopupPlacement::BelowLeading);
+        SetCornerRadius(8.0f);
+        SetConstrainToViewport(true);
+        SetMatchAnchorWidth(true);
+        SetOffset(0.0f, 4.0f);
+        SetBackgroundFill(Fluent(p).flyoutFill);
+        SetBorderColor(p.dropdownMenuBorder);
+        SetShadowEnabled(true);
+        SetShadowPasses({{p.menuShadow[0].sigma, p.menuShadow[0].alpha, 0.0f, p.menuShadow[0].offsetY},
+                         {p.menuShadow[1].sigma, p.menuShadow[1].alpha, 0.0f, p.menuShadow[1].offsetY}});
+    }
+
+    void SetAnchor(const RectF &anchor)
+    {
+        anchor_ = anchor;
+        SetAnchorRect(anchor);
+    }
+
+    SizeF Measure(const SizeF &availableSize) override
+    {
+        // Measured at the width it is shown at, so the rows know where their text gets cut.
+        const float width = std::min(std::max(kWidth, anchor_.width), availableSize.width);
+        const SizeF size = msimeui::Popup::Measure({width, availableSize.height});
+        return {width, size.height};
+    }
+
+    void LayoutOverlay(const SizeF &viewportSize) override
+    {
+        // As tall as the room below the box, so the list scrolls instead of being flipped above
+        // the box or running off the window.
+        const float below = viewportSize.height - (anchor_.y + anchor_.height + 4.0f) - 8.0f - 8.0f;
+        list_->SetMaxHeight(std::clamp(below, 120.0f, 440.0f));
+        msimeui::Popup::LayoutOverlay(viewportSize);
+    }
+
+    void Render(msimeui::DeviceResources &dr) override
+    {
+        // Like an open dropdown menu, the flyout is a composited layer: grayscale text.
+        ScopedTextAntialias grayscale(dr, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+        msimeui::Popup::Render(dr);
+    }
+
+    bool OnMouseWheel(const POINT &point, short delta, WPARAM) override
+    {
+        if (!window_ || !HitTest(window_->ClientPixelsToDips(point)))
+            return false;
+        // Taken even at the end of the list, so the page under the flyout does not scroll.
+        list_->Wheel(delta);
+        return true;
+    }
+
+  private:
+    static constexpr float kWidth = 320.0f;
+
+    SearchResultsList *list_ = nullptr;
+    RectF anchor_ = {};
+};
+
+// Fluent tooltip with the full text of a suggestion that does not fit. It sits in the popup layer
+// above the flyout and takes no input, so the row under it stays clickable.
+class SearchToolTip : public msimeui::Visual
+{
+  public:
+    void Show(const std::wstring &text, const RectF &anchor)
+    {
+        TextStyle style;
+        style.size = kFontCaption;
+        style.wrap = true;
+        text_.Set(text, style);
+        anchor_ = anchor;
+        fade_.Start(0.0f, 1.0f, 120.0, msimeui::Easing::Ease(), msimeui::NowMs());
+        InvalidateMeasure();
+        if (window_)
+            window_->RequestAnimationFrame();
+    }
+
+    SizeF Measure(const SizeF &availableSize) override
+    {
+        textWidth_ = std::max(0.0f, std::min(kMaxWidth, availableSize.width) - kPaddingX * 2.0f);
+        const SizeF text = text_.Measure(textWidth_);
+        textWidth_ = std::min(textWidth_, std::ceil(text.width));
+        return {textWidth_ + kPaddingX * 2.0f, text.height + kPaddingY * 2.0f};
+    }
+
+    void Arrange(const RectF &finalRect) override
+    {
+        bounds_ = finalRect;
+    }
+
+    void LayoutOverlay(const SizeF &viewportSize) override
+    {
+        const SizeF size = MeasureInLayout({std::max(0.0f, viewportSize.width - 16.0f), viewportSize.height});
+        float x = std::clamp(anchor_.x, 8.0f, std::max(8.0f, viewportSize.width - size.width - 8.0f));
+        float y = anchor_.y + anchor_.height + 4.0f;
+        if (y + size.height > viewportSize.height - 8.0f)
+            y = anchor_.y - size.height - 4.0f;
+        ArrangeInLayout({x, std::max(8.0f, y), size.width, size.height});
+    }
+
+    void Render(msimeui::DeviceResources &dr) override
+    {
+        const Palette &p = CurrentPalette();
+        const double now = window_ ? window_->GetFrameTime() : msimeui::NowMs();
+        const float opacity = fade_.Value(now);
+        if (fade_.IsRunning(now) && window_)
+            window_->RequestAnimationFrame();
+        PushOpacity(dr, opacity);
+        FillRounded(dr, bounds_, 4.0f, p.tooltipBg);
+        StrokeRounded(dr, bounds_, 4.0f, p.tooltipBorder, CssBorder());
+        text_.Draw(dr, {bounds_.x + kPaddingX, bounds_.y + kPaddingY}, p.tooltipText, textWidth_);
+        PopOpacity(dr);
+    }
+
+    bool HitTest(const PointF &) const override
+    {
+        return false;
+    }
+
+    msimeui::Visual *FindVisualAt(const PointF &) override
+    {
+        return nullptr;
+    }
+
+    msimeui::Visual *FindFocusableAt(const PointF &) override
+    {
+        return nullptr;
+    }
+
+  private:
+    static constexpr float kMaxWidth = 320.0f;
+    static constexpr float kPaddingX = 8.0f;
+    static constexpr float kPaddingY = 5.0f;
+
+    TextLayout text_;
+    RectF anchor_ = {};
+    float textWidth_ = 0.0f;
+    msimeui::Tween fade_{0.0f};
 };
 
 class SidebarHeader : public msimeui::Visual
@@ -576,12 +1305,8 @@ class SidebarHeader : public msimeui::Visual
     BitmapImage logo_{AssetPath(L"msime.png"), 25.0f, 25.0f, 6.0f};
 };
 
-// The search box at the top of the sidebar, plus the result list that opens under it.
-//
-// Both live inside the sidebar's own vertical flow rather than in a popup: the sidebar is the only
-// place the window already scrolls, and a popup would have to reproduce its clipping and DPI
-// handling. When there are no results the list takes no height, so the sidebar looks exactly like
-// it did before the box was added.
+// The search box at the top of the sidebar. Its suggestions open in a flyout over the window, in
+// the popup layer an open dropdown menu uses, instead of pushing the navigation items down.
 class SidebarSearch : public msimeui::Panel
 {
   public:
@@ -589,66 +1314,123 @@ class SidebarSearch : public msimeui::Panel
 
     explicit SidebarSearch(ActivateHandler onActivate) : onActivate_(std::move(onActivate))
     {
-        TextField::Options options;
-        options.height = 28.0f;
-        options.fontSize = kFontCaption;
-        options.paddingX = 8.0f;
-        options.paddingY = 4.0f;
-        options.placeholder = L"搜索设置";
-        field_ = std::make_shared<TextField>(options);
-        field_->SetOnChanged([this](const std::wstring &text) { Search(text); });
-        // Enter picks the first result, so the box is usable without the mouse.
-        field_->SetOnCommit([this](const std::wstring &text) {
-            Search(text);
-            if (!results_.empty())
-                Activate(results_.front());
+        field_ = std::make_shared<SearchField>();
+        field_->SetOnChanged([this](const std::wstring &text) {
+            highlighted_ = -1;
+            Search(text, true);
         });
-        field_->SetMargin({12.0f, 0.0f, 12.0f, 8.0f});
-        listHolder_ = std::make_shared<msimeui::Container>();
+        field_->SetOnFocusChanged([this](bool focused) {
+            // Coming back to a box that still holds a query brings its suggestions back.
+            if (focused && !open_ && !Query().empty())
+                Search(Query(), true);
+        });
+        // Enter opens the suggestion picked with the arrow keys, or the best one, so the box is
+        // usable without the mouse.
+        field_->SetOnSubmit([this]() {
+            if (!open_)
+                Search(Query(), true);
+            if (results_.empty())
+                return;
+            const size_t index = highlighted_ >= 0 ? static_cast<size_t>(highlighted_) : 0;
+            Activate(results_[std::min(index, results_.size() - 1)]);
+        });
+        // margin: 2px 8px 8px, so the box lines up with the navigation items below it.
+        field_->SetMargin({8.0f, 2.0f, 8.0f, 8.0f});
+        tip_ = std::make_shared<SearchToolTip>();
         AddChild(field_);
-        AddChild(listHolder_);
     }
 
     // Rows collected so far, in page order. The window rebuilds this as pages get built.
-    // Re-runs the current query against a new index.
+    // Re-runs an open query against the new index.
     void SetIndex(const std::shared_ptr<const std::vector<SettingsIndexEntry>> &index)
     {
         index_ = index;
-        if (!Query().empty())
-            Search(Query());
+        if (open_ && !Query().empty())
+            Search(Query(), false);
     }
 
     void Focus()
     {
-        if (field_ && window_)
-            window_->FocusVisual(field_->Box().get());
+        if (field_)
+            field_->Focus();
+    }
+
+    // Keys the text box itself has no use for, routed here by the window while the box has focus:
+    // Up / Down move through the suggestions, Escape closes them, then clears the query, then
+    // leaves the box.
+    bool HandleKey(WPARAM key)
+    {
+        if (!field_ || !field_->IsFocused())
+            return false;
+        if (key == VK_ESCAPE)
+        {
+            if (open_)
+            {
+                Close();
+                return true;
+            }
+            if (Query().empty())
+                return false;
+            field_->Clear();
+            return true;
+        }
+        if (key != VK_DOWN && key != VK_UP)
+            return false;
+        if (!open_)
+        {
+            if (Query().empty())
+                return false;
+            Search(Query(), true);
+        }
+        if (results_.empty())
+            return true;
+        const int count = static_cast<int>(results_.size());
+        if (key == VK_DOWN)
+            highlighted_ = highlighted_ < 0 ? 0 : (highlighted_ + 1) % count;
+        else
+            highlighted_ = highlighted_ <= 0 ? count - 1 : highlighted_ - 1;
+        for (size_t i = 0; i < items_.size(); ++i)
+            items_[i]->SetHighlighted(static_cast<int>(i) == highlighted_);
+        if (list_ && static_cast<size_t>(highlighted_) < items_.size())
+            list_->Reveal(items_[static_cast<size_t>(highlighted_)]->GetBounds());
+        if (window_)
+            window_->Invalidate();
+        return true;
+    }
+
+    // The hover delay of a cut-off suggestion ran out: show its full text.
+    void ShowPendingToolTip()
+    {
+        msimeui::Scene *scene = window_ ? window_->GetScene() : nullptr;
+        if (window_)
+            KillTimer(window_->GetHandle(), kSearchTipTimer);
+        if (!scene || !open_ || !tipItem_)
+            return;
+        const RectF item = tipItem_->GetBounds();
+        tip_->Show(tipItem_->ToolTipText(), {tipItem_->TextX(), item.y, item.width, item.height});
+        // Re-added so it lands on top of the flyout.
+        scene->RemovePopup(tip_.get(), false);
+        scene->AddPopup(tip_);
+        scene->RelayoutPopups();
     }
 
     SizeF Measure(const SizeF &availableSize) override
     {
-        // MeasureInLayout already accounts for each child's margin.
-        const SizeF field = field_->MeasureInLayout(availableSize);
-        const SizeF list = listHolder_->MeasureInLayout({availableSize.width, availableSize.height});
-        return {availableSize.width, field.height + list.height};
+        // MeasureInLayout already accounts for the field's margin.
+        return {availableSize.width, field_->MeasureInLayout(availableSize).height};
     }
 
     void Arrange(const RectF &finalRect) override
     {
         bounds_ = finalRect;
-        const SizeF field = field_->MeasureInLayout({finalRect.width, finalRect.height});
-        field_->ArrangeInLayout({finalRect.x, finalRect.y, finalRect.width, field.height});
-        const float listTop = finalRect.y + field.height;
-        const SizeF list = listHolder_->MeasureInLayout({finalRect.width, finalRect.height - field.height});
-        listHolder_->ArrangeInLayout({finalRect.x, listTop, finalRect.width, list.height});
+        field_->ArrangeInLayout(finalRect);
+        if (popup_)
+            popup_->SetAnchor(field_->GetBounds());
     }
 
     void Render(msimeui::DeviceResources &dr) override
     {
-        for (const auto &child : children_)
-        {
-            if (dr.IsVisible(Inflate(child->GetBounds(), 4.0f)))
-                child->Render(dr);
-        }
+        field_->Render(dr);
     }
 
   private:
@@ -657,38 +1439,170 @@ class SidebarSearch : public msimeui::Panel
         return field_ ? field_->GetText() : std::wstring();
     }
 
-    void Search(const std::wstring &query)
+    static std::wstring PageIcon(const std::string &pageId)
     {
-        results_.clear();
-        auto fresh = std::make_shared<Column>(0.0f);
-        if (index_ && !query.empty())
+        for (const auto &page : Pages())
         {
-            results_ = SearchSettings(*index_, query);
-            for (const SettingsIndexEntry &entry : results_)
-            {
-                fresh->Add(std::make_shared<SearchResultItem>(entry.title, entry.pageTitle,
-                                                              [this, entry]() { Activate(entry); }));
-            }
+            if (page.id == pageId)
+                return page.icon;
         }
-        listHolder_->SetChild(fresh);
-        InvalidateMeasure();
+        return {};
+    }
+
+    bool SameResults(const std::vector<SettingsIndexEntry> &other) const
+    {
+        if (other.size() != results_.size())
+            return false;
+        for (size_t i = 0; i < other.size(); ++i)
+        {
+            if (other[i].pageId != results_[i].pageId || other[i].target.lock() != results_[i].target.lock())
+                return false;
+        }
+        return true;
+    }
+
+    // Runs the query and shows its suggestions. `rebuild` false keeps an open flyout as it is when
+    // the hits did not change, so indexing more pages in the background does not reset the
+    // pointer's hover or the tooltip.
+    void Search(const std::wstring &query, bool rebuild)
+    {
+        std::vector<SettingsIndexEntry> hits;
+        if (index_ && !query.empty())
+            hits = SearchSettings(*index_, query);
+        if (!rebuild && open_ && SameResults(hits))
+            return;
+        results_ = std::move(hits);
+        if (highlighted_ >= static_cast<int>(results_.size()))
+            highlighted_ = -1;
+        HideToolTip();
+        tipItem_ = nullptr;
+        if (query.empty())
+        {
+            Close();
+            items_.clear();
+            return;
+        }
+        msimeui::Scene *scene = window_ ? window_->GetScene() : nullptr;
+        if (!scene)
+            return;
+
+        items_.clear();
+        auto column = std::make_shared<Column>(0.0f);
+        for (const SettingsIndexEntry &entry : results_)
+        {
+            auto item = std::make_shared<SearchResultItem>(entry.title, entry.pageTitle, PageIcon(entry.pageId),
+                                                           [this, entry]() { Activate(entry); });
+            item->SetHighlighted(static_cast<int>(items_.size()) == highlighted_);
+            item->SetOnHoverChanged([this](SearchResultItem *hovered, bool entered) { OnItemHover(hovered, entered); });
+            items_.push_back(item);
+            column->Add(item);
+        }
+        if (results_.empty())
+        {
+            TextStyle style;
+            style.size = kFontCaption;
+            auto empty = std::make_shared<Label>(L"找不到相关设置", style, TextRole::Muted);
+            empty->SetMargin({12.0f, 10.0f, 12.0f, 10.0f});
+            column->Add(empty);
+        }
+        auto list = std::make_shared<SearchResultsList>(column);
+        auto popup = std::make_shared<SearchPopup>(list);
+        popup->SetAnchor(field_->GetBounds());
+
+        const bool wasOpen = open_;
+        if (wasOpen)
+            scene->RemovePopup(popup_.get(), false);
+        else
+            // Only one flyout at a time: an open dropdown menu goes away.
+            scene->ClearPopups(true);
+        popup_ = popup;
+        list_ = list.get();
+        SearchPopup *raw = popup.get();
+        scene->AddPopup(popup_, [this, raw]() {
+            // Dismissed from outside: a click elsewhere, or the page switching.
+            if (popup_.get() != raw)
+                return;
+            open_ = false;
+            tipItem_ = nullptr;
+            if (window_)
+                KillTimer(window_->GetHandle(), kSearchTipTimer);
+        });
+        if (!wasOpen)
+            popup_->BeginAppearAnimation(140.0, -3.0f, 0.985f);
+        open_ = true;
+        scene->RelayoutPopups();
+        window_->Invalidate();
+    }
+
+    void Close()
+    {
+        HideToolTip();
+        tipItem_ = nullptr;
+        if (!open_)
+            return;
+        open_ = false;
+        if (msimeui::Scene *scene = window_ ? window_->GetScene() : nullptr)
+            scene->RemovePopup(popup_.get(), false);
+        popup_.reset();
+        list_ = nullptr;
         if (window_)
-            window_->Relayout();
+            window_->Invalidate();
+    }
+
+    // A pointer resting on a suggestion whose text is cut off gets the full text after the same
+    // delay as the title bar's tooltips.
+    void OnItemHover(SearchResultItem *item, bool hovered)
+    {
+        if (hovered)
+        {
+            HideToolTip();
+            tipItem_ = item;
+            if (window_ && item->IsTruncated())
+                SetTimer(window_->GetHandle(), kSearchTipTimer, 500, nullptr);
+            return;
+        }
+        if (tipItem_ == item)
+        {
+            tipItem_ = nullptr;
+            HideToolTip();
+        }
+    }
+
+    void HideToolTip()
+    {
+        if (!window_)
+            return;
+        KillTimer(window_->GetHandle(), kSearchTipTimer);
+        if (msimeui::Scene *scene = window_->GetScene())
+            scene->RemovePopup(tip_.get(), false);
     }
 
     void Activate(const SettingsIndexEntry &entry)
     {
+        // Closing drops the flyout the clicked row lives in; keep what the handler needs.
+        const SettingsIndexEntry target = entry;
+        Close();
         if (onActivate_)
         {
             const auto handler = onActivate_;
-            handler(entry);
+            handler(target);
         }
     }
 
-    std::shared_ptr<TextField> field_;
-    std::shared_ptr<msimeui::Container> listHolder_;
+    std::shared_ptr<SearchField> field_;
+    std::shared_ptr<SearchPopup> popup_;
+    // The list inside `popup_`, owned by it.
+    SearchResultsList *list_ = nullptr;
+    std::shared_ptr<SearchToolTip> tip_;
     std::shared_ptr<const std::vector<SettingsIndexEntry>> index_;
     std::vector<SettingsIndexEntry> results_;
+    // Kept here as well as in the flyout, so a row stays alive through its own click handler.
+    std::vector<std::shared_ptr<SearchResultItem>> items_;
+    // The suggestion under the pointer, waiting for its tooltip; one of `items_`.
+    SearchResultItem *tipItem_ = nullptr;
+    // Suggestion picked with the arrow keys; -1 while none is.
+    int highlighted_ = -1;
+    bool open_ = false;
     ActivateHandler onActivate_;
 };
 
@@ -1332,6 +2246,103 @@ class SplashView : public msimeui::Visual
     bool finished_ = false;
 };
 
+// What a search hit highlights: the SettingRow its title belongs to, or, for a title that heads a
+// block of its own (a form field, a heading over a list of options), that block.
+msimeui::Visual *HighlightTarget(msimeui::Visual &title)
+{
+    for (msimeui::Visual *visual = &title; visual; visual = visual->GetParentVisual())
+    {
+        if (dynamic_cast<SettingRow *>(visual))
+            return visual;
+    }
+    msimeui::Visual *parent = title.GetParentVisual();
+    return parent ? parent : &title;
+}
+
+// The accent pulse on the setting a search jumped to, like the highlight Windows Settings puts on
+// the card a search opened. It is drawn over the page by the root rather than by the setting, so
+// any target works, and it follows the target's bounds while the page scrolls.
+class SearchHighlight : public msimeui::Visual
+{
+  public:
+    // `title` keeps the target's page alive for the check; `target` is its row or block.
+    void Start(const std::shared_ptr<msimeui::Visual> &title, msimeui::Visual *target)
+    {
+        title_ = title;
+        target_ = target;
+        reducedMotion_ = !SystemAnimationsEnabled();
+        startMs_ = msimeui::NowMs();
+        if (window_)
+            window_->RequestAnimationFrame();
+    }
+
+    // The page it was on went away; its bounds no longer mean anything on screen.
+    void Stop()
+    {
+        startMs_ = -1.0;
+        target_ = nullptr;
+        title_.reset();
+    }
+
+    void RenderOver(msimeui::DeviceResources &dr, const RectF &clip)
+    {
+        if (startMs_ < 0.0)
+            return;
+        const double now = window_ ? window_->GetFrameTime() : msimeui::NowMs();
+        const double elapsed = std::max(0.0, now - startMs_);
+        const double duration = reducedMotion_ ? kStillMs : kPulseMs * kPulses;
+        if (elapsed >= duration || title_.expired())
+        {
+            startMs_ = -1.0;
+            target_ = nullptr;
+            return;
+        }
+        // Raised cosine per pulse: starts and ends at nothing, peaks halfway. With animations
+        // turned off it holds still, then goes in one step.
+        const float strength =
+            reducedMotion_ ? 1.0f
+                           : static_cast<float>(0.5 - 0.5 * std::cos(2.0 * 3.14159265358979 * elapsed / kPulseMs));
+        // Reaches into the section padding so the highlight frames the setting instead of
+        // touching its text.
+        const RectF bounds = target_->GetBounds();
+        const RectF box = {bounds.x - 12.0f, bounds.y - 4.0f, bounds.width + 24.0f, bounds.height + 8.0f};
+        const Palette &p = CurrentPalette();
+        dr.PushClip(clip);
+        FillRounded(dr, box, 6.0f, WithAlpha(p.accent, kFillAlpha * strength));
+        StrokeRounded(dr, box, 6.0f, WithAlpha(p.accent, kStrokeAlpha * strength), 1.0f);
+        dr.PopClip();
+        if (window_)
+            window_->RequestAnimationFrame();
+    }
+
+    SizeF Measure(const SizeF &) override
+    {
+        return {};
+    }
+
+    void Arrange(const RectF &finalRect) override
+    {
+        bounds_ = finalRect;
+    }
+
+    void Render(msimeui::DeviceResources &) override
+    {
+    }
+
+  private:
+    static constexpr double kPulseMs = 700.0;
+    static constexpr int kPulses = 2;
+    static constexpr double kStillMs = 1200.0;
+    // Over the content, so the fill stays faint enough to read the text through.
+    static constexpr float kFillAlpha = 0.12f;
+    static constexpr float kStrokeAlpha = 0.6f;
+
+    std::weak_ptr<msimeui::Visual> title_;
+    msimeui::Visual *target_ = nullptr;
+    double startMs_ = -1.0;
+    bool reducedMotion_ = false;
+};
+
 // ---------------------------------------------------------------------------------
 // Root: title bar, sidebar, content and the overlays, laid out like `.main`.
 // ---------------------------------------------------------------------------------
@@ -1340,9 +2351,11 @@ class RootPanel : public msimeui::Panel
   public:
     RootPanel(std::shared_ptr<TitleBar> titleBar, std::shared_ptr<msimeui::ScrollViewer> sidebar,
               std::shared_ptr<msimeui::ScrollViewer> content, std::shared_ptr<ModalLayer> modal,
-              std::shared_ptr<ToastView> toast, std::shared_ptr<SplashView> splash)
+              std::shared_ptr<ToastView> toast, std::shared_ptr<SplashView> splash,
+              std::shared_ptr<SearchHighlight> highlight)
         : titleBar_(std::move(titleBar)), sidebar_(std::move(sidebar)), content_(std::move(content)),
-          modal_(std::move(modal)), toast_(std::move(toast)), splash_(std::move(splash))
+          modal_(std::move(modal)), toast_(std::move(toast)), splash_(std::move(splash)),
+          highlight_(std::move(highlight))
     {
         AddChild(titleBar_);
         AddChild(sidebar_);
@@ -1350,6 +2363,8 @@ class RootPanel : public msimeui::Panel
         AddChild(toast_);
         AddChild(modal_);
         AddChild(splash_);
+        // Not laid out: it draws over the content at the bounds of whatever it highlights.
+        AddChild(highlight_);
         content_->SetVerticalAlignment(msimeui::VerticalAlignment::Stretch);
         sidebar_->SetVerticalAlignment(msimeui::VerticalAlignment::Stretch);
     }
@@ -1387,7 +2402,10 @@ class RootPanel : public msimeui::Panel
         // layers of their own there and get grayscale text.
         const bool covered = splash_->Covers();
         if (!covered)
+        {
             content_->Render(dr);
+            highlight_->RenderOver(dr, content_->GetBounds());
+        }
         ScopedTextAntialias grayscale(dr, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
         if (!covered)
             sidebar_->Render(dr);
@@ -1448,6 +2466,7 @@ class RootPanel : public msimeui::Panel
     std::shared_ptr<ModalLayer> modal_;
     std::shared_ptr<ToastView> toast_;
     std::shared_ptr<SplashView> splash_;
+    std::shared_ptr<SearchHighlight> highlight_;
 };
 
 bool IsCaptionButton(WPARAM hit)
@@ -1502,7 +2521,9 @@ class SettingsWindowImpl : public HostServices
         modal_ = std::make_shared<ModalLayer>();
         toast_ = std::make_shared<ToastView>();
         splash_ = std::make_shared<SplashView>();
-        root_ = std::make_shared<RootPanel>(titleBar_, sidebarScroll_, contentScroll_, modal_, toast_, splash_);
+        highlight_ = std::make_shared<SearchHighlight>();
+        root_ =
+            std::make_shared<RootPanel>(titleBar_, sidebarScroll_, contentScroll_, modal_, toast_, splash_, highlight_);
 
         sidebar_->SetOnSelect([this](size_t index) { ShowPageIndex(index, false); });
         sidebar_->SetOnActivateEntry([this](const SettingsIndexEntry &entry) { ActivateSearchEntry(entry); });
@@ -1529,6 +2550,7 @@ class SettingsWindowImpl : public HostServices
     {
         skinpreview::SetImageLoadWindow(nullptr);
         KillTimer(hwnd_, kToolTipTimer);
+        KillTimer(hwnd_, kSearchTipTimer);
         KillTimer(hwnd_, kToastTimer);
         KillTimer(hwnd_, kImageFrameTimer);
         KillTimer(hwnd_, kSplashTimer);
@@ -1643,6 +2665,7 @@ class SettingsWindowImpl : public HostServices
         if (index >= pages.size() || index == current_)
             return;
         current_ = index;
+        highlight_->Stop();
         window_->GetScene()->ClearPopups(true);
         modal_->Close();
         auto &page = pageCache_[index];
@@ -1675,7 +2698,17 @@ class SettingsWindowImpl : public HostServices
         VisualPtr built;
         {
             SettingsIndexScope scope(pageId, [slice, pageId, pageTitle](const SettingsIndexScope::Row &row) {
-                slice->push_back({pageId, pageTitle, row.title, row.description, row.row});
+                // A page that heads a block with the same words as the row under it ("联想模式"
+                // over the 联想模式 row) would list the setting twice; the first one stays.
+                for (SettingsIndexEntry &existing : *slice)
+                {
+                    if (existing.title != row.title)
+                        continue;
+                    if (existing.description.empty())
+                        existing.description = row.description;
+                    return;
+                }
+                slice->push_back({pageId, pageTitle, row.title, row.description, row.target});
             });
             built = pages[index].build(context_);
         }
@@ -1698,7 +2731,7 @@ class SettingsWindowImpl : public HostServices
         {
             for (const SettingsIndexEntry &entry : *pageEntries)
             {
-                if (!entry.row.expired())
+                if (!entry.target.expired())
                     flat->push_back(entry);
             }
         }
@@ -1728,7 +2761,8 @@ class SettingsWindowImpl : public HostServices
         KillTimer(hwnd_, kIndexPageTimer);
     }
 
-    // Switches to the entry's page and scrolls its row into view.
+    // Switches to the entry's page, opens the collapsed group the row sits in, scrolls the row to
+    // the middle of the view and flashes it.
     void ActivateSearchEntry(const SettingsIndexEntry &entry)
     {
         const auto &pages = Pages();
@@ -1736,14 +2770,26 @@ class SettingsWindowImpl : public HostServices
         {
             if (entry.pageId != pages[i].id)
                 continue;
+            // The sidebar follows, as if its item had been clicked.
+            sidebar_->Select(i, current_ != static_cast<size_t>(-1));
             ShowPageIndex(i, false);
-            if (auto row = entry.row.lock())
-            {
-                ScrollIntoView(*row);
-                // Focus the row so the scroll target is also where the keyboard goes next.
-                if (window_)
-                    window_->FocusVisual(row.get());
-            }
+            auto title = entry.target.lock();
+            if (!title)
+                return;
+            const bool shown = RevealInAncestors(*title);
+            // Expanding a group moves everything under it: lay out again before reading where
+            // the setting now is.
+            window_->Relayout();
+            if (!shown)
+                return;
+            msimeui::Visual *setting = HighlightTarget(*title);
+            const RectF target = setting->GetBounds();
+            const RectF view = contentScroll_->GetBounds();
+            contentScroll_->SetScrollOffset(contentScroll_->GetScrollOffset() + (target.y + target.height * 0.5f) -
+                                            (view.y + view.height * 0.5f));
+            window_->Relayout();
+            highlight_->Start(title, setting);
+            window_->RefreshHover();
             return;
         }
     }
@@ -1840,6 +2886,15 @@ class SettingsWindowImpl : public HostServices
                 result = 0;
                 return true;
             }
+            if (wParam == kSearchTipTimer)
+            {
+                if (sidebar_)
+                    sidebar_->Search()->ShowPendingToolTip();
+                else
+                    KillTimer(hwnd_, kSearchTipTimer);
+                result = 0;
+                return true;
+            }
             if (wParam == kToastTimer)
             {
                 toast_->Hide();
@@ -1884,6 +2939,11 @@ class SettingsWindowImpl : public HostServices
             if (wParam == 'F' && (GetKeyState(VK_CONTROL) & 0x8000) && sidebar_)
             {
                 sidebar_->Search()->Focus();
+                result = 0;
+                return true;
+            }
+            if (sidebar_ && sidebar_->Search()->HandleKey(wParam))
+            {
                 result = 0;
                 return true;
             }
@@ -2063,6 +3123,7 @@ class SettingsWindowImpl : public HostServices
     std::shared_ptr<msimeui::ScrollViewer> sidebarScroll_;
     std::shared_ptr<msimeui::Container> pageHost_;
     std::shared_ptr<msimeui::ScrollViewer> contentScroll_;
+    std::shared_ptr<SearchHighlight> highlight_;
     std::shared_ptr<ModalLayer> modal_;
     std::shared_ptr<ToastView> toast_;
     std::shared_ptr<SplashView> splash_;

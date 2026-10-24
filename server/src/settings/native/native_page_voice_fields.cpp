@@ -631,7 +631,8 @@ msimeui::Visual *InputBox::FindFirstFocusableDescendant()
 // ---------------------------------------------------------------------------------
 Field::Field(std::wstring label, VisualPtr control) : Column(7.0f)
 {
-    label_ = std::make_shared<Label>(std::move(label), FieldTextStyle(), TextRole::Secondary);
+    label_ = std::make_shared<Label>(label, FieldTextStyle(), TextRole::Secondary);
+    IndexSettingTitle(label_, std::move(label));
     Add(label_);
     Add(std::move(control));
 }

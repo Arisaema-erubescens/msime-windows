@@ -766,14 +766,18 @@ TextStyle CaptionStyle()
     return style;
 }
 
-std::shared_ptr<Label> MakeTitle(std::wstring text)
+std::shared_ptr<Label> MakeTitle(std::wstring text, std::wstring searchDescription)
 {
-    return std::make_shared<Label>(std::move(text), SectionTitleStyle());
+    auto label = std::make_shared<Label>(text, SectionTitleStyle());
+    IndexSettingTitle(label, std::move(text), std::move(searchDescription));
+    return label;
 }
 
-std::shared_ptr<Label> MakeSubTitle(std::wstring text)
+std::shared_ptr<Label> MakeSubTitle(std::wstring text, std::wstring searchDescription)
 {
-    return std::make_shared<Label>(std::move(text), SubItemTitleStyle());
+    auto label = std::make_shared<Label>(text, SubItemTitleStyle());
+    IndexSettingTitle(label, std::move(text), std::move(searchDescription));
+    return label;
 }
 
 std::shared_ptr<Label> MakeDescription(std::wstring text)
@@ -1005,6 +1009,33 @@ void Hideable::SetVisible(bool visible)
     InvalidateVisual();
 }
 
+void Hideable::SetOnReveal(std::function<void()> handler)
+{
+    onReveal_ = std::move(handler);
+}
+
+void Hideable::Reveal()
+{
+    if (visible_ || !onReveal_)
+        return;
+    const auto handler = onReveal_;
+    handler();
+}
+
+bool RevealInAncestors(msimeui::Visual &visual)
+{
+    bool shown = true;
+    for (msimeui::Visual *ancestor = visual.GetParentVisual(); ancestor; ancestor = ancestor->GetParentVisual())
+    {
+        if (auto *hideable = dynamic_cast<Hideable *>(ancestor))
+        {
+            hideable->Reveal();
+            shown = shown && hideable->IsVisible();
+        }
+    }
+    return shown;
+}
+
 SizeF Hideable::Measure(const SizeF &availableSize)
 {
     // MeasureInLayout already took a margin set since the last pass off `availableSize`
@@ -1183,12 +1214,6 @@ SettingRow::SettingRow(VisualPtr left, VisualPtr control) : left_(std::move(left
         AddChild(control_);
 }
 
-void SettingRow::SetSearchText(std::wstring title, std::wstring description)
-{
-    searchTitle_ = std::move(title);
-    searchDescription_ = std::move(description);
-}
-
 SizeF SettingRow::Measure(const SizeF &availableSize)
 {
     constexpr float kGap = 10.0f;
@@ -1227,7 +1252,7 @@ void SettingRow::Render(msimeui::DeviceResources &dr)
 VisualPtr MakeTitleBlock(std::wstring title, std::wstring description, bool subItem)
 {
     auto column = std::make_shared<Column>(0.0f);
-    column->Add(subItem ? MakeSubTitle(std::move(title)) : MakeTitle(std::move(title)));
+    column->Add(subItem ? MakeSubTitle(std::move(title), description) : MakeTitle(std::move(title), description));
     if (!description.empty())
     {
         auto desc = MakeDescription(std::move(description));
@@ -1250,17 +1275,18 @@ struct RowCollectorState
 thread_local std::vector<RowCollectorState> g_rowCollectorStack;
 } // namespace
 
-std::shared_ptr<SettingRow> MakeRow(std::wstring title, std::wstring description, VisualPtr control, bool subItem)
+void IndexSettingTitle(const std::shared_ptr<msimeui::Visual> &title, std::wstring text, std::wstring description)
 {
-    auto row = std::make_shared<SettingRow>(MakeTitleBlock(title, description, subItem), std::move(control));
-    // Search text is kept on the row because the index is built from it later; the labels above
-    // only own their own copies.
-    row->SetSearchText(std::move(title), std::move(description));
-    if (!g_rowCollectorStack.empty() && g_rowCollectorStack.back().collector)
-        g_rowCollectorStack.back().collector({row->SearchTitle(), row->SearchDescription(), row});
-    return row;
+    if (!title || text.empty() || g_rowCollectorStack.empty() || !g_rowCollectorStack.back().collector)
+        return;
+    g_rowCollectorStack.back().collector({std::move(text), std::move(description), title});
 }
 
+std::shared_ptr<SettingRow> MakeRow(std::wstring title, std::wstring description, VisualPtr control, bool subItem)
+{
+    return std::make_shared<SettingRow>(MakeTitleBlock(std::move(title), std::move(description), subItem),
+                                        std::move(control));
+}
 SettingsIndexScope::SettingsIndexScope(std::string pageId, std::function<void(const Row &)> collector)
 {
     g_rowCollectorStack.push_back({std::move(pageId), std::move(collector)});
@@ -3425,6 +3451,31 @@ bool Expander::OnMouseUp(const POINT &point, WPARAM)
 HCURSOR Expander::GetCursor() const
 {
     return LoadCursor(nullptr, IDC_HAND);
+}
+
+std::shared_ptr<Expander> MakeExpander(std::wstring title, bool subItem)
+{
+    auto expander = std::make_shared<Expander>(title, subItem);
+    IndexSettingTitle(expander, std::move(title));
+    return expander;
+}
+
+void BindExpander(const std::shared_ptr<Expander> &expander, const std::shared_ptr<Hideable> &details)
+{
+    // Weak both ways: each handler lives on the other visual, and strong captures would keep
+    // the pair alive after the page drops them.
+    std::weak_ptr<Hideable> weakDetails = details;
+    std::weak_ptr<Expander> weakExpander = expander;
+    expander->SetOnToggled([weakDetails](bool expanded) {
+        if (auto box = weakDetails.lock())
+            box->SetVisible(expanded);
+    });
+    details->SetOnReveal([weakExpander, weakDetails]() {
+        if (auto header = weakExpander.lock())
+            header->SetExpanded(true);
+        if (auto box = weakDetails.lock())
+            box->SetVisible(true);
+    });
 }
 
 // ---------------------------------------------------------------------------------

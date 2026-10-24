@@ -12,23 +12,26 @@
 #include <string>
 #include <vector>
 
+namespace msimeui
+{
+class Visual;
+}
+
 namespace native_settings
 {
-class SettingRow;
-
-// One indexed settings row.
+// One indexed setting title.
 //
-// `row` is a weak handle on the page's row, and the page stays in the window's page cache for as
-// long as the entry is useful, so locking it gives back the very visual that is on screen. A
-// weak_ptr needs only a forward declaration, which is what keeps this header free of the control
-// headers and their D2D dependency; the portable test target includes this one.
+// `target` is a weak handle on the visual that shows the title, and the page stays in the window's
+// page cache for as long as the entry is useful, so locking it gives back the very visual that is
+// on screen. A weak_ptr needs only a forward declaration, which is what keeps this header free of
+// the control headers and their D2D dependency; the portable test target includes this one.
 struct SettingsIndexEntry
 {
     std::string pageId;
     std::wstring pageTitle;
     std::wstring title;
     std::wstring description;
-    std::weak_ptr<SettingRow> row;
+    std::weak_ptr<msimeui::Visual> target;
 };
 
 // Matches `query` against entry titles and descriptions, best first.

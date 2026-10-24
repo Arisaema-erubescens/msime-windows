@@ -11,24 +11,24 @@ namespace
 using native_settings::SearchSettings;
 using native_settings::SettingsIndexEntry;
 
-// A live stand-in for a settings row. The header only forward-declares SettingRow, so the test
+// A live stand-in for a setting title. The header only forward-declares msimeui::Visual, so the test
 // cannot construct one; a non-null pointer with a no-op deleter is enough to make the weak handle
 // lock and a null one to make it expired, which is all SearchSettings looks at.
-native_settings::SettingRow *FakeRowPointer()
+msimeui::Visual *FakeRowPointer()
 {
     static char storage = 0;
-    return reinterpret_cast<native_settings::SettingRow *>(&storage);
+    return reinterpret_cast<msimeui::Visual *>(&storage);
 }
 
-std::shared_ptr<native_settings::SettingRow> MakeFakeRow()
+std::shared_ptr<msimeui::Visual> MakeFakeRow()
 {
-    return std::shared_ptr<native_settings::SettingRow>(FakeRowPointer(), [](native_settings::SettingRow *) {});
+    return std::shared_ptr<msimeui::Visual>(FakeRowPointer(), [](msimeui::Visual *) {});
 }
 
 struct RowBuilder
 {
     std::vector<SettingsIndexEntry> entries;
-    std::vector<std::shared_ptr<native_settings::SettingRow>> kept;
+    std::vector<std::shared_ptr<msimeui::Visual>> kept;
 
     // `alive = false` gives an entry with no row, the way a malformed entry or one built for a
     // page that was torn down would look.
@@ -44,7 +44,7 @@ struct RowBuilder
         {
             auto row = MakeFakeRow();
             kept.push_back(row);
-            entry.row = row;
+            entry.target = row;
         }
         entries.push_back(std::move(entry));
     }

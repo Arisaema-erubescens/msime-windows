@@ -70,8 +70,8 @@ std::vector<SettingsIndexEntry> SearchSettings(const std::vector<SettingsIndexEn
     for (size_t i = 0; i < entries.size(); ++i)
     {
         const SettingsIndexEntry &entry = entries[i];
-        // A row whose page is gone would link to nothing.
-        if (entry.row.expired())
+        // A title whose page is gone would link to nothing.
+        if (entry.target.expired())
             continue;
         const int titleSpan = MatchSpan(entry.title, query);
         if (titleSpan >= 0)
