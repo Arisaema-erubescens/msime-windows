@@ -561,7 +561,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         const std::string modelValue = Trimmed(Narrow(model->Input()->GetText()));
         std::string jsonMode = "auto";
         if (const Json *stored = context.model.Find("ai_assistant.json_mode"); stored && stored->is_string())
-            jsonMode = json::value_to<std::string>(*stored);
+            jsonMode = stored->get<std::string>();
         return Json{{"provider", provider},
                     {"token", Trimmed(Narrow(token->GetText()))},
                     {"endpoint", endpointValue},
