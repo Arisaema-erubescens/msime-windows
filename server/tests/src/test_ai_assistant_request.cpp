@@ -7,7 +7,8 @@ namespace
 // 厂商字段现在按接口地址判断，所以构造请求时必须显式给地址；默认给一个 DeepSeek 地址，
 // 让"标签=deepseek"的历史用例保持原意。
 AiAssistant::Request MakeRequest(const std::string &provider, const std::string &thinking,
-                                 const std::string &endpoint = "https://api.deepseek.com/chat/completions")
+                                 const std::string &endpoint = "https://api.deepseek.com/chat/completions",
+                                 const std::string &json_mode = "force")
 {
     AiAssistant::Request request;
     request.pinyin_segments = {"shang", "hai"};
@@ -17,6 +18,7 @@ AiAssistant::Request MakeRequest(const std::string &provider, const std::string 
     request.config.endpoint = endpoint;
     request.config.prompt = "Return the best candidate.";
     request.config.thinking = thinking;
+    request.config.json_mode = json_mode;
     return request;
 }
 } // namespace
@@ -107,6 +109,25 @@ TEST_CASE(ai_request_omits_unsupported_sampling_for_openai_reasoning_models)
         REQUIRE(!body.contains("thinking"));
         REQUIRE(AiAssistant::detail::RequestTimeoutMs(request.config) > 8000L);
     }
+}
+
+TEST_CASE(ai_request_uses_json_mode_strategy)
+{
+    // 自动档：本机地址不带 response_format，原生实现带上。
+    const auto local = MakeRequest("deepseek", "disabled", "http://127.0.0.1:11434/v1/chat/completions", "auto");
+    const auto local_body = AiAssistant::detail::BuildRequestBody(local);
+    REQUIRE(!local_body.contains("response_format"));
+    // 标签写着 deepseek，地址却是本机：thinking 同样不能跟着标签走。
+    REQUIRE(!local_body.contains("thinking"));
+
+    const auto native = MakeRequest("deepseek", "disabled", "https://api.deepseek.com/chat/completions", "auto");
+    REQUIRE(AiAssistant::detail::BuildRequestBody(native).contains("response_format"));
+
+    // 兼容档一律不带，强制档一律带上。
+    const auto off = MakeRequest("deepseek", "disabled", "https://api.deepseek.com/chat/completions", "off");
+    REQUIRE(!AiAssistant::detail::BuildRequestBody(off).contains("response_format"));
+    const auto force = MakeRequest("deepseek", "disabled", "http://127.0.0.1:1234/v1/chat/completions", "force");
+    REQUIRE(AiAssistant::detail::BuildRequestBody(force).contains("response_format"));
 }
 
 TEST_CASE(ai_request_keeps_custom_provider_request_shape)
