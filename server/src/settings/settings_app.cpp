@@ -1537,6 +1537,12 @@ void HandleClientMessage(HWND hwnd, const std::string &raw)
                 SetTimer(hwnd, kRestartRefreshTimer, 500, nullptr);
                 PostRestartServerDone(true);
             }
+            else
+            {
+                // 正在关闭或宿主不可用：重启请求没有人会再来收尾，回执必须在这里补发，
+                // 否则页面按钮永远停在「重启中…」。
+                PostRestartServerDone(false);
+            }
         }
         else if (type == "openExternalUrl")
         {
