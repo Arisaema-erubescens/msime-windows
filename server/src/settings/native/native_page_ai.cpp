@@ -848,13 +848,14 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         auto testStatus = std::make_shared<StatusText>();
         auto actions = std::make_shared<Row>(10.0f);
         actions->Add(testButton);
-        actions->Add(testStatus, 1.0f);
-        fetchStatus = std::make_shared<StatusText>();
+        fetchStatus = testStatus;
         auto modelField = std::make_shared<Field>(L"模型", modelRow);
         auto tail = std::make_shared<Column>(0.0f);
         tail->Add(std::make_shared<MinHeight>(actions, 20.0f));
-        fetchStatus->SetMargin({0.0f, 7.0f, 0.0f, 0.0f});
-        tail->Add(fetchStatus);
+        // Share one feedback area and reserve a line so single-line messages do not move the fields below.
+        auto feedback = std::make_shared<MinHeight>(fetchStatus, 20.0f);
+        feedback->SetMargin({0.0f, 7.0f, 0.0f, 0.0f});
+        tail->Add(feedback);
         modelField->Add(tail);
         grid->Add(modelField);
         test = std::make_unique<CredentialTest>(
