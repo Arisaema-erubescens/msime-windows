@@ -23,6 +23,7 @@
 #include "engine/contracts/input_state_shortcuts.h"
 #include "statistics/stats_store.h"
 #include "voice-input/voice_providers.h"
+#include "ai/chat_request_params.h"
 
 using namespace ime_config_detail;
 
@@ -1046,6 +1047,10 @@ bool LoadImeConfig()
         g_ai_assistant.thinking = tbl["ai_assistant"]["thinking"].value_or(std::string("disabled"));
         if (!VoiceInput::IsValidThinkingLevel(g_ai_assistant.thinking))
             g_ai_assistant.thinking = "disabled";
+        // 旧配置里没有这个键，缺省按 auto：本机地址与未知服务不带 response_format，
+        // 原生实现照旧带上，升级后行为对已有的云端用户不变。
+        g_ai_assistant.json_mode =
+            ChatCompletions::NormalizeJsonMode(tbl["ai_assistant"]["json_mode"].value_or(std::string("auto")));
         const std::string legacy_ai_prompt = tbl["ai_assistant"]["prompt"].value_or(g_ai_assistant.prompt);
         g_ai_assistant.prompt_id = tbl["ai_assistant"]["prompt_id"].value_or(std::string("custom_1"));
         if (g_ai_assistant.prompt_id != "custom_1" && g_ai_assistant.prompt_id != "custom_2" &&
