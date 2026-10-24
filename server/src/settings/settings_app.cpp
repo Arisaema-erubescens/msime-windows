@@ -1522,21 +1522,25 @@ void HandleClientMessage(HWND hwnd, const std::string &raw)
         }
         else if (type == "restartServer")
         {
-            if (!NotifyImeServerRestart())
+            // 入口已保证 g_worker 非空且未在关闭：从那里到这里只经过 JSON 解析和这次同步的
+            // 管道写，都不泵消息，所以 g_closing / g_worker 中途不会变。若有哪个分支被改成
+            // 会泵消息的等待，就要改回「发送后重新检查状态、不可用也发回执」的写法。
+            const bool ok = NotifyImeServerRestart();
+            if (!ok)
             {
                 MessageBoxW(g_settings_hwnd, L"未能重启输入法进程，请稍后重试。", L"水杉输入法",
                             MB_OK | MB_ICONWARNING);
-                PostRestartServerDone(false);
             }
-            else if (g_worker && !g_closing)
+            else
             {
                 // Watchdog 拉起新 Server 后才会落位 .gram.new；设置进程不会因为这次重启
                 // 收到配置变化，所以在接下来几秒主动拉快照，待更新清掉或次数用完就停。
                 // 不重启设置进程：避免单实例/重开时序问题和窗口闪现。
                 g_restart_refresh_remaining = kRestartRefreshTicks;
                 SetTimer(hwnd, kRestartRefreshTimer, 500, nullptr);
-                PostRestartServerDone(true);
             }
+            // 回执只有一个出口：无论重启是否成功，页面按 restartServerDone 恢复按钮。
+            PostRestartServerDone(ok);
         }
         else if (type == "openExternalUrl")
         {
