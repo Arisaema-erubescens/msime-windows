@@ -217,11 +217,12 @@ ApiCredentialTest::Result TestTranslationOnce(const ApiCredentialTest::Request &
     // 页面把当前生效的服务商、地址、Token 与模型原样传上来，测的就是用户眼前这一份。
     // 字段全空说明是只发 service 的旧客户端，才回落到已保存的配置。
     const auto configured = GetConfiguredTranslation();
-    const auto config = Value(request, "provider").empty() && Value(request, "endpoint").empty() &&
-                                Value(request, "token").empty() && Value(request, "model").empty()
-                            ? AiTranslation::FromConfiguredTranslation(*configured)
-                            : AiTranslation::FromFields(Value(request, "provider"), Value(request, "endpoint"),
-                                                        Value(request, "token"), Value(request, "model"));
+    const auto config =
+        Value(request, "provider").empty() && Value(request, "endpoint").empty() && Value(request, "token").empty() &&
+                Value(request, "model").empty()
+            ? AiTranslation::FromConfiguredTranslation(*configured)
+            : AiTranslation::FromFields(Value(request, "provider"), Value(request, "endpoint"), Value(request, "token"),
+                                        Value(request, "model"), Value(request, "json_mode"));
     if (!AiTranslation::IsUsableConfig(config))
     {
         if (config.provider == "jev")

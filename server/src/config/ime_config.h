@@ -117,6 +117,9 @@ struct AiAssistantConfig
     int candidate_limit = 3;
     // DeepSeek reasoning effort: disabled | low | high | max. Other providers ignore it.
     std::string thinking = "disabled";
+    // response_format 策略：auto | force | off，见 ChatCompletions::JsonMode。AI 联想与候选词
+    // 翻译共用这一项，两边对同一个端点的请求形状保持一致。
+    std::string json_mode = "auto";
     // custom_1 | custom_2 | custom_3
     std::string prompt_id = "custom_1";
     std::string prompt_custom_1;
@@ -199,6 +202,8 @@ struct TranslationConfig
         std::string endpoint;
         std::string token;
         std::string model;
+        // 从 [ai_assistant].json_mode 带过来，翻译请求与 AI 联想用同一条策略。
+        std::string json_mode = "auto";
     } ai;
 };
 

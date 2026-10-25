@@ -559,10 +559,14 @@ struct AiPage : std::enable_shared_from_this<AiPage>
     {
         const std::string endpointValue = Trimmed(Narrow(endpoint->GetText()));
         const std::string modelValue = Trimmed(Narrow(model->Input()->GetText()));
+        std::string jsonMode = "auto";
+        if (const Json *stored = context.model.Find("ai_assistant.json_mode"); stored && stored->is_string())
+            jsonMode = stored->get<std::string>();
         return Json{{"provider", provider},
                     {"token", Trimmed(Narrow(token->GetText()))},
                     {"endpoint", endpointValue},
-                    {"model", modelValue}};
+                    {"model", modelValue},
+                    {"json_mode", jsonMode}};
     }
 
     void RefreshChoices()
@@ -905,6 +909,15 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         thinkingColumn->Add(MakeDescription(L"只对 DeepSeek 生效。开启后候选更准，但要多等几秒到几十秒。"));
         thinkingDimmable = std::make_shared<Dimmable>(thinkingColumn);
         grid->Add(thinkingDimmable);
+
+        auto jsonMode = BindDropdown(context, "ai_assistant.json_mode",
+                                     Options({{"auto", L"自动"}, {"force", L"强制 JSON"}, {"off", L"兼容模式"}}));
+        jsonMode->SetHeight(40.0f);
+        auto jsonModeColumn = std::make_shared<Field>(L"输出格式", jsonMode);
+        jsonModeColumn->Add(
+            MakeDescription(L"请求里是否带 response_format。自动档对本机地址与未知服务不带，"
+                            L"只对 OpenAI、DeepSeek 这类原生实现带上。本地模型报 400 时改成兼容模式。"));
+        grid->Add(jsonModeColumn);
 
         endpoint = GridInput();
         endpoint->SetOnCommit([this](const std::wstring &text) {

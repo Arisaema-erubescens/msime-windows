@@ -583,6 +583,7 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
             {"providers", ProviderEntriesJson(ai)},
             {"candidate_limit", ai.candidate_limit},
             {"thinking", ai.thinking},
+            {"json_mode", ai.json_mode},
             {"prompt", ai.prompt},
             {"prompt_id", ai.prompt_id},
             {"prompt_custom_1", ai.prompt_custom_1},
