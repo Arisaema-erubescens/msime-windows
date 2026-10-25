@@ -909,6 +909,7 @@ class Expander : public msimeui::Visual
 {
   public:
     explicit Expander(std::wstring title, bool subItem = false);
+    Expander(std::wstring title, const TextStyle &style);
     void SetOnToggled(std::function<void(bool expanded)> handler);
     void SetExpanded(bool expanded);
     bool IsExpanded() const;
@@ -930,6 +931,7 @@ class Expander : public msimeui::Visual
 
 // An expander whose title is indexed for search.
 std::shared_ptr<Expander> MakeExpander(std::wstring title, bool subItem = false);
+std::shared_ptr<Expander> MakeExpander(std::wstring title, const TextStyle &style);
 
 // Wires an expander to the details it opens: a click toggles them, and a search hit inside
 // them expands both, so the chevron never disagrees with what is shown.

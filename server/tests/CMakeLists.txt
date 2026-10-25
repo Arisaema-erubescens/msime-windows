@@ -136,6 +136,7 @@ set(TEST_SOURCE_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/test_config_non_ascii_path.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/test_collocation_model.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/test_neural_model.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/test_lattice_model.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/test_network_proxy.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/test_update_download.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/test_dictionary_replay_non_ascii_path.cpp"
@@ -198,6 +199,8 @@ set(TEST_SOURCE_FILES
     # activation-fallback and id-guard cases link the real translation unit.
     "${CMAKE_SOURCE_DIR}/src/settings/collocation_model.cpp"
     "${CMAKE_SOURCE_DIR}/src/settings/neural_model.cpp"
+    "${CMAKE_SOURCE_DIR}/src/settings/lattice_model.cpp"
+    "${CMAKE_SOURCE_DIR}/src/settings/model_download.cpp"
     # Routing lives in dictionary_manager.cpp's HandleRequest, so the importHans dispatch test has
     # to link the real translation unit rather than restate the branch order.
     "${CMAKE_SOURCE_DIR}/src/settings/dictionary_manager.cpp"

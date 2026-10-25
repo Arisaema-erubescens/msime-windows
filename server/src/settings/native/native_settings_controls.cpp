@@ -3379,6 +3379,11 @@ Expander::Expander(std::wstring title, bool subItem)
     title_.Set(std::move(title), subItem ? SubItemTitleStyle() : SectionTitleStyle());
 }
 
+Expander::Expander(std::wstring title, const TextStyle &style)
+{
+    title_.Set(std::move(title), style);
+}
+
 void Expander::SetOnToggled(std::function<void(bool expanded)> handler)
 {
     onToggled_ = std::move(handler);
@@ -3456,6 +3461,13 @@ HCURSOR Expander::GetCursor() const
 std::shared_ptr<Expander> MakeExpander(std::wstring title, bool subItem)
 {
     auto expander = std::make_shared<Expander>(title, subItem);
+    IndexSettingTitle(expander, std::move(title));
+    return expander;
+}
+
+std::shared_ptr<Expander> MakeExpander(std::wstring title, const TextStyle &style)
+{
+    auto expander = std::make_shared<Expander>(title, style);
     IndexSettingTitle(expander, std::move(title));
     return expander;
 }

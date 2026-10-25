@@ -2507,6 +2507,12 @@ void QuanpinDictionary::set_sentence_association(const SentenceAssociationOption
     // 高精度档模型的路径同样随选项下发（模型按需下载，不在资源目录）。重建句柄只是丢掉
     // 已解析的指针，模型本身由 shared_sentence_model 按路径持有，重排线程手里的指针不失效。
     neural_desktop_model_ = neural::LazySentenceModel(sentence_association_.neural_desktop_model);
+    // 词格语言模型同理：用户下载的 sc.lm 路径随选项下发，空则回到资源目录那份。模型由
+    // shared_language_model 按路径永久持有，换指针不会让别处手里的旧指针失效。
+    language_model_ =
+        &ngram::shared_language_model(sentence_association_.language_model.empty()
+                                          ? paths_.resource(metasequoia::assets::language_model)
+                                          : metasequoia::path_from_utf8(sentence_association_.language_model.c_str()));
     // 开关变了，之前缓存的候选列表按旧开关算出，必须清掉，否则打开/关闭后要到缓存过期
     // 才见效。整句候选都进这几个缓存，见 query_series / query_single_path。
     reset_cache();

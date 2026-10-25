@@ -6,6 +6,7 @@
 #include "engine/core/sentence_association_options.h"
 #include "engine/local_modes/radical_query.h"
 #include "engine/quanpin/quanpin_utils.h"
+#include "settings/lattice_model.h"
 #include "settings/neural_model.h"
 
 #include <filesystem>
@@ -42,6 +43,12 @@ std::string ResolveNeuralDesktopModelPath()
         return {};
     }
     return metasequoia::path_to_utf8(file);
+}
+
+std::string ResolveLatticeLanguageModelPath()
+{
+    const std::filesystem::path file = model_download::ResolveInstalledFile(lattice_model::ModelFile());
+    return file.empty() ? std::string() : metasequoia::path_to_utf8(file);
 }
 
 EngineInputSession::EngineInputSession(SchemeType scheme, const ShuangpinProfile &profile)
@@ -115,6 +122,19 @@ void EngineInputSession::ApplyConfiguration()
     association.collocation_grammar.non_collocation_penalty = GetConfiguredAssocSentenceCollocationNonPenalty();
     association.collocation_grammar.weak_collocation_penalty = GetConfiguredAssocSentenceCollocationWeakPenalty();
     association.collocation_grammar.rear_penalty = GetConfiguredAssocSentenceCollocationRearPenalty();
+    // 词格语言模型按需下载：任一整句来源开着时词格才会解码，那时才去盘上找（要在上面的来源都定下来
+    // 之后判断）。Trigram 整句和设置页一致，模型不在时不出：设置页那边开关置灰显示为关。开发与测试
+    // 环境把 sc.lm 放在资源目录里，那份同样算在。
+    if (association.any_sentence_source())
+    {
+        association.language_model = ResolveLatticeLanguageModelPath();
+        if (association.word_lattice && association.language_model.empty())
+        {
+            std::error_code error;
+            association.word_lattice =
+                std::filesystem::is_regular_file(paths_.resource(metasequoia::assets::language_model), error);
+        }
+    }
     session_.set_sentence_association(association);
     session_.set_shuangpin_preedit_uses_raw(GetConfiguredShuangpinPreeditMode() == "shuangpin");
     // 五笔拼音混输与 z 键角色是两个独立设置：混输是「同时给五笔和拼音候选」，z 键角色只管

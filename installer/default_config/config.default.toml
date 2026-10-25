@@ -33,7 +33,7 @@ floating_toolbar_settings = true
 # 悬浮工具栏用户缩放（相对系统 DPI），可选：0.75 / 1.0 / 1.25 / 1.5
 floating_toolbar_scale = 1.0
 # 悬浮工具栏图标尺寸（px，再乘 scale），可选：16–28
-floating_toolbar_font_size = 24
+floating_toolbar_font_size = 22
 # 悬浮工具栏自动隐藏：显示一段时间无交互后淡出，鼠标悬停时不隐藏，切换中英等状态时重新显示
 floating_toolbar_auto_hide = false
 # 自动隐藏延时（秒），可选：1–60
@@ -82,8 +82,8 @@ clean_mode = false
 # chinese-ime-lm 的 Transformer，还需模型文件在数据目录里，desktop 更准也更慢。
 #
 [association]
-# 词格整句联想（kenlm 三元模型打分）
-sentence_wordlattice = true
+# 词格整句联想（kenlm 三元模型打分）。模型 sc.lm 不随安装包分发，要在设置页下载后才能开启
+sentence_wordlattice = false
 # Google 解码器整句联想
 sentence_google = true
 # 神经网络模型整句（效果优先 / desktop）：内部生成最多 12 条 Trigram 备选并挑选，不依赖 sentence_wordlattice 开关
