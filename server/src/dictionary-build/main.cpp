@@ -9,6 +9,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -541,7 +542,14 @@ int run(int argc, wchar_t **argv)
     if (!log_path.empty())
     {
         fs::create_directories(log_path.parent_path());
-        g_log.open(log_path, std::ios::binary | std::ios::trunc);
+        // 追加而不是覆盖：安装程序失败后让用户重试，成功的那次不能把失败的原因冲掉。
+        g_log.open(log_path, std::ios::binary | std::ios::app);
+        SYSTEMTIME now{};
+        GetLocalTime(&now);
+        char stamp[32];
+        std::snprintf(stamp, sizeof(stamp), "%04u-%02u-%02u %02u:%02u:%02u", now.wYear, now.wMonth, now.wDay, now.wHour,
+                      now.wMinute, now.wSecond);
+        log_line(std::string("---- dictionary build ") + stamp);
     }
 
     const auto started = std::chrono::steady_clock::now();
@@ -575,9 +583,32 @@ int run(int argc, wchar_t **argv)
     for (const auto &path : built)
     {
         const fs::path final_path = fs::path(path).replace_extension();
-        if (!MoveFileExW(path.c_str(), final_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        // 刚写完的大文件可能正被杀毒软件扫描，替换会短暂地拒绝访问或共享冲突，等一等再试。
+        // 被别的进程长期打开着（比如 Server 抢先建了空库）就等不完，报出来让安装程序处理。
+        DWORD error = ERROR_SUCCESS;
+        for (int attempt = 0; attempt < 20; ++attempt)
+        {
+            if (MoveFileExW(path.c_str(), final_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            {
+                error = ERROR_SUCCESS;
+                break;
+            }
+            error = GetLastError();
+            if (error != ERROR_ACCESS_DENIED && error != ERROR_SHARING_VIOLATION)
+                break;
+            if (attempt == 0)
+                log_line("waiting for " + to_utf8(final_path.wstring()) + " to be released (error " +
+                         std::to_string(error) + ")");
+            Sleep(500);
+        }
+        if (error != ERROR_SUCCESS)
+        {
+            std::error_code ignored;
+            for (const auto &leftover : built)
+                fs::remove(leftover, ignored);
             throw std::runtime_error("cannot replace " + to_utf8(final_path.wstring()) + " (error " +
-                                     std::to_string(GetLastError()) + ")");
+                                     std::to_string(error) + "); another program may have it open");
+        }
     }
     log_line("dictionaries ready in " + elapsed(started));
     return 0;

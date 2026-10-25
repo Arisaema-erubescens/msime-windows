@@ -347,8 +347,8 @@ jobs:
         run: ./installer/tests/cloud-choice.ps1
       - name: Test that bundled skins back up changed user copies before overwriting
         run: ./installer/tests/bundled-skins.ps1
-      - name: Test that upgrades keep the desktop neural model shipped by 0.9.x
-        run: ./installer/tests/retired-desktop-model.ps1
+      - name: Test that upgrades keep the desktop neural model and sc.lm older packages shipped
+        run: ./installer/tests/retired-models.ps1
       - name: Stop local packaging after failed component builds
         run: ./installer/tests/build-failures.ps1
       - name: Test local Server test entrypoints in a moved checkout

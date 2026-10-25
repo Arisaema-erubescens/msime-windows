@@ -158,6 +158,15 @@ strings = "あ亜".encode()
     if ($issText -notmatch '(?s)Source: "\{#MySourceRoot\}\\bundled_skins\\\*";[^\r\n]*\\\s*DestDir: "\{code:GetDataDir\}\\skins";[^\r\n]*\\\s*Flags: ignoreversion') {
         throw 'Bundled skins must overwrite skins\<id> in the data directory'
     }
+    # 安装期间占住的 Server 启动锁必须和 TSF DLL 用的是同一个名字，否则 DLL 照样能在词库生成前拉起 Server，
+    # 引擎建出空的 msime.db 并占着，生成程序替换时拒绝访问。
+    $dllSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../windows/src/IME/MetasequoiaIME.cpp'))
+    $dllMutex = [regex]::Match($dllSource, 'SERVER_LAUNCH_MUTEX_NAME\[\]\s*=\s*L"([^"]+)"').Groups[1].Value.Replace('\\', '\')
+    $issMutex = [regex]::Match($issText, '(?m)^#define\s+MyServerLaunchMutex\s+"([^"]+)"').Groups[1].Value
+    if (-not $dllMutex -or $dllMutex -cne $issMutex) { throw "Installer launch mutex '$issMutex' does not match the TSF DLL's '$dllMutex'" }
+    if ($issText -notmatch "(?s)CreateMutex\('\{#MyServerLaunchMutex\}'\);\s*StopImeProcesses;") {
+        throw 'PrepareToInstall must take the Server launch mutex before stopping IME processes'
+    }
     # 数据目录不整个归输入法时（旧版安装器把标记写进了用户原有的文件夹，#537），卸载只按
     # IsShippedAppDataItem 等名单删。包里新增了顶层条目而名单没跟上，卸载就会把它漏在用户目录里。
     $iss = [IO.File]::ReadAllText((Join-Path $installer 'msime_setup.iss'))
