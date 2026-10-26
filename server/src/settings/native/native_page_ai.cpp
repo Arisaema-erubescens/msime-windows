@@ -280,14 +280,13 @@ struct AiPage : std::enable_shared_from_this<AiPage>
     {
         const bool hasTest = !testStatus->GetText().empty();
         const bool hasModels = !fetchStatus->GetText().empty();
-        // Compare original messages, never their display prefixes or a normalized approximation.
-        const bool sameError = hasTest && hasModels && testStatus->GetKind() == "error" &&
-                               fetchStatus->GetKind() == "error" && testStatus->GetText() == fetchStatus->GetText();
-        const bool twoRows = hasTest && hasModels && !sameError;
+        // Each operation keeps its own record; identical messages stay on separate rows so the
+        // attribution is never lost.
+        const bool twoRows = hasTest && hasModels;
         testStatus->SetDisplayPrefix(twoRows ? L"连接测试：" : L"");
         fetchStatus->SetDisplayPrefix(twoRows ? L"模型查询：" : L"");
         testStatus->SetVisible(hasTest);
-        fetchStatus->SetVisible(hasModels && !sameError);
+        fetchStatus->SetVisible(hasModels);
         const float topPadding = twoRows ? 4.0f : 0.0f;
         if (testStatus->GetPadding().top != topPadding)
             testStatus->SetPadding({0.0f, topPadding, 0.0f, 0.0f});

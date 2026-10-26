@@ -348,36 +348,31 @@ TEST_CASE(settings_ai_feedback_keeps_both_operations_in_both_response_orders)
         }
 }
 
-TEST_CASE(settings_ai_feedback_only_merges_exact_nonempty_errors)
+TEST_CASE(settings_ai_feedback_keeps_identical_errors_attributed)
 {
-    for (const std::string other : {"same error", "same error.", "Same error", "same error "})
-    {
-        auto &scene = AiPageScene::Feedback();
-        scene.Reply(true, scene.Start(true), false, "same error");
-        scene.Reply(false, scene.Start(false), false, other);
-        REQUIRE_EQ(scene.Messages().size(), other == "same error" ? size_t{1} : size_t{2});
-        if (other == "same error")
-        {
-            REQUIRE(scene.Messages() == std::vector<std::wstring>({L"same error"}));
-            scene.Snapshot();
-            REQUIRE(scene.Messages() == std::vector<std::wstring>({L"same error"}));
-            scene.Reply(false, scene.Start(false), false, "different error");
-            REQUIRE_EQ(scene.Messages().size(), size_t{2});
-            scene.Reply(false, scene.Start(false), false, "same error");
-            REQUIRE(scene.Messages() == std::vector<std::wstring>({L"same error"}));
-        }
-    }
-    auto &scene = AiPageScene::Feedback();
-    scene.Reply(true, scene.Start(true), true, "same error");
-    scene.Reply(false, scene.Start(false), false, "same error");
-    REQUIRE_EQ(scene.Messages().size(), size_t{2});
-    auto &success = AiPageScene::Feedback();
-    success.Reply(true, success.Start(true), true, "获取到 1 个模型");
-    success.Reply(false, success.Start(false), true, "ok");
-    REQUIRE_EQ(success.Messages().size(), size_t{2});
+    // Two independent operations keep their own row and prefix even when they report the same text.
+    auto &outcomes = AiPageScene::Feedback();
+    outcomes.Reply(true, outcomes.Start(true), false, "same error");
+    outcomes.Reply(false, outcomes.Start(false), false, "same error");
+    REQUIRE(outcomes.Messages() == std::vector<std::wstring>({L"模型查询：same error", L"连接测试：same error"}));
+    outcomes.Snapshot();
+    REQUIRE(outcomes.Messages() == std::vector<std::wstring>({L"模型查询：same error", L"连接测试：same error"}));
+
+    // The common same-text case: both buttons report the same local precondition.
+    auto &precondition = AiPageScene::Feedback();
+    precondition.Reply(true, precondition.Start(true), false, "请先填写有效的 API Key。");
+    precondition.Reply(false, precondition.Start(false), false, "请先填写有效的 API Key。");
+    REQUIRE(precondition.Messages() ==
+            std::vector<std::wstring>({L"模型查询：请先填写有效的 API Key。", L"连接测试：请先填写有效的 API Key。"}));
+
+    // Same text but one succeeded and the other failed; they are still distinct records.
+    auto &mixed = AiPageScene::Feedback();
+    mixed.Reply(true, mixed.Start(true), true, "same error");
+    mixed.Reply(false, mixed.Start(false), false, "same error");
+    REQUIRE(mixed.Messages() == std::vector<std::wstring>({L"模型查询：same error", L"连接测试：same error"}));
 }
 
-TEST_CASE(settings_ai_feedback_reserves_one_row_and_expands_only_for_distinct_records)
+TEST_CASE(settings_ai_feedback_reserves_one_row_and_expands_for_two_records)
 {
     for (float dpi : {96.0f, 120.0f, 144.0f, 192.0f})
     {
@@ -388,7 +383,7 @@ TEST_CASE(settings_ai_feedback_reserves_one_row_and_expands_only_for_distinct_re
         const auto query = scene.Start(false);
         REQUIRE(scene.LabelBounds(L"候选数量").y > initial + 10);
         scene.Reply(false, query, false, "same error");
-        REQUIRE(std::fabs(scene.LabelBounds(L"候选数量").y - initial) < 0.1f);
+        REQUIRE(scene.LabelBounds(L"候选数量").y > initial + 10);
         scene.Snapshot("siliconflow");
         REQUIRE(scene.Messages().empty());
         REQUIRE(std::fabs(scene.LabelBounds(L"候选数量").y - initial) < 0.1f);
