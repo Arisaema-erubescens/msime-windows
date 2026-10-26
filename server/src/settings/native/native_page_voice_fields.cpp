@@ -911,6 +911,8 @@ StatusText::StatusText() : Hideable(nullptr, false)
 
 void StatusText::Set(const std::wstring &text, const std::string &kind)
 {
+    if (text_ == text && kind_ == kind)
+        return;
     text_ = text;
     kind_ = kind;
     label_->SetText(prefix_ + text_);

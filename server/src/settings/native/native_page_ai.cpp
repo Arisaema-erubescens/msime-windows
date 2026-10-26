@@ -288,7 +288,9 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         fetchStatus->SetDisplayPrefix(twoRows ? L"模型查询：" : L"");
         testStatus->SetVisible(hasTest);
         fetchStatus->SetVisible(hasModels && !sameError);
-        testStatus->SetPadding({0.0f, twoRows ? 4.0f : 0.0f, 0.0f, 0.0f});
+        const float topPadding = twoRows ? 4.0f : 0.0f;
+        if (testStatus->GetPadding().top != topPadding)
+            testStatus->SetPadding({0.0f, topPadding, 0.0f, 0.0f});
     }
 
     void ClearModelMenu(bool clearModels = true)
@@ -367,7 +369,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         if (pendingFetch.empty() || message.value("requestId", std::string()) != pendingFetch)
             return;
         pendingFetch.clear();
-        fetchButton->SetDisabled(false);
+        fetchButton->SetDisabled(mode == "select");
         fetchButton->SetText(L"查询模型");
         if (!message.value("ok", false))
         {

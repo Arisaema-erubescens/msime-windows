@@ -1,6 +1,7 @@
 #include "tests/includes/settings_window_harness.h"
 #include "tests/includes/test_framework.h"
 
+#include "settings/native/native_page_model_combo.h"
 #include "settings/native/native_settings_model.h"
 #include "settings/native/native_settings_pages.h"
 #include "settings/native/native_page_voice_fields.h"
@@ -498,4 +499,39 @@ TEST_CASE(settings_ai_feedback_invalidates_requests_started_before_the_first_sna
     REQUIRE(scene.Messages().empty());
     REQUIRE(!scene.Button(L"测试连接")->IsDisabled());
     REQUIRE(!scene.Button(L"查询模型")->IsDisabled());
+}
+
+TEST_CASE(settings_ai_model_query_reply_keeps_select_mode_button_disabled)
+{
+    auto &scene = AiPageScene::Feedback();
+    scene.Snapshot("jev");
+    REQUIRE(scene.Button(L"查询模型")->IsDisabled());
+    const auto boxes = scene.Visible<native_settings::voice_fields::ModelCombo>();
+    REQUIRE(boxes.size() == 1);
+    const auto bounds = (*boxes.begin())->GetBounds();
+    scene.harness.Click(bounds.x + bounds.width - 16.0f, bounds.y + bounds.height * 0.5f);
+    const Json request = Json::parse(scene.sent.back());
+    REQUIRE(request["type"] == "apiModelList");
+    const auto id = request["data"].value("requestId", std::string());
+    scene.Reply(false, id, false, "model list unavailable");
+    REQUIRE(scene.Button(L"查询模型")->IsDisabled());
+}
+
+TEST_CASE(settings_status_text_only_notifies_when_text_or_kind_changes)
+{
+    native_settings::voice_fields::StatusText status;
+    int changes = 0;
+    status.SetOnChanged([&]() { ++changes; });
+    status.Clear();
+    REQUIRE(changes == 0);
+    status.Set(L"invalid key", "error");
+    status.Set(L"invalid key", "error");
+    REQUIRE(changes == 1);
+    status.Set(L"invalid key", "success");
+    REQUIRE(changes == 2);
+    status.Set(L"connected", "success");
+    REQUIRE(changes == 3);
+    status.Clear();
+    status.Clear();
+    REQUIRE(changes == 4);
 }
