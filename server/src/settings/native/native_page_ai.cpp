@@ -562,11 +562,24 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         std::string jsonMode = "auto";
         if (const Json *stored = context.model.Find("ai_assistant.json_mode"); stored && stored->is_string())
             jsonMode = stored->get<std::string>();
+        // 探测复用真实联想的请求构造器，thinking、提示词和候选数都会进请求体。
+        // 少传任何一项，探测就会按结构体默认值发请求，测的便不是用户眼前这份配置。
+        // 提示词取页面本地持有的 promptId 与 customPrompts，而不是宿主镜像里已经 resolve 过的
+        // ai_assistant.prompt：刚改完就点测试时镜像还是旧值，会测到改之前的提示词。
+        const auto custom = customPrompts.find(promptId);
+        const std::string promptValue = custom != customPrompts.end() && !custom->second.empty()
+                                            ? custom->second
+                                            : context.model.GetString("ai_assistant.prompt");
         return Json{{"provider", provider},
                     {"token", Trimmed(Narrow(token->GetText()))},
                     {"endpoint", endpointValue},
                     {"model", modelValue},
-                    {"json_mode", jsonMode}};
+                    {"json_mode", jsonMode},
+                    {"thinking", context.model.GetString("ai_assistant.thinking")},
+                    {"prompt", promptValue},
+                    // 兜底与 Sync() 保持一致：快照尚未到达时 GetInt 会回 0，
+                    // 那样探测和 CredentialTest 的配置快照比对会误报「配置已变更」。
+                    {"candidate_limit", std::to_string(context.model.GetInt("ai_assistant.candidate_limit", 3))}};
     }
 
     void RefreshChoices()
