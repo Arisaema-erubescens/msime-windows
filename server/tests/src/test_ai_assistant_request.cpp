@@ -253,6 +253,9 @@ TEST_CASE(credential_test_polish_probe_is_plain_text)
                std::string("整理后的句子。"));
     REQUIRE(ApiCredentialTest::detail::ParsePolishedText("<think>没闭合的思考").empty());
     REQUIRE(ApiCredentialTest::detail::ParsePolishedText("   ").empty());
-    // 联想那套 candidates JSON 不是润色的合法回复。
-    REQUIRE(ApiCredentialTest::detail::ParsePolishedText(R"({"candidates":[{"text":"实施"}]})").empty());
+    // 润色的验收只看「剥掉思考段后是不是有文本」，与引擎 parse_polished_text 同口径。
+    // 引擎也不会因为模型把 JSON 当纯文本回出来就判失败，探测不在这里多造一条规则，
+    // 否则又变成探测与正式使用标准不一致。这条断言钉的正是「两边同口径」。
+    REQUIRE_EQ(ApiCredentialTest::detail::ParsePolishedText(R"({"candidates":[{"text":"实施"}]})"),
+               std::string(R"({"candidates":[{"text":"实施"}]})"));
 }
