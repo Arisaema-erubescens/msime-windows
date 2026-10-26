@@ -194,7 +194,7 @@ TEST_CASE(credential_test_probe_follows_json_mode_and_timeout)
     // 推理模型在正式使用时等 30 秒，探测不能先用 15 秒判它超时。
     const auto reasoning = ProbeConfig("openai", "o3-mini", "https://api.openai.com/v1/chat/completions");
     REQUIRE_EQ(ApiCredentialTest::detail::ChatProbeTimeoutMs(reasoning),
-               AiAssistant::detail::RequestTimeoutMs(reasoning.config));
+               AiAssistant::detail::RequestTimeoutMs(reasoning));
     REQUIRE(ApiCredentialTest::detail::ChatProbeTimeoutMs(reasoning) > 15000L);
 }
 
