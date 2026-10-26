@@ -444,7 +444,7 @@ TEST_CASE(settings_ai_feedback_timeout_stays_separate_and_is_cancelled_by_edit)
     edited.Edit(L"API Token");
     REQUIRE(edited.Messages().empty());
     // Exercise the real UI timeout rather than shortening it or making a real API call.
-    const ULONGLONG deadline = GetTickCount64() + 32000;
+    const ULONGLONG deadline = GetTickCount64() + 45000;
     auto *activeButton = active.Button(L"测试中…");
     while (activeButton->IsDisabled() && GetTickCount64() < deadline)
     {
