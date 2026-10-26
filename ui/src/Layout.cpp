@@ -2369,19 +2369,25 @@ void DrawNineSlice(ID2D1RenderTarget *target, ID2D1Bitmap *bitmap, const RectF &
             const D2D1_RECT_F source = D2D1::RectF(sourceLeft[col] * toDipX, sourceTop[row] * toDipY,
                                                    sourceRight[col] * toDipX, sourceBottom[row] * toDipY);
             const D2D1_RECT_F part = D2D1::RectF(dx[col], dy[row], dx[col + 1], dy[row + 1]);
+            // CSS border-image-repeat：横向平铺只作用于中列（上、中、下三段），
+            // 纵向平铺只作用于中行（左、中、右三段），四角始终拉伸。
+            const bool tileX = nineSlice.repeatX && col == 1;
+            const bool tileY = nineSlice.repeatY && row == 1;
             ComPtr<ID2D1ImageBrush> brush;
             if (context)
             {
                 // An image brush puts the top-left of its source rectangle at the brush origin.
-                const float scaleX = (part.right - part.left) / (source.right - source.left);
-                const float scaleY = (part.bottom - part.top) / (source.bottom - source.top);
+                // Tiled axes keep the source at its native size (scale 1) and wrap past its edge.
+                const float scaleX = tileX ? 1.0f : (part.right - part.left) / (source.right - source.left);
+                const float scaleY = tileY ? 1.0f : (part.bottom - part.top) / (source.bottom - source.top);
                 const D2D1_MATRIX_3X2_F transform =
                     D2D1::Matrix3x2F::Scale(scaleX, scaleY) * D2D1::Matrix3x2F::Translation(part.left, part.top);
-                context->CreateImageBrush(bitmap,
-                                          D2D1::ImageBrushProperties(source, D2D1_EXTEND_MODE_CLAMP,
-                                                                     D2D1_EXTEND_MODE_CLAMP,
-                                                                     D2D1_INTERPOLATION_MODE_LINEAR),
-                                          D2D1::BrushProperties(opacity, transform), brush.GetAddressOf());
+                context->CreateImageBrush(
+                    bitmap,
+                    D2D1::ImageBrushProperties(source, tileX ? D2D1_EXTEND_MODE_WRAP : D2D1_EXTEND_MODE_CLAMP,
+                                               tileY ? D2D1_EXTEND_MODE_WRAP : D2D1_EXTEND_MODE_CLAMP,
+                                               D2D1_INTERPOLATION_MODE_LINEAR),
+                    D2D1::BrushProperties(opacity, transform), brush.GetAddressOf());
             }
             if (brush)
             {
@@ -2403,6 +2409,7 @@ void Card::SetBackgroundNineSlice(std::wstring filePath, const NineSlice &nineSl
     normalized.width = NonNegative(nineSlice.width);
     if (backgroundImage_ == filePath && backgroundNineSlice_ && SameThickness(nineSlice_.slice, normalized.slice) &&
         SameThickness(nineSlice_.width, normalized.width) && nineSlice_.fill == normalized.fill &&
+        nineSlice_.repeatX == normalized.repeatX && nineSlice_.repeatY == normalized.repeatY &&
         backgroundOpacity_ == clamped)
     {
         return;

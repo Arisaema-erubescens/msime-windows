@@ -464,6 +464,10 @@ struct NineSlice
     Thickness slice;
     Thickness width;
     bool fill = true;
+    // 同 CSS border-image-repeat：repeatX 让上、中、下三段沿横向平铺（按源图原尺寸），
+    // repeatY 让左、中、右三段沿纵向平铺；false 为拉伸。四角永远不平铺。
+    bool repeatX = false;
+    bool repeatY = false;
 };
 
 // Draws `bitmap` nine-sliced into `destination` (DIPs). Bitmap sizes are read in DIPs at 96 DPI,
