@@ -989,7 +989,7 @@ void CredentialTest::Start()
     pendingService_ = service_();
     pendingSnapshot_ = readConfig_();
     const std::string requestId = pendingId_;
-    timer_ = SetTimeout(30000, [this, requestId]() {
+    timer_ = SetTimeout(context_->credentialTestTimeoutMs, [this, requestId]() {
         timer_ = 0;
         if (pendingId_ != requestId)
             return;

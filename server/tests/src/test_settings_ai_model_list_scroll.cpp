@@ -433,14 +433,17 @@ TEST_CASE(settings_ai_feedback_preserves_success_when_the_other_operation_starts
 TEST_CASE(settings_ai_feedback_timeout_stays_separate_and_is_cancelled_by_edit)
 {
     auto &active = AiPageScene::Feedback();
+    active.context.credentialTestTimeoutMs = 100;
     const auto activeTest = active.Start(true);
     active.Reply(false, active.Start(false), true, "ok");
     auto &edited = AiPageScene::Feedback();
+    edited.context.credentialTestTimeoutMs = 100;
     const auto oldTest = edited.Start(true);
     edited.Edit(L"API Token");
     REQUIRE(edited.Messages().empty());
-    // Exercise the real UI timeout rather than shortening it or making a real API call.
-    const ULONGLONG deadline = GetTickCount64() + 45000;
+    // Exercise the real timer path with a shortened timer. Keep the same 15 s scheduling
+    // slack the old 30 s timer / 45 s deadline pair had, so a slow CI machine still passes.
+    const ULONGLONG deadline = GetTickCount64() + 15000;
     auto *activeButton = active.Button(L"测试中…");
     while (activeButton->IsDisabled() && GetTickCount64() < deadline)
     {
