@@ -99,9 +99,11 @@ struct AiPage : std::enable_shared_from_this<AiPage>
     std::shared_ptr<Dropdown> promptSlot;
     std::shared_ptr<InputBox> prompt;
     std::shared_ptr<PlainButton> fetchButton;
+    std::shared_ptr<StatusText> testStatus;
     std::shared_ptr<StatusText> fetchStatus;
     std::unique_ptr<CredentialTest> test;
     std::string pendingFetch;
+    Json feedbackConfig;
     // 切换模式或服务商后，配置要等宿主写盘并推回快照才算落地。这期间状态栏说「保存中」，
     // 免得「界面已经切好、后端还是旧服务商」的那几百毫秒被当成已经可用。
     bool saving = false;
@@ -245,7 +247,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         // 选择器不自带模型清单：官方 TypeSafe 只认内置模型名，自建实现的模型名由用户填。
         // 这个按钮在 select 模式下只会返回一句「不提供模型列表」，不如直接关掉。
         if (fetchButton)
-            fetchButton->SetDisabled(select);
+            fetchButton->SetDisabled(select || !pendingFetch.empty());
         RefreshStatus();
     }
 
@@ -274,13 +276,36 @@ struct AiPage : std::enable_shared_from_this<AiPage>
                                   : L"尚未启用；下面的配置保存后，打开总开关才会生效。");
     }
 
-    void ClearModelMenu()
+    void RefreshFeedback()
+    {
+        const bool hasTest = !testStatus->GetText().empty();
+        const bool hasModels = !fetchStatus->GetText().empty();
+        // Compare original messages, never their display prefixes or a normalized approximation.
+        const bool sameError = hasTest && hasModels && testStatus->GetKind() == "error" &&
+                               fetchStatus->GetKind() == "error" && testStatus->GetText() == fetchStatus->GetText();
+        const bool twoRows = hasTest && hasModels && !sameError;
+        testStatus->SetDisplayPrefix(twoRows ? L"连接测试：" : L"");
+        fetchStatus->SetDisplayPrefix(twoRows ? L"模型查询：" : L"");
+        testStatus->SetVisible(hasTest);
+        fetchStatus->SetVisible(hasModels && !sameError);
+        testStatus->SetPadding({0.0f, twoRows ? 4.0f : 0.0f, 0.0f, 0.0f});
+    }
+
+    void ClearModelMenu(bool clearModels = true)
     {
         pendingFetch.clear();
-        fetchButton->SetDisabled(false);
+        fetchButton->SetDisabled(mode == "select");
         fetchButton->SetText(L"查询模型");
-        model->SetModels({});
+        if (clearModels)
+            model->SetModels({});
         fetchStatus->Clear();
+    }
+
+    void ClearFeedback(bool clearModels = true)
+    {
+        test->Reset();
+        ClearModelMenu(clearModels);
+        feedbackConfig = CurrentConfig();
     }
 
     void SwitchProvider(const std::string &next)
@@ -292,7 +317,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         saving = true;
         providerDropdown->SetValue(provider);
         ApplyProviderFields();
-        ClearModelMenu();
+        ClearFeedback();
         SyncLayout();
     }
 
@@ -312,7 +337,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         RefreshChoices();
         providerDropdown->SetValue(provider);
         ApplyProviderFields();
-        ClearModelMenu();
+        ClearFeedback();
         SyncLayout();
     }
 
@@ -322,6 +347,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         Write("ai_assistant.prompt_" + promptId, customPrompts[promptId]);
         promptId = id;
         prompt->SetText(Widen(customPrompts[id]));
+        ClearFeedback(false);
     }
 
     void Fetch()
@@ -396,6 +422,10 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         customPrompts["custom_3"] = m.GetString("ai_assistant.prompt_custom_3");
         promptSlot->SetValue(promptId);
         prompt->SetText(Widen(customPrompts[promptId]));
+        const Json config = CurrentConfig();
+        if (feedbackConfig != config)
+            ClearFeedback();
+        feedbackConfig = config;
         SyncLayout();
     }
 
@@ -418,8 +448,12 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         providerField = std::make_shared<Hideable>(std::make_shared<Field>(L"服务提供商", providerDropdown));
         grid->Add(providerField);
         model = std::make_shared<ModelCombo>();
-        model->SetOnPicked([this](const std::wstring &value) { WriteProviderValue("model", Narrow(value)); });
+        model->SetOnPicked([this](const std::wstring &value) {
+            WriteProviderValue("model", Narrow(value));
+            ClearFeedback(false);
+        });
         model->SetOnFetch([this]() { Fetch(); });
+        model->Input()->SetOnEdited([this](const std::wstring &) { ClearFeedback(false); });
         model->Input()->SetOnCommit([this](const std::wstring &text) {
             // 空值表示回到默认模型：写空串让后端补默认值，界面上显示占位符。
             WriteProviderValue("model", Trimmed(Narrow(text)));
@@ -431,15 +465,20 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         modelRow->Add(model, 1.0f);
         modelRow->Add(fetchButton);
         auto testButton = std::make_shared<PlainButton>(L"测试连接", CredentialButtonStyle());
-        auto testStatus = std::make_shared<StatusText>();
+        testStatus = std::make_shared<StatusText>();
         auto actions = std::make_shared<Row>(10.0f);
         actions->Add(testButton);
-        fetchStatus = testStatus;
+        fetchStatus = std::make_shared<StatusText>();
+        testStatus->SetOnChanged([this]() { RefreshFeedback(); });
+        fetchStatus->SetOnChanged([this]() { RefreshFeedback(); });
         auto modelField = std::make_shared<Field>(L"模型", modelRow);
         auto tail = std::make_shared<Column>(0.0f);
         tail->Add(std::make_shared<MinHeight>(actions, 20.0f));
-        // Share one feedback area and reserve a line so single-line messages do not move the fields below.
-        auto feedback = std::make_shared<MinHeight>(fetchStatus, 20.0f);
+        auto feedbackRows = std::make_shared<Column>(0.0f);
+        feedbackRows->Add(fetchStatus);
+        feedbackRows->Add(testStatus);
+        // Reserve one line; distinct records may expand the area to two labelled rows.
+        auto feedback = std::make_shared<MinHeight>(feedbackRows, 20.0f);
         feedback->SetMargin({0.0f, 7.0f, 0.0f, 0.0f});
         tail->Add(feedback);
         modelField->Add(tail);
@@ -453,6 +492,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         });
 
         token = GridInput(true);
+        token->SetOnEdited([this](const std::wstring &) { ClearFeedback(); });
         token->SetOnCommit([this](const std::wstring &text) {
             // 不用 Token 的服务商不落盘，免得留下一个谁都不读的空槽或旧值。
             if (!AiAssistant::ProviderUsesToken(provider))
@@ -479,6 +519,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
             value = std::clamp(value, 1, 10);
             limit->SetText(std::to_wstring(value));
             Write("ai_assistant.candidate_limit", value);
+            ClearFeedback(false);
         });
         auto limitField = std::make_shared<Field>(L"候选数量", limit);
         limitField->Add(MakeDescription(L"每次输入最多生成几个候选，范围 1-10。"));
@@ -503,6 +544,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         grid->Add(jsonModeColumn);
 
         endpoint = GridInput();
+        endpoint->SetOnEdited([this](const std::wstring &) { ClearFeedback(); });
         endpoint->SetOnCommit([this](const std::wstring &text) {
             WriteProviderValue("endpoint", Trimmed(Narrow(text)));
             // 端点变了，思考强度是否生效也跟着变（后端按域名判定）。
@@ -612,6 +654,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
             prompt->SetOnCommit([this](const std::wstring &text) {
                 customPrompts[promptId] = Narrow(text);
                 Write("ai_assistant.prompt_" + promptId, customPrompts[promptId]);
+                ClearFeedback(false);
             });
             column->Add(prompt);
             auto hint = MakeDescription(
@@ -623,6 +666,7 @@ struct AiPage : std::enable_shared_from_this<AiPage>
         page.AddRaw(promptSection, 18.0f);
 
         SyncLayout();
+        feedbackConfig = CurrentConfig();
         context.OnConfig([weak = weak_from_this()]() {
             if (auto page = weak.lock())
                 page->Sync();

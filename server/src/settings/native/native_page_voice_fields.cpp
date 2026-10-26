@@ -518,6 +518,11 @@ void InputBox::SetOnCommit(std::function<void(const std::wstring &)> handler)
     onCommit_ = std::move(handler);
 }
 
+void InputBox::SetOnEdited(std::function<void(const std::wstring &)> handler)
+{
+    box_->SetOnTextChanged(std::move(handler));
+}
+
 bool InputBox::IsFocused() const
 {
     return box_->IsFocused();
@@ -906,7 +911,9 @@ StatusText::StatusText() : Hideable(nullptr, false)
 
 void StatusText::Set(const std::wstring &text, const std::string &kind)
 {
-    label_->SetText(text);
+    text_ = text;
+    kind_ = kind;
+    label_->SetText(prefix_ + text_);
     if (kind == "success")
         label_->SetColor(Hex(0x4CAF72));
     else if (kind == "error")
@@ -914,13 +921,24 @@ void StatusText::Set(const std::wstring &text, const std::string &kind)
     else
         label_->SetRole(TextRole::Muted);
     SetVisible(!text.empty());
+    if (onChanged_)
+        onChanged_();
 }
 
 void StatusText::Clear()
 {
-    label_->SetText(L"");
-    label_->SetRole(TextRole::Muted);
-    SetVisible(false);
+    Set(L"", "");
+}
+
+void StatusText::SetDisplayPrefix(const std::wstring &prefix)
+{
+    prefix_ = prefix;
+    label_->SetText(prefix_ + text_);
+}
+
+void StatusText::SetOnChanged(std::function<void()> handler)
+{
+    onChanged_ = std::move(handler);
 }
 
 UINT_PTR SetTimeout(UINT ms, std::function<void()> callback)
@@ -990,6 +1008,12 @@ void CredentialTest::Finish()
     pendingId_.clear();
     button_->SetDisabled(false);
     button_->SetText(idleLabel_);
+}
+
+void CredentialTest::Reset()
+{
+    Finish();
+    status_->Clear();
 }
 
 // ---------------------------------------------------------------------------------
