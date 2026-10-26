@@ -370,11 +370,20 @@ struct VoicePage : std::enable_shared_from_this<VoicePage>
         const auto it = PolishDefaults().find(polishProvider);
         const std::string endpoint = Value(polishEndpoint);
         const std::string model = Value(polishModel);
+        const SettingsModel &config = context.model;
+        // 提示词相关字段一并带上：润色探测按用户当前选中的预设或自定义提示词发请求，
+        // 少了这些就只能在探测里用默认提示词，测的不是用户配的那一份。
         return Json{
             {"provider", polishProvider},
             {"token", Value(polishToken)},
             {"endpoint", !endpoint.empty() ? endpoint : (it != PolishDefaults().end() ? it->second.endpoint : "")},
-            {"model", !model.empty() ? model : (it != PolishDefaults().end() ? it->second.model : "")}};
+            {"model", !model.empty() ? model : (it != PolishDefaults().end() ? it->second.model : "")},
+            {"polish_thinking", config.GetString("voice_input.polish_thinking")},
+            {"polish_prompt_id", config.GetString("voice_input.polish_prompt_id")},
+            {"polish_prompt", config.GetString("voice_input.polish_prompt")},
+            {"polish_prompt_custom_1", config.GetString("voice_input.polish_prompt_custom_1")},
+            {"polish_prompt_custom_2", config.GetString("voice_input.polish_prompt_custom_2")},
+            {"polish_prompt_custom_3", config.GetString("voice_input.polish_prompt_custom_3")}};
     }
 
     // applyVoiceConfig

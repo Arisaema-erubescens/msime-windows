@@ -641,6 +641,8 @@ add_executable(${SETTINGS_EXECUTABLE_NAME} WIN32
     "./src/ai/chat_completions.h"
     "./src/ai/ai_assistant_reply.cpp"
     "./src/ai/ai_assistant_reply.h"
+    "./src/ai/ai_assistant_request.cpp"
+    "./src/ai/ai_assistant_request.h"
     "./src/cloud/ai_translation.cpp"
     "./src/cloud/ai_translation.h"
     "./src/cloud/custom_translation.cpp"
