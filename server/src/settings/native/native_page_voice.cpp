@@ -760,7 +760,8 @@ struct VoicePage : std::enable_shared_from_this<VoicePage>
             polishModel->SetOnPicked(
                 [this](const std::wstring &value) { Write("voice_input.polish_model", Narrow(Trim(value))); });
             polishModel->SetOnFetch([this]() { FetchPolishModels(); });
-            polishModel->Input()->SetPlaceholder(Widen(it->second.model));
+            if (const auto it = PolishDefaults().find(polishProvider); it != PolishDefaults().end())
+                polishModel->Input()->SetPlaceholder(Widen(it->second.model));
             polishModel->Input()->SetOnCommit([this](const std::wstring &text) {
                 // 空值表示回到默认模型：写空串让后端补默认值，界面上显示占位符。
                 Write("voice_input.polish_model", Narrow(Trim(text)));
