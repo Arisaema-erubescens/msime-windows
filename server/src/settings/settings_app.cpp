@@ -6,6 +6,7 @@
 #include "settings/settings_launcher.h"
 #include "settings/api_credential_test.h"
 #include "settings/collocation_model.h"
+#include "settings/lattice_model.h"
 #include "settings/neural_model.h"
 #include "settings/default_input_method.h"
 #include "settings/game_compat_name.h"
@@ -419,6 +420,14 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
             {"candidate_horizontal_arrow_navigation", GetConfiguredCandidateHorizontalArrowNavigationEnabled()}}},
           {"association",
            {{"sentence_wordlattice", GetConfiguredAssocSentenceWordLattice()},
+            {"sentence_wordlattice_model_status", [] {
+                 const auto status = lattice_model::GetModelStatus();
+                 return nlohmann::json{{"state", status.state},
+                                       {"progress", status.progress},
+                                       {"error", status.error},
+                                       {"deletePending", status.delete_pending}};
+             }()},
+            {"sentence_wordlattice_model_url", lattice_model::SourceUrl()},
             {"sentence_google", GetConfiguredAssocSentenceGoogle()},
             {"sentence_neural_desktop", GetConfiguredAssocSentenceNeuralDesktop()},
             {"sentence_neural_desktop_model_status", [] {
@@ -583,6 +592,7 @@ std::wstring BuildConfigMessage(bool refresh_skin_catalog)
             {"providers", ProviderEntriesJson(ai)},
             {"candidate_limit", ai.candidate_limit},
             {"thinking", ai.thinking},
+            {"json_mode", ai.json_mode},
             {"prompt", ai.prompt},
             {"prompt_id", ai.prompt_id},
             {"prompt_custom_1", ai.prompt_custom_1},
@@ -1394,6 +1404,29 @@ void HandleClientMessage(HWND hwnd, const std::string &raw)
             PostConfig(false);
         }
         else if (type == "neuralModelStatusRequest")
+        {
+            PostConfig(false);
+        }
+        else if (type == "latticeModelDownload")
+        {
+            // 词格语言模型 sc.lm，与神经模型同一套：后台下载，进度随快照回放，页面在下载态轮询。
+            lattice_model::StartDownload();
+            PostConfig(false);
+        }
+        else if (type == "latticeModelImport")
+        {
+            const std::filesystem::path source = lattice_model::PromptForModelFile(hwnd);
+            if (!source.empty())
+                lattice_model::ImportModel(source);
+            PostConfig(false);
+        }
+        else if (type == "latticeModelDelete")
+        {
+            // Server 映射着文件时删不掉，DeleteModel 改留删除标记，快照里 deletePending 提示重启。
+            lattice_model::DeleteModel();
+            PostConfig(false);
+        }
+        else if (type == "latticeModelStatusRequest")
         {
             PostConfig(false);
         }

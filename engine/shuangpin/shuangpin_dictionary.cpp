@@ -1334,6 +1334,11 @@ void ShuangpinDictionary::set_sentence_association(const SentenceAssociationOpti
             ? nullptr
             : gram::shared_gram_db(metasequoia::path_from_utf8(sentence_association_.collocation_model.c_str()));
     neural_desktop_model_ = neural::LazySentenceModel(sentence_association_.neural_desktop_model);
+    // 用户下载的 sc.lm，见 QuanpinDictionary::set_sentence_association。
+    language_model_ =
+        &ngram::shared_language_model(sentence_association_.language_model.empty()
+                                          ? paths_.resource(metasequoia::assets::language_model)
+                                          : metasequoia::path_from_utf8(sentence_association_.language_model.c_str()));
     // 开关变了就清缓存，否则打开/关闭要等缓存过期才见效。见 generateSeries 的整句块。
     reset_cache();
 }

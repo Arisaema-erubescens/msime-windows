@@ -169,6 +169,7 @@ include_directories("${MSIME_ENGINE_DIR}/utfcpp/source/")
 set(MY_EXECUTABLE_NAME "MetasequoiaImeServer")
 set(WATCHDOG_EXECUTABLE_NAME "MetasequoiaImeWatchdog")
 set(DICTIONARY_REPLAY_EXECUTABLE_NAME "MetasequoiaImeDictionaryReplay")
+set(DICTIONARY_BUILD_EXECUTABLE_NAME "MetasequoiaImeDictionaryBuild")
 
 add_executable(${WATCHDOG_EXECUTABLE_NAME} WIN32
     "./src/watchdog/main.cpp"
@@ -421,6 +422,19 @@ target_link_libraries(${DICTIONARY_REPLAY_EXECUTABLE_NAME} PRIVATE
 target_compile_definitions(${DICTIONARY_REPLAY_EXECUTABLE_NAME} PRIVATE NOMINMAX=1)
 add_dependencies(${PROJECT_NAME} ${DICTIONARY_REPLAY_EXECUTABLE_NAME})
 
+# 安装时把 scripts/pack-dictionary-source.py 导出的文本源还原成词库，安装包因此不必带 SQLite 文件。
+add_executable(${DICTIONARY_BUILD_EXECUTABLE_NAME}
+    "./src/dictionary-build/main.cpp"
+    "./src/resource/resource.h"
+    "./src/resource/resource.rc"
+)
+target_link_libraries(${DICTIONARY_BUILD_EXECUTABLE_NAME} PRIVATE unofficial::sqlite3::sqlite3 bcrypt)
+target_compile_definitions(${DICTIONARY_BUILD_EXECUTABLE_NAME} PRIVATE NOMINMAX=1 WIN32_LEAN_AND_MEAN=1)
+if(MSVC)
+    target_compile_options(${DICTIONARY_BUILD_EXECUTABLE_NAME} PRIVATE /W4 /permissive-)
+endif()
+add_dependencies(${PROJECT_NAME} ${DICTIONARY_BUILD_EXECUTABLE_NAME})
+
 # msimeui stays a separately built GUI framework component at ../ui. The product-owned emoji panel
 # lives under src/emoji-panel so it can evolve separately from the framework's example applications.
 # msimeui's standalone layout tests belong to its own CI job. Its EXCLUDE_FROM_ALL
@@ -523,6 +537,10 @@ add_executable(${SETTINGS_EXECUTABLE_NAME} WIN32
     "./src/settings/collocation_model.h"
     "./src/settings/neural_model.cpp"
     "./src/settings/neural_model.h"
+    "./src/settings/lattice_model.cpp"
+    "./src/settings/lattice_model.h"
+    "./src/settings/model_download.cpp"
+    "./src/settings/model_download.h"
     "./src/settings/default_input_method.cpp"
     "./src/settings/default_input_method.h"
     "./src/settings/game_compat_name.cpp"
@@ -551,6 +569,8 @@ add_executable(${SETTINGS_EXECUTABLE_NAME} WIN32
     "./src/settings/native/native_page_appearance.cpp"
     "./src/settings/native/native_page_input.cpp"
     "./src/settings/native/native_page_helpcode.cpp"
+    "./src/settings/native/native_page_model_combo.cpp"
+    "./src/settings/native/native_page_model_combo.h"
     "./src/settings/native/native_page_shortcut.cpp"
     "./src/settings/native/native_page_dictionary.cpp"
     "./src/settings/native/native_page_dictionary_panel.cpp"
@@ -623,6 +643,8 @@ add_executable(${SETTINGS_EXECUTABLE_NAME} WIN32
     "./src/ai/chat_completions.h"
     "./src/ai/ai_assistant_reply.cpp"
     "./src/ai/ai_assistant_reply.h"
+    "./src/ai/ai_assistant_request.cpp"
+    "./src/ai/ai_assistant_request.h"
     "./src/cloud/ai_translation.cpp"
     "./src/cloud/ai_translation.h"
     "./src/cloud/custom_translation.cpp"

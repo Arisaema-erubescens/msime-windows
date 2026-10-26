@@ -13,6 +13,10 @@ std::string ResolveCollocationModelPath(const std::string &model_id);
 // 空串，引擎据此静默不重排。声明在此供测试钉住解析语义。
 std::string ResolveNeuralDesktopModelPath();
 
+// 词格语言模型 sc.lm 的路径：<DataDir>/models/language-model/ 下已落位的文件，未下载或已删除待重启
+// 时返回空串，引擎据此回到资源目录那份（产品安装里没有，退回启发式打分）。声明在此供测试钉住解析语义。
+std::string ResolveLatticeLanguageModelPath();
+
 class EngineInputSession : public IInputSession
 {
   public:

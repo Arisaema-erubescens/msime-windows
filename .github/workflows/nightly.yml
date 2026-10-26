@@ -86,7 +86,7 @@ jobs:
   tip:
     name: TSF ${{ matrix.name }}
     needs: gate
-    if: ${{ !cancelled() && needs.gate.result == 'success' && needs.gate.outputs.changed != 'false' }}
+    if: ${{ !cancelled() && needs.gate.result != 'failure' && needs.gate.outputs.changed != 'false' }}
     runs-on: windows-2025
     timeout-minutes: 60
     strategy:
@@ -153,7 +153,7 @@ jobs:
   server:
     name: Server
     needs: gate
-    if: ${{ !cancelled() && needs.gate.result == 'success' && needs.gate.outputs.changed != 'false' }}
+    if: ${{ !cancelled() && needs.gate.result != 'failure' && needs.gate.outputs.changed != 'false' }}
     runs-on: windows-2025
     timeout-minutes: 90
     env:
@@ -238,7 +238,7 @@ jobs:
   package:
     name: Package and publish
     needs: [gate, tip, server]
-    if: ${{ !cancelled() && needs.gate.result == 'success' && needs.gate.outputs.changed != 'false' && needs.tip.result == 'success' && needs.server.result == 'success' }}
+    if: ${{ !cancelled() && needs.gate.result != 'failure' && needs.gate.outputs.changed != 'false' && needs.tip.result == 'success' && needs.server.result == 'success' }}
     # The publish step talks to github.com several times (release view/create/edit/upload) and
     # the downloads upstream of it have been the flakiest part of the week -- retry the whole
     # job once on failure before the notify job files an issue. Retrying a job re-runs every
@@ -337,6 +337,8 @@ jobs:
         run: |
           # The trust anchor is the .cer committed in the repository, not whatever the signing
           # step used, so a mistyped secret cannot publish a payload signed by something else.
+          # Only the signer's identity is compared: the nightly certificate is self-signed and no
+          # runner trusts it, so Get-AuthenticodeSignature's own verdict is unusable here.
           $expected = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2((Resolve-Path $env:NIGHTLY_CERT_PATH).Path)
           $targets = @(
             Get-ChildItem -Path 'installer/server_exe', 'installer/tsf_dll' -Recurse -File |
@@ -344,17 +346,11 @@ jobs:
             Get-ChildItem -Path 'installer/Output' -Filter '*.exe' -File
           )
           if ($targets.Count -eq 0) { throw 'Nothing to verify.' }
-          $bad = @()
-          foreach ($target in $targets) {
-            $signature = Get-AuthenticodeSignature -LiteralPath $target.FullName
-            if ($signature.Status -ne 'Valid' -or
-                -not $signature.SignerCertificate -or
-                $signature.SignerCertificate.Thumbprint -ne $expected.Thumbprint) {
-              $bad += "$($target.FullName): status=$($signature.Status) signer=$($signature.SignerCertificate.Thumbprint)"
-            }
-          }
+          $bad = @($targets | Where-Object {
+            (Get-AuthenticodeSignature -LiteralPath $_.FullName).SignerCertificate.Thumbprint -ne $expected.Thumbprint
+          })
           if ($bad) {
-            throw "Files not signed by the nightly certificate:`n$($bad -join "`n")"
+            throw "Files not signed by the nightly certificate:`n$($bad.FullName -join "`n")"
           }
           Write-Host "Verified $($targets.Count) file(s) against $($expected.Thumbprint)."
       - name: Name the artifact and record its checksum

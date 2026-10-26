@@ -26,6 +26,10 @@ struct SentenceAssociationOptions
     // 空 = 模型缺席，neural_desktop 开着也静默不重排，与 collocation_model 的降级范式一致。
     std::string neural_desktop_model;
 
+    // 词格打分的 kenlm 模型（sc.lm）。安装包不带它，宿主在用户下载后把路径（UTF-8）传入；
+    // 空 = 用资源目录里的 sc.lm（开发与测试环境放在那里，产品安装里没有），再缺就退回启发式打分。
+    std::string language_model;
+
     // 万象语法模型（octagram .gram）。宿主按模型包解析出 .gram 的路径传入，空 = 关闭；
     // 路径无效时词格静默退回无搭配打分，与其他整句来源的降级范式一致。
     // 加成只在解码期逐边叠加一次（weight 把 query() 换到 log10 域后缩放）；collocation_rerank
@@ -48,9 +52,9 @@ struct SentenceAssociationOptions
     {
         return word_lattice == other.word_lattice && google == other.google && neural_desktop == other.neural_desktop &&
                neural_keyboard == other.neural_keyboard && show_next_on_duplicate == other.show_next_on_duplicate &&
-               neural_desktop_model == other.neural_desktop_model && collocation_model == other.collocation_model &&
-               collocation_weight == other.collocation_weight && collocation_rerank == other.collocation_rerank &&
-               collocation_grammar == other.collocation_grammar;
+               neural_desktop_model == other.neural_desktop_model && language_model == other.language_model &&
+               collocation_model == other.collocation_model && collocation_weight == other.collocation_weight &&
+               collocation_rerank == other.collocation_rerank && collocation_grammar == other.collocation_grammar;
     }
     bool operator!=(const SentenceAssociationOptions &other) const
     {
